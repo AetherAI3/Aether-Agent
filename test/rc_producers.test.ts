@@ -16,10 +16,18 @@ import type { BrainEvent } from "../src/core/brain_protocol.js";
 import {
   RC_PRODUCED_EVENT_TYPES,
   RC_UNPRODUCED_EVENT_TYPES,
+  artifactEvent,
+  ciEvent,
+  diffSummaryEvent,
   hostPresenceEvent,
   mapBrainEventToRc,
+  prStatusEvent,
+  previewEvent,
   producerCoverage,
   sessionOpenedEvent,
+  subagentEvent,
+  subagentFinishedEvent,
+  testsEvent,
 } from "../src/core/rc/producers.js";
 import { createOutbox, enqueueEvent } from "../src/core/rc/outbox.js";
 import { VIEWER_EVENT_TYPES } from "../src/core/rc/viewer_profile.js";
@@ -207,10 +215,19 @@ test("every viewer event type is either produced or explicitly deferred", () => 
   );
 });
 
-test("each deferred type says which subsystem it waits on", () => {
+test("any type still deferred names the subsystem it waits on", () => {
+  // Empty once all thirteen have producers. Kept because the invariant is
+  // "nothing is deferred without a stated reason", not "nothing is deferred".
   for (const [type, reason] of Object.entries(RC_UNPRODUCED_EVENT_TYPES)) {
     assert.ok(reason.length > 20, `${type} needs a real reason, not a placeholder`);
   }
+});
+
+test("all thirteen viewer event types now have a producer", () => {
+  const coverage = producerCoverage();
+  assert.deepEqual(coverage.unproduced, []);
+  assert.equal(coverage.produced.length, VIEWER_EVENT_TYPES.length);
+  assert.deepEqual([...coverage.produced].sort(), [...VIEWER_EVENT_TYPES].sort());
 });
 
 test("the produced list stays inside the viewer profile", () => {
@@ -220,4 +237,217 @@ test("the produced list stays inside the viewer profile", () => {
       `${type} is not in the viewer profile`,
     );
   }
+});
+
+// ── 4. The seven subsystem adapters ─────────────────────────────────────────
+//
+// For each: it survives its own allowlist (a producer whose payload is filtered
+// to nothing is a dead feature), and the fields deliberately dropped stay
+// dropped.
+
+function box(): ReturnType<typeof createOutbox> {
+  return createOutbox({
+    session_id: "rs_" + "f".repeat(32),
+    project_ref: "p",
+    device_id: "d",
+    epoch: 1,
+    project_root: "/repo",
+  });
+}
+
+/** Enqueue and return what actually reached the outbox, or null if refused. */
+function persisted(event: {
+  event_type: string;
+  payload: Record<string, unknown>;
+}): Record<string, unknown> | null {
+  const record = box();
+  const ok = enqueueEvent(record, event.event_type, event.payload);
+  return ok ? record.events[0]!.payload : null;
+}
+
+test("subagent comes from the orchestrator's worker tree, without the model", () => {
+  // Model identity is one of the four identities kept separate from device,
+  // account and connector identity. A viewer stream is where they would blur.
+  const payload = persisted(
+    subagentEvent({ id: "w-1", model: "claude-opus-5", step: "writing tests", tokens: 10, uvt: 2 }),
+  );
+  assert.ok(payload, "subagent payload was filtered to nothing");
+  assert.equal(payload["subagent_id"], "w-1");
+  assert.equal(payload["summary"], "writing tests");
+  assert.doesNotMatch(JSON.stringify(payload), /claude-opus-5/);
+  assert.equal(payload["tokens"], undefined);
+  assert.equal(payload["uvt"], undefined);
+});
+
+test("a finished subagent reports its terminal status", () => {
+  const payload = persisted(subagentFinishedEvent("w-1", "done"));
+  assert.equal(payload?.["status"], "done");
+});
+
+test("diff_summary carries counts and paths, never a diff body", () => {
+  const payload = persisted(
+    diffSummaryEvent({ additions: 12, deletions: 3, uncounted: ["img.png"] }, [
+      "src/a.ts",
+      "img.png",
+    ]),
+  );
+  assert.ok(payload, "diff_summary was filtered to nothing");
+  assert.equal(payload["insertions"], 12);
+  assert.equal(payload["deletions"], 3);
+  assert.equal(payload["files_changed"], 2);
+  assert.deepEqual(payload["files"], ["src/a.ts", "img.png"]);
+});
+
+test("an absolute path in a diff summary is refused by the sanitizer", () => {
+  const payload = persisted(
+    diffSummaryEvent({ additions: 1, deletions: 0, uncounted: [] }, ["/home/someone/secret/a.ts"]),
+  );
+  assert.doesNotMatch(JSON.stringify(payload), /someone/);
+});
+
+test("tests reports the verifier's own status, inventing no counts", () => {
+  // "unknown" means the tree moved while the command ran. Collapsing that to
+  // pass or fail is exactly the claim RC must not make for a viewer.
+  const payload = persisted(
+    testsEvent({ status: "unknown", reason: "the tree changed during the run", record: null }),
+  );
+  assert.ok(payload);
+  assert.equal(payload["status"], "unknown");
+  assert.equal(payload["passed"], undefined, "a count nobody measured must not appear");
+  assert.equal(payload["failed"], undefined);
+});
+
+test("tests passes through every verifier status unchanged", () => {
+  for (const status of ["verified", "failed", "stale"] as const) {
+    const payload = persisted(testsEvent({ status, reason: "r", record: null }));
+    assert.equal(payload?.["status"], status);
+  }
+});
+
+const RECEIPT = {
+  receipt_id: "rcpt_1",
+  plan_id: "plan_1",
+  action_digest: "sha256:" + "0".repeat(64),
+  repository: "AetherAI3/aether-agent",
+  provider_object_ids: {} as Record<string, string | number>,
+  reconciled: true,
+  issued_at: "2026-09-07T00:00:00.000Z",
+};
+
+test("ci comes from a CI action receipt and carries only the run identity", () => {
+  const event = ciEvent({
+    ...RECEIPT,
+    action_type: "aether.github.ci.rerun_failed",
+    provider_object_ids: { run_id: 42 },
+  });
+  assert.ok(event);
+  const payload = persisted(event);
+  assert.ok(payload);
+  assert.equal(payload["provider"], "github");
+  assert.equal(payload["run_id"], "42");
+  assert.equal(payload["status"], "reconciled");
+});
+
+test("a non-CI receipt does not become a ci event", () => {
+  assert.equal(ciEvent({ ...RECEIPT, action_type: "aether.github.pr.create" }), null);
+});
+
+test("pr_status builds its URL from the receipt, never from a branch name", () => {
+  const event = prStatusEvent({
+    ...RECEIPT,
+    action_type: "aether.github.pr.create",
+    provider_object_ids: { number: 149 },
+  });
+  assert.ok(event);
+  const payload = persisted(event);
+  assert.ok(payload);
+  assert.equal(payload["repo"], "AetherAI3/aether-agent");
+  assert.equal(payload["number"], 149);
+  assert.equal(payload["url"], "https://github.com/AetherAI3/aether-agent/pull/149");
+});
+
+test("a repository that is not a plain owner/name yields no URL", () => {
+  // Nothing may be spliced into a link a viewer might click.
+  const event = prStatusEvent({
+    ...RECEIPT,
+    repository: "evil.example/../../x?a=b",
+    action_type: "aether.github.pr.update",
+    provider_object_ids: { number: 1 },
+  });
+  assert.ok(event);
+  const payload = persisted(event);
+  assert.equal(payload?.["url"], undefined);
+  assert.equal(payload?.["repo"], undefined);
+});
+
+test("a non-PR receipt does not become a pr_status event", () => {
+  assert.equal(prStatusEvent({ ...RECEIPT, action_type: "aether.github.ci.rerun_failed" }), null);
+});
+
+const MEDIA = {
+  artifactId: "art_1",
+  sequence: "1",
+  createdAt: "2026-09-07T00:00:00.000Z",
+  kind: "image" as const,
+  displayName: "diagram.png",
+  filePath: "/home/someone/out/diagram.png",
+  url: "https://cdn.example/signed?token=SIGNED-URL-CANARY",
+  model: "some-image-model",
+  prompt: "a private prompt the operator typed",
+  sizeBytes: 1024,
+  source: "agent-media" as const,
+};
+
+test("artifact publishes identifiers, never the path, URL, prompt or model", () => {
+  const payload = persisted(artifactEvent(MEDIA));
+  assert.ok(payload);
+  assert.equal(payload["artifact_id"], "art_1");
+  assert.equal(payload["kind"], "image");
+  assert.equal(payload["title"], "diagram.png");
+  const text = JSON.stringify(payload);
+  assert.doesNotMatch(text, /someone/);
+  assert.doesNotMatch(text, /SIGNED-URL-CANARY/);
+  assert.doesNotMatch(text, /a private prompt/);
+  assert.doesNotMatch(text, /some-image-model/);
+});
+
+const PREVIEW = {
+  schema: "aether.preview/1" as const,
+  instanceId: "11111111-1111-4111-8111-111111111111",
+  projectRoot: "/repo",
+  commandDigest: "0".repeat(64),
+  phase: "ready" as const,
+  supervisorPid: 1,
+  childPid: 2,
+  controlPort: 3,
+  startedAt: "2026-09-07T00:00:00.000Z",
+};
+
+test("preview publishes a public URL but never a loopback one", () => {
+  // A localhost URL is useless to somebody on another machine and still
+  // discloses a local port.
+  const local = persisted(previewEvent({ ...PREVIEW, url: "http://127.0.0.1:5173/" }, () => true));
+  assert.equal(local?.["url"], undefined);
+  assert.equal(local?.["phase"], "ready");
+
+  const remote = persisted(
+    previewEvent({ ...PREVIEW, url: "https://preview.example/app" }, () => false),
+  );
+  assert.equal(remote?.["url"], "https://preview.example/app");
+});
+
+test("preview never publishes pids, ports or the child's error text", () => {
+  const payload = persisted(
+    previewEvent(
+      { ...PREVIEW, phase: "failed", error: "ECONNREFUSED at /home/someone" },
+      () => true,
+    ),
+  );
+  assert.ok(payload);
+  assert.equal(payload["phase"], "failed");
+  const text = JSON.stringify(payload);
+  assert.doesNotMatch(text, /ECONNREFUSED/);
+  assert.doesNotMatch(text, /someone/);
+  assert.equal(payload["controlPort"], undefined);
+  assert.equal(payload["supervisorPid"], undefined);
 });
