@@ -222,12 +222,24 @@ test("cmdLogin reports an unavailable browser and continues with the printed dev
   const stderr = captureStderr();
   try {
     const code = await cmdLogin(ctx, {}, {
-      openBrowser: () => ({ status: "unavailable", detail: "synthetic headless session" }),
+      openBrowser: () => ({
+        schema: "aether.cli.browser/1",
+        code: "BROWSER_HEADLESS",
+        available: false,
+        platform: "linux",
+        launcher: null,
+        browser: null,
+        evidence: "synthetic headless session",
+        launched: false,
+      }),
     });
     assert.equal(code, 0);
     assert.match(stdout, /https:\/\/x\.example\/device/);
     assert.match(stdout, /BROW-SER/);
-    assert.match(stderr.text(), /Browser was not opened \(unavailable\)/);
+    // The typed code, not a status word: an operator (or a script) has to be
+    // able to tell "no desktop here" from "the OS refused the launch".
+    assert.match(stderr.text(), /Browser was not opened \(BROWSER_HEADLESS\)/);
+    assert.match(stderr.text(), /open the URL above from another device/);
     assert.match(stderr.text(), /aether auth login --no-browser/);
     assert.equal(await ctx.tokens.get(), "aek_browser_fallback");
   } finally {
