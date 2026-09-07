@@ -8,6 +8,7 @@ import { createMcpMenuIO, runMcpMenu } from "../src/commands/mcp.js";
 import type { MenuIO } from "../src/commands/mcp.js";
 import { LocalMcpStore } from "../src/core/mcp_store.js";
 import { McpClient } from "../src/core/mcp.js";
+import type { BrowserOpenResult } from "../src/core/browser.js";
 import type { Key } from "../src/commands/chat.js";
 import type { ApiClient } from "../src/core/transport.js";
 
@@ -19,6 +20,22 @@ function keyScript(seq: Array<Key | string>): () => Promise<Key> {
   return async () => keys[i++] ?? ({ kind: "interrupt" } as Key);
 }
 
+/** A MenuIO.openUrl stub that reports a real browser opened. Tests that care
+ *  about the no-browser path override `code`/`launched` instead. */
+function openedOk(over: Partial<BrowserOpenResult> = {}): BrowserOpenResult {
+  return {
+    schema: "aether.cli.browser/1",
+    code: "BROWSER_READY",
+    available: true,
+    platform: "linux",
+    launcher: "xdg-open",
+    browser: "xdg-open",
+    evidence: "test stub",
+    launched: true,
+    ...over,
+  };
+}
+
 function makeIO(keys: Array<Key | string>, lines: string[] = []) {
   const out: string[] = [];
   let li = 0;
@@ -26,9 +43,30 @@ function makeIO(keys: Array<Key | string>, lines: string[] = []) {
     out: { write: (s: string) => (out.push(s), true) } as unknown as MenuIO["out"],
     nextKey: keyScript(keys),
     readLine: async () => lines[li++] ?? "",
-    openUrl: () => {},
+    openUrl: async () => openedOk(),
     sleep: async () => {},
   };
+  return { io, out };
+}
+
+/**
+ * makeIO with the browser outcome under test control, writing into a SHARED
+ * call-order log so browser and broker events can be ordered against each
+ * other. `sleep` is a real timer: pollUntilConnected sleeps for the remaining
+ * deadline, so a no-op sleep spins the loop thousands of times instead of
+ * polling a couple of times like production.
+ */
+function makeAuthIO(keys: Array<Key | string>, browser: BrowserOpenResult, order: string[]) {
+  const { io, out } = makeIO(keys);
+  io.openUrl = async () => {
+    order.push("open-browser");
+    return browser;
+  };
+  io.sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      order.push("sleep");
+      setTimeout(resolve, Math.max(1, Math.min(ms, 40)));
+    });
   return { io, out };
 }
 
@@ -214,7 +252,7 @@ test("Ctrl+C cancels an in-flight MCP operation and restores the terminal loop",
     out: { write: (value: string) => (chunks.push(value), true) } as unknown as MenuIO["out"],
     async nextKey() { return keyQueue.shift() ?? { kind: "eof" }; },
     async readLine() { return ""; },
-    openUrl() {},
+    async openUrl() { return openedOk(); },
     async sleep() {},
     subscribeCancel(cancel) {
       subscriptions++;
@@ -276,4 +314,100 @@ test("MCP menu IO close is exception-safe and does not write after resolving a p
   assert.equal(input.listenerCount("data"), 0);
   input.destroy();
   output.destroy();
+});
+
+// ── OAuth handoff ───────────────────────────────────────────────────────────
+//
+// Two failures that both used to read as success, or as a slow provider.
+
+const STALE_ROW = {
+  provider_id: "fal.ai",
+  created_at: "2026-01-01T00:00:00.000000+00:00",
+  updated_at: "2026-01-01T00:00:00.000000+00:00",
+};
+
+function oauthApi(order: string[], connections: () => unknown[]): ApiClient {
+  return {
+    async getJson(path: string) {
+      if (path === "/mcp-broker/oauth/providers")
+        return [{ provider_id: "fal.ai", display_name: "fal.ai", flow: "auth_code_pkce" }];
+      if (path === "/mcp-broker/oauth/connections") {
+        order.push("list-connections");
+        return connections();
+      }
+      throw Object.assign(new Error("HTTP 404"), { status: 404 });
+    },
+    async postJson(path: string) {
+      if (path === "/mcp-broker/oauth/start")
+        return { flow: "auth_code_pkce", authorize_url: "https://provider.example/authorize?x=1" };
+      throw Object.assign(new Error("HTTP 404"), { status: 404 });
+    },
+  } as unknown as ApiClient;
+}
+
+test("a re-authorization that never completes is not reported as connected", async () => {
+  // The provider is ALREADY connected. Before the baseline check, the first
+  // poll found this row and printed "connected" without the operator having
+  // touched the consent screen.
+  const order: string[] = [];
+  const api = oauthApi(order, () => [STALE_ROW]);
+  const dir = mkdtempSync(join(tmpdir(), "aether-mcpoauth-"));
+  const store = new LocalMcpStore(join(dir, "mcp.json"));
+  const { io, out } = makeAuthIO([{ kind: "submit" }, { kind: "submit" }, "q", "q"], openedOk(), order);
+
+  await runMcpMenu(new McpClient(api), store, io, { oauthTimeoutMs: 150 });
+  const text = out.join("");
+
+  // The menu ROW also reads "fal.ai  connected", so the negative has to be
+  // the note the auth flow writes, not any occurrence of the word.
+  assert.doesNotMatch(text, /✔ fal\.ai connected\n/);
+  assert.match(text, /MCP_AUTH_TIMEOUT/);
+  assert.match(text, /already connected and that connection was left untouched/);
+});
+
+test("the connection baseline is read before the browser is opened", async () => {
+  // Order is the whole point: a baseline captured after the browser could
+  // already include the authorization it is supposed to be measuring against.
+  const order: string[] = [];
+  const api = oauthApi(order, () => [STALE_ROW]);
+  const dir = mkdtempSync(join(tmpdir(), "aether-mcpoauth-"));
+  const store = new LocalMcpStore(join(dir, "mcp.json"));
+  const { io } = makeAuthIO([{ kind: "submit" }, { kind: "submit" }, "q", "q"], openedOk(), order);
+
+  await runMcpMenu(new McpClient(api), store, io, { oauthTimeoutMs: 150 });
+
+  const firstList = order.indexOf("list-connections");
+  const opened = order.indexOf("open-browser");
+  assert.ok(firstList >= 0 && opened >= 0, `expected both events, got ${JSON.stringify(order)}`);
+  assert.ok(firstList < opened, `baseline must precede the browser: ${JSON.stringify(order)}`);
+});
+
+test("a machine with no browser is told so, and no authorization wait is started", async () => {
+  const order: string[] = [];
+  const api = oauthApi(order, () => []);
+  const dir = mkdtempSync(join(tmpdir(), "aether-mcpoauth-"));
+  const store = new LocalMcpStore(join(dir, "mcp.json"));
+  const { io, out } = makeAuthIO(
+    [{ kind: "submit" }, { kind: "submit" }, "q", "q"],
+    openedOk({
+      code: "BROWSER_NOT_FOUND",
+      available: false,
+      launched: false,
+      launcher: null,
+      browser: null,
+      evidence: "no browser registered",
+    }),
+    order,
+  );
+
+  await runMcpMenu(new McpClient(api), store, io, { oauthTimeoutMs: 30_000 });
+  const text = out.join("");
+
+  assert.match(text, /browser not opened \(BROWSER_NOT_FOUND\)/);
+  assert.match(text, /authorization was not started/);
+  // The authorization wait never began. Its first act is always a sleep, so
+  // zero sleeps proves the operator was not held for the full oauth timeout
+  // waiting on a browser that was never going to appear.
+  assert.equal(order.filter((e) => e === "sleep").length, 0);
+  assert.ok(order.indexOf("open-browser") > order.indexOf("list-connections"));
 });
