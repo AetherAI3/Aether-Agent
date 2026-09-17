@@ -121,6 +121,12 @@ export async function handleSlash(
     case "":
       printSlashHelp(out, arg);
       break;
+    case "browser":
+    case "ats":
+      // These operations belong to the managed chat hook/session lifecycle.
+      // The coding REPL only gives a handoff, and never replays the arguments.
+      out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
+      break;
     case "models":
       await showPicker(ctx, out, "model", signal);
       break;

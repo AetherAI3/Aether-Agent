@@ -5,7 +5,10 @@ import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { AtsBrowserObserver, validateBrowserUrl } from "./browser.js";
+import { createBrowserFetch } from "./browser_transport.js";
 export { AtsBrowserObserver, validateBrowserUrl, observeBrowser } from "./browser.js";
+export { createBrowserFetch } from "./browser_transport.js";
+export { createBrowserVisionSkill } from "./vision_skill.js";
 export * from "./settings.js";
 
 const require = createRequire(import.meta.url);
@@ -127,6 +130,6 @@ export async function scanStrategies(options) {
 export async function createBrowserObserver({ env = process.env, maxVisionSteps = 100, maxAgeMs = 15_000 } = {}) {
   const baseUrl = validateBrowserUrl(env.AGENT_BROWSER_URL || "http://127.0.0.1:8092");
   const { AgentBrowser } = await import("aether-browser");
-  const browser = new AgentBrowser({ env, baseUrl, timeoutMs: 15_000 });
+  const browser = new AgentBrowser({ env, baseUrl, timeoutMs: 15_000, fetch: createBrowserFetch() });
   return new AtsBrowserObserver({ browser, baseUrl, maxVisionSteps, maxAgeMs });
 }

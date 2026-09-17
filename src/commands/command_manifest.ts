@@ -36,6 +36,8 @@ export interface CommandAvailability { state: AvailabilityState; capabilityRequi
 export interface CommandManifestEntry {
   key: CommandManifestKey;
   surface: CommandSurface;
+  /** Omitted for ordinary shell/coding commands; managed chat owns these operations. */
+  sessionScope?: "managed-agent";
   name: string;
   aliases: readonly string[];
   compatibilityAliases: readonly string[];
@@ -146,6 +148,10 @@ function validateBindings(label: string, entry: CommandManifestEntry, errors: st
 }
 function validateProductMetadata(label: string, entry: CommandManifestEntry, errors: string[]): void {
   if (!entry.detailedHelp.trim()) errors.push(`${label}: missing detailed help`);
+  if (entry.sessionScope !== undefined && (entry.sessionScope !== "managed-agent" || entry.surface !== "slash"
+      || !entry.availability.capabilityRequirements.includes("aether.hosted"))) {
+    errors.push(`${label}: managed-agent scope requires a slash command and hosted account capability`);
+  }
   if (!(PERMISSION_CLASSES as readonly string[]).includes(entry.permissionClass)) errors.push(`${label}: invalid permission class '${entry.permissionClass}'`);
   if (!(AVAILABILITY_STATES as readonly string[]).includes(entry.availability.state)) errors.push(`${label}: invalid availability state '${entry.availability.state}'`);
   const capabilities = new Set<string>();

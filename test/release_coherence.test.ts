@@ -213,11 +213,11 @@ function assertCandidatePacket(packet: string): void {
   assert.equal(onlyPacketRow(rows, "Proposed tag"), `\`v${VERSION}\``);
   assert.equal(
     onlyPacketRow(rows, "Source identity"),
-    "Final candidate commit and source-package digest must be attached after the cross-repository changes are frozen.",
+    `Canonical ATS adapter commit \`${(JSON.parse(read("packages", "ats-skills-source.json")) as {revision: string}).revision}\`; per-file SHA-256 custody is recorded in \`packages/ats-skills-source.json\`. The Agent PR records its final candidate commit.`,
   );
   assert.equal(
     onlyPacketRow(rows, "Archive evidence"),
-    "Final packed tarball, file manifest, digest and clean installation evidence pending. No archive measurements are asserted here.",
+    "Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending.",
   );
   assert.equal(
     onlyPacketRow(rows, "Hosted checks"),
@@ -382,6 +382,8 @@ const FEATURE_MANIFEST: Array<{ claim: string; command?: string; packaged: strin
       "dist/src/commands/ats_agent.js",
       "node_modules/aether-ats-skills/src/index.js",
       "node_modules/aether-ats-skills/src/browser.js",
+      "node_modules/aether-ats-skills/src/browser_transport.js",
+      "node_modules/aether-ats-skills/src/vision_skill.js",
       "node_modules/aether-ats-skills/python/bridge.py",
     ],
   },

@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:8dcc7beca062f2e001091daf60a0f55104acae32e86b9fcd8485055f68e57c67 -->
+<!-- manifest-digest: sha256:ac0a53cbdd900ad0e05841f5d5bae1f29ef4ecd0be6da4b220c56a3b1052d3ab -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -754,3 +754,17 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 manage HUD overlay elements
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.hud`
+
+### Managed agent chat
+
+#### `/browser status|setup [URL]|open|refresh|stop|retry`
+
+manage the visual browser in a managed agent chat
+
+Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.browser` · Requires: `aether.hosted`
+
+#### `/ats status|mode|strategies|data|browser`
+
+configure ATS setup inside a managed agent chat
+
+Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `slash.ats` · Requires: `aether.hosted`

@@ -76,7 +76,9 @@ test("ordinary managed agents never load local ATS dependencies", async () => {
     let loads = 0;
     const hooks = createAtsHooks({ root: dir, load: async () => { loads++; return fakePackage(); } });
     const ordinary = agent(); ordinary.config.behavior = { system_prompt: "Be helpful." };
-    assert.equal(await hooks.beforeChat!(context(), ordinary), undefined);
+    const cleanup = await hooks.beforeChat!(context(), ordinary);
+    assert.equal(typeof cleanup, "function");
+    await cleanup!();
     assert.equal(loads, 0);
   });
 });
@@ -86,7 +88,9 @@ test("a quoted ATS marker cannot turn an ordinary agent into a local ATS session
     const ordinary = agent(); ordinary.config.behavior = { system_prompt: `Explain this marker: ${ATS_PROFILE_MARKER}\nDo not run it.` };
     let loads = 0;
     const hooks = createAtsHooks({ root: dir, load: async () => { loads++; return fakePackage(); } });
-    assert.equal(await hooks.beforeChat!(context(), ordinary), undefined);
+    const cleanup = await hooks.beforeChat!(context(), ordinary);
+    assert.equal(typeof cleanup, "function");
+    await cleanup!();
     assert.equal(loads, 0);
   });
 });
@@ -214,7 +218,9 @@ test("chat without a browser connection keeps storage ready and reports unavaila
     await binding(dir);
     let output = "";
     const hooks = createAtsHooks({ root: dir, env: {}, output: (text) => { output += text; }, load: async () => fakePackage({ createBrowserObserver: async () => { throw new Error("must not open"); } }) });
-    assert.equal(await hooks.beforeChat!(context(), agent()), undefined);
+    const cleanup = await hooks.beforeChat!(context(), agent());
+    assert.equal(typeof cleanup, "function");
+    await cleanup!();
     assert.match(output, /Browser unavailable/);
     assert.match(output, /local execution is not connected/);
   });
@@ -227,9 +233,11 @@ test("browser opening failure releases the observer and keeps text chat availabl
     let output = "";
     const hooks = createAtsHooks({ root: dir, env: { AGENT_BROWSER_CONTROLLER_TOKEN: "fixture-token" }, output: (text) => { output += text; },
       load: async () => fakePackage({ createBrowserObserver: async () => ({ open: async () => { throw new Error("no slot"); }, close: async () => { closes++; }, snapshot: async () => ({}), status: () => ({ state: "unavailable" }) }) }) });
-    assert.equal(await hooks.beforeChat!(context(), agent()), undefined);
+    const cleanup = await hooks.beforeChat!(context(), agent());
+    assert.equal(typeof cleanup, "function");
+    await cleanup!();
     assert.equal(closes, 1);
-    assert.match(output, /Browser unavailable.*no slot/);
+    assert.match(output, /Browser unavailable.*aether-browser@0.2.2 doctor/);
     assert.match(output, /Text chat remains available/);
   });
 });
@@ -260,8 +268,10 @@ test("browser dependency connection failure leaves account chat usable", async (
     let output = "";
     const hooks = createAtsHooks({ root: dir, env: { AGENT_BROWSER_CONTROLLER_TOKEN: "fixture-token" }, output: (text) => { output += text; },
       load: async () => fakePackage({ createBrowserObserver: async () => { throw new Error("cannot connect"); } }) });
-    assert.equal(await hooks.beforeChat!(context(), agent()), undefined);
-    assert.match(output, /Browser unavailable.*cannot connect/);
+    const cleanup = await hooks.beforeChat!(context(), agent());
+    assert.equal(typeof cleanup, "function");
+    await cleanup!();
+    assert.match(output, /Browser unavailable.*aether-browser@0.2.2 doctor/);
     assert.match(output, /Text chat remains available/);
   });
 });
@@ -402,4 +412,66 @@ test("managed TTY queues Shift-Tab after the active command and removes its list
     assert.deepEqual(order, ["command:start", "command:end", "cycle"]);
     assert.equal(input.listenerCount("keypress"), 0);
   } finally { globalThis.fetch = prior; input.destroy(); }
+});
+
+test("ordinary agents gain explicit browser controls without triggering ATS memory setup", async () => {
+  await fixture(async (dir) => {
+    const ordinary = agent(); ordinary.config.behavior = { system_prompt: "Be helpful." };
+    let loads = 0, closes = 0, rendered = "";
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => { throw new Error("must use chat surface"); }, openViewer: async () => ({ launched: true }),
+      load: async () => { loads++; return fakePackage({ initializeMemory: async () => { throw new Error("must not initialize ATS memory"); }, createBrowserObserver: async () => ({
+        open: async () => ({ state: "connected", viewUrl: "http://127.0.0.1:6080/vnc.html" }), snapshot: async () => ({}), close: async () => { closes++; }, status: () => ({ state: "connected" }),
+      }) }); } });
+    const surface = { write: (text: string) => { rendered += text; }, signal: new AbortController().signal };
+    const cleanup = await hooks.beforeChat!(context(), ordinary, surface);
+    assert.equal(loads, 0);
+    assert.equal(await hooks.onChatCommand!(context(), ordinary, "/browser open", surface), true);
+    assert.equal(loads, 1);
+    assert.match(rendered, /Browser viewer launch requested/);
+    assert.doesNotMatch(rendered, /local memory verified/);
+    await cleanup!(); assert.equal(closes, 1);
+  });
+});
+
+test("background visual status preserves an edited TTY draft through the real readline chat loop", async () => {
+  const previous = globalThis.fetch;
+  const previousTerm = process.env["TERM"];
+  process.env["TERM"] = "xterm";
+  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode(_enabled: boolean) { return this; } });
+  let rendered = "", emitStatus: (text: string) => void = () => {}, started = false;
+  const sent: string[] = [];
+  const out = Object.assign(new Writable({ write(chunk, _encoding, done) { rendered += String(chunk); done(); } }), { columns: 20 });
+  const timeout = new AbortController();
+  const deadline = setTimeout(() => timeout.abort(), 2000);
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/thread")) return new Response(JSON.stringify({ id: "thread-1" }));
+    if (String(url).includes("/messages")) {
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)); sent.push(body.body);
+        return new Response(JSON.stringify({ message: { id: "message-1", body: body.body }, admission: { state: "saved" } }));
+      }
+      if (!started) {
+        started = true;
+        setImmediate(() => {
+          input.write("keep this long visual draft");
+          input.write("\x1b[D\x1b[D");
+          emitStatus("Browser  ● LIVE\nFresh frame verified\n");
+          input.end("X\n/exit\n");
+        });
+      }
+      return new Response(JSON.stringify({ messages: [] }));
+    }
+    return new Response(JSON.stringify({ schema_version: "aether.managed-agents/1", availability: "ok", agent: agent() }));
+  }) as typeof fetch;
+  try {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "", { input, out, err: out, signal: timeout.signal, hooks: {
+      beforeChat: async (_ctx, _agent, surface) => { emitStatus = surface!.write; },
+    } }), 0, rendered);
+    assert.deepEqual(sent, ["keep this long visual draXft"]);
+    assert.match(rendered, /Fresh frame verified/);
+    assert.equal(input.listenerCount("keypress"), 0);
+  } finally {
+    clearTimeout(deadline); globalThis.fetch = previous; input.destroy();
+    if (previousTerm === undefined) delete process.env["TERM"]; else process.env["TERM"] = previousTerm;
+  }
 });

@@ -6,16 +6,31 @@ export interface StrategyScan extends Record<string, unknown> { state: "scanned"
 export declare function initializeMemory(options: MemoryOptions): Promise<MemoryReceipt>;
 export declare function scanStrategies(options: NativeOptions & { directory: string }): Promise<StrategyScan>;
 export declare function validateBrowserUrl(value: string, base?: string): string;
-export interface BrowserStatus { state: string; sessionId: string | null; viewUrl: string | null; viewerState: string; ageMs: number | null; visionStepsRemaining: number | null; }
+export interface BrowserObservation {
+  sequence: number; capturedAt: string; origin: string; title: string;
+  screenshotBytes: number; width: number; height: number;
+}
+export interface BrowserStatus { state: string; sessionId: string | null; viewUrl: string | null; viewerState: string; ageMs: number | null; visionStepsRemaining: number | null; expiresAt: string | null; observation: BrowserObservation | null; }
 export declare class AtsBrowserObserver {
   constructor(options: { browser: unknown; baseUrl: string; maxVisionSteps?: number; maxAgeMs?: number; now?: () => number });
-  open(): Promise<{ sessionId: string; viewUrl: string | null; state: string }>;
+  open(options?: { signal?: AbortSignal }): Promise<{ sessionId: string; viewUrl: string | null; state: string }>;
   snapshot(options?: { signal?: AbortSignal }): Promise<unknown>;
   close(): Promise<void>;
   status(): BrowserStatus;
 }
 export declare function createBrowserObserver(options?: { env?: Record<string,string | undefined>; maxVisionSteps?: number; maxAgeMs?: number }): Promise<AtsBrowserObserver>;
 export declare function observeBrowser(observer: AtsBrowserObserver, options?: { intervalMs?: number; signal?: AbortSignal }): AsyncGenerator<unknown>;
+export declare function createBrowserFetch(options?: { fetch?: typeof globalThis.fetch; timeoutMs?: number; maxResponseBytes?: number }): typeof globalThis.fetch;
+export interface BrowserVisualContext {
+  schema_version: 'aether.browser.visual/1'; trust: 'untrusted_page_data'; authority: 'observation_only';
+  source: { session_id: string; sequence: number; captured_at: string; origin: string; image_sha256: string; width: number; height: number; vision_steps_remaining: number };
+  image: { mime_type: 'image/png'; data: string };
+  page: { title: string; text: string; truncated: boolean };
+}
+export declare function createBrowserVisionSkill(observer: AtsBrowserObserver): {
+  readonly name: 'aether_browser_observe'; readonly description: string; readonly input_schema: Record<string, unknown>;
+  invoke(input?: { max_text_chars?: number }, options?: { signal?: AbortSignal }): Promise<BrowserVisualContext>;
+};
 export declare function defaultSettings(): Record<string, unknown>;
 export declare function validateSettings(value: unknown): Record<string, unknown>;
 export declare function cyclePermissionMode(mode: string): string;

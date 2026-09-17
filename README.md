@@ -71,6 +71,21 @@ workspace. Shift-Tab cycles the
 local ATS permission preference. Model availability, projects, APR memory and
 UVT admission remain enforced by Cloud.
 
+ATS chat opens the configured browser view after memory verification. For any
+managed agent, `/browser setup [URL]` configures the connection and `/browser open`
+opens it. Use `/browser status`, `/browser refresh`, `/browser stop` or
+`/browser retry` to manage the view; `/ats browser` is an alias. Status updates
+preserve your draft and cursor. LIVE requires a fresh validated screenshot;
+an open window alone is not proof of observation. Retry starts a new bounded
+session after releasing the old one.
+
+The local API defaults to `http://127.0.0.1:8092`. Run
+`npx aether-browser@0.2.2 doctor` to check the separately installed runtime.
+Remote APIs use HTTPS and environment credentials. The native noVNC viewer
+stays on the browser host and must never be tunneled or published.
+The bundled read-only visual skill exposes verified images for an admitted
+host; Cloud DM does not yet receive those images or control this browser.
+
 These commands require the matching Cloud terminal adapter. ATS setup also
 requires its Python engine and a separately running Agent Browser runtime;
 missing services are reported explicitly. This candidate prepares and observes

@@ -11,13 +11,13 @@ before evaluating release readiness.
 | Proposed tag | `v0.4.0` |
 | Release scope | Shared Cloud managed-agent inventory, creation, customization and Online DM chat; guided ATS device setup, native strategy preparation and bounded browser observation. |
 | Version decision | A minor release for the new account-agent workflow and bundled ATS runtime dependency. |
-| Source identity | Canonical ATS adapter commit `8f8ac98e023c8cb3665d258c634e65bb0d041602`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
+| Source identity | Canonical ATS adapter commit `eaf11bf367dd6aeb7ba354e59d8cfb4a84b3387a`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
 | Runtime dependency policy | Exactly `aether-ats-skills` 0.1.0 from `file:packages/ats-skills`, bundled into the CLI. Its exact registry dependencies are `aether-browser` 0.2.2 and `aether-context` 0.3.1. No additional runtime, optional or peer dependencies; no installation hooks. |
 | Source custody | ATS owns the canonical source. The Agent copy must match its recorded upstream source and digest; it is not a separate implementation. |
 | Required Cloud companion | `/agent/managed` terminal adapter with canonical account authentication, owner-scoped agents, revision checks, exact conversation binding and existing admission gates. |
 | Local prerequisites | The ATS Python engine and a reachable Agent Browser runtime are separate prerequisites. The npm context dependency is a launcher, not proof that Python memory is installed or verified. |
 | Platform evidence | Linux packed offline installation and CLI selftest passed in this workspace. Windows packed-install/terminal/browser qualification remains required. |
-| Archive evidence | Final source pack check passed: 563 files, 3,409,680 unpacked bytes, all three exact bundled runtimes, offline installation with lifecycle scripts disabled, CLI/headless selftest. |
+| Archive evidence | Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending. |
 | Hosted checks | Required exact-commit CI, CodeQL, supply-chain audit, generated-documentation, production-package and release-truth checks pending. |
 | Live service evidence | Deployment of the Cloud adapter, actual web/terminal DM sync, model/UVT execution and broker connectivity are not established by local tests. |
 | Publication evidence | No npm/PyPI publish, tag, trusted-publishing provenance or registry dist-tag update is established by this packet. |
@@ -48,7 +48,13 @@ separate memory activation gate.
 
 Browser observation has a finite budget and freshness checks. Remote API
 observation does not expose a server's unauthenticated loopback viewer to a
-different machine. Strategy scanning does not execute Python or PineScript
+different machine. Never tunnel, proxy or publish the native noVNC/raw VNC
+viewer. LIVE requires a matching, fresh, validated PNG receipt. Browser open,
+refresh, stop and retry are explicit; cancellation propagates from chat through
+setup and streamed observation. Background updates preserve the terminal draft.
+The read-only visual skill returns untrusted page data and image provenance;
+Cloud model dispatch and browser actions are not connected by this candidate.
+Strategy scanning does not execute Python or PineScript
 inputs, and unsupported translation stays visible. ATS permission modes are
 local preferences; they do not authorize live broker orders.
 
@@ -80,9 +86,12 @@ command, not through a second agent registry.
 
 ## Local validation record
 
-- Native ATS package: 39 tests passed with zero skips using published Context 0.3.1, the existing pinned Nano compiler, and the actual ATS compile seam. Full-pool memory preservation and process-tree cleanup regressions passed.
-- Agent final focused feature suites: 43 tests passed; build and all six generated documentation checks passed. Release/package-policy, release-coherence, audit-helper and PyPI launcher suites also passed.
-- Real npm audit reported zero vulnerabilities.
+- Native ATS package: 61 tests passed with zero skips using published Context 0.3.1, the existing pinned Nano compiler, and the actual ATS compile seam. Browser/transport/visual subset: 34 passed. Full-pool memory preservation and process-tree cleanup regressions passed.
+- Agent terminal/controller/managed suites: 45 tests passed; manifest/slash/generated-doc suites: 48 passed; release/package/coherence/public-document suites: 65 passed. Build and all six generated documentation checks passed.
+- Final packed-install verification passed: 569 files, 3,468,703 unpacked bytes, all three exact bundled runtimes, offline installation with lifecycle scripts disabled, installed SDK/visual-skill import, CLI and headless selftest.
+- The earlier candidate dependency audit reported zero vulnerabilities; this follow-up adds no dependency versions or graph edges.
 - The broad Agent test run encountered an existing `review_counts` EPIPE failure. It was reproduced in a detached, untouched `ccbe1595` baseline (10 passes, two EPIPE failures in the isolated review/ship suite). A completely green full suite is not claimed.
 - Cross-repository schema check: the ATS profile validates against Cloud's native `AgentConfigV1`. Cloud terminal adapter: 21 focused tests and independent owner/authentication-boundary review passed.
 - Companions: [Cloud #1691](https://github.com/AetherAI3/AETHER-CLOUD/pull/1691) and [ATS #441](https://github.com/AetherAI3/ATSv2/pull/441). No live broker, deployed Cloud compatibility, Windows, registry publication or autonomous executor qualification.
+
+- Browser follow-up review: four independent lanes and four bounded review rounds addressed B1–B4; no LOOP-17 convergence claim. Scope and runtime constraints: [review artifact](../loops/ATS_BROWSER_SETUP/2026-09-17/AUDIT-ARTIFACT.md). Actual headed Chrome/noVNC and Cloud vision dispatch remain unqualified.

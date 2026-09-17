@@ -1,4 +1,4 @@
-import { createInterface, type Key } from "node:readline";
+import { createInterface, type Key, type Interface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import type { Writable } from "node:stream";
 import type { AppContext } from "../core/context.js";
@@ -10,11 +10,17 @@ import { theme } from "../ui/theme.js";
 import { sanitizeTerm, sliceVisible, visibleWidth } from "../ui/text.js";
 import { decodeKey, splitKeys } from "../ui/keys.js";
 
+export interface ManagedChatSurface {
+  /** Prompt-preserving output for asynchronous local status and setup. */
+  write(text: string): void;
+  signal: AbortSignal;
+}
+
 export interface ManagedAgentHooks {
   createATS?: (ctx: AppContext, name: string) => Promise<number>;
-  beforeChat?: (ctx: AppContext, agent: ManagedAgent) => Promise<void | (() => Promise<void>)>;
-  onChatCommand?: (ctx: AppContext, agent: ManagedAgent, input: string) => Promise<boolean>;
-  cycleMode?: (ctx: AppContext, agent: ManagedAgent) => Promise<void>;
+  beforeChat?: (ctx: AppContext, agent: ManagedAgent, surface?: ManagedChatSurface) => Promise<void | (() => Promise<void>)>;
+  onChatCommand?: (ctx: AppContext, agent: ManagedAgent, input: string, surface?: ManagedChatSurface) => Promise<boolean>;
+  cycleMode?: (ctx: AppContext, agent: ManagedAgent, surface?: ManagedChatSurface) => Promise<void>;
   help?: (agent: ManagedAgent) => string | undefined;
 }
 
@@ -199,6 +205,15 @@ export function bindManagedAgentKeys(
   return () => { active = false; input.removeListener("keypress", keypress); };
 }
 
+/** Write above a readline draft, including wrapped input and a moved cursor.
+ * readline owns the draft and cursor; prompt(true) redraws without resetting either. */
+export function writeManagedChatEvent(out: Writable, reader: Pick<Interface, "getCursorPos" | "prompt">, text: string): void {
+  const { rows } = reader.getCursorPos();
+  out.write(`\r${rows > 0 ? `\x1b[${rows}A` : ""}\x1b[0J`);
+  out.write(text.endsWith("\n") ? text : text + "\n");
+  reader.prompt(true);
+}
+
 export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefined, prompt = "", deps: ManagedAgentDeps = {}): Promise<number> {
   const out = deps.out ?? process.stdout;
   const inputStream = deps.input ?? process.stdin;
@@ -208,12 +223,23 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
   const signal = deps.signal ? AbortSignal.any([controller.signal, deps.signal]) : controller.signal;
   let timer: ReturnType<typeof setInterval> | undefined;
   let closeSession: void | (() => Promise<void>) = undefined;
+  let reader: Interface | undefined;
+  let surfaceClosed = false;
+  const surface: ManagedChatSurface = {
+    signal,
+    write(text) {
+      if (surfaceClosed) return;
+      if (ctx.flags.json) out.write(JSON.stringify({ type: "agent_status", text: sanitizeTerm(text) }) + "\n");
+      else if (reader && terminal) writeManagedChatEvent(out, reader, text);
+      else out.write(text);
+    },
+  };
   try {
     if (!(await ctx.tokens.get())) throw new Error("Sign in with `aether auth login` to sync your agents.");
     if (ctx.flags.local) throw new Error("Managed agents require your Aether account. Omit --local to sync with Cloud.");
     const agent = id ? await client.get(id, signal) : await pickManagedAgent(await client.list(signal), out, signal);
     if (!agent) return 0;
-    closeSession = await deps.hooks?.beforeChat?.(ctx, agent);
+    closeSession = await deps.hooks?.beforeChat?.(ctx, agent, surface);
     const thread = await client.thread(agent.agent_id, signal);
     if (typeof thread["id"] !== "string") throw new Error("Cloud did not return a conversation ID.");
     const conversationId = thread["id"];
@@ -228,7 +254,7 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
       if (ctx.flags.json) out.write(JSON.stringify(receipt) + "\n");
       else {
         const admission = receipt.admission;
-        out.write(theme.dim(`Message saved · ${sanitizeTerm(admission?.state ?? "admission not reported")}${admission?.reason ? ` · ${sanitizeTerm(admission.reason)}` : ""}`) + "\n");
+        surface.write(theme.dim(`Message saved · ${sanitizeTerm(admission?.state ?? "admission not reported")}${admission?.reason ? ` · ${sanitizeTerm(admission.reason)}` : ""}`) + "\n");
       }
     };
     if (prompt.trim()) { await send(prompt); return 0; }
@@ -242,9 +268,10 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
     let syncFailed = false;
     let closed = false;
     const rl = createInterface({ input: inputStream, output: out, terminal });
+    reader = rl;
     const lines = rl[Symbol.asyncIterator]();
     let inputClosed = false;
-    rl.once("close", () => { inputClosed = true; });
+    rl.once("close", () => { inputClosed = true; reader = undefined; });
     rl.setPrompt(ctx.flags.json ? "" : theme.cyan("you › "));
     const refresh = async (redraw = false): Promise<void> => {
       if (polling || closed) return;
@@ -254,14 +281,18 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
         if (closed) return;
         for (const message of messages) {
           if (seen.get(message.id) === message.body) continue;
-          if (redraw && terminal) out.write("\r\x1b[2K");
-          out.write(ctx.flags.json ? JSON.stringify({ type: "message", message }) + "\n" : renderMessage(message, agent));
+          const rendered = ctx.flags.json ? JSON.stringify({ type: "message", message }) + "\n" : renderMessage(message, agent);
+          if (terminal && reader) writeManagedChatEvent(out, rl, rendered);
+          else out.write(rendered);
           seen.set(message.id, message.body);
         }
-        if (syncFailed && !ctx.flags.json) out.write(theme.dim("Conversation sync restored.\n"));
+        if (syncFailed && !ctx.flags.json) surface.write(theme.dim("Conversation sync restored.\n"));
         syncFailed = false;
       } catch (error) {
-        if (!closed && !syncFailed) out.write(ctx.flags.json ? JSON.stringify({ type: "sync_error", message: managedAgentError(error) }) + "\n" : theme.yellow("Conversation sync paused. " + sanitizeTerm(managedAgentError(error))) + "\n");
+        if (!closed && !syncFailed) {
+          if (ctx.flags.json) out.write(JSON.stringify({ type: "sync_error", message: managedAgentError(error) }) + "\n");
+          else surface.write(theme.yellow("Conversation sync paused. " + sanitizeTerm(managedAgentError(error))) + "\n");
+        }
         syncFailed = true;
       } finally {
         polling = false;
@@ -276,9 +307,9 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
     };
     const removeKeys = terminal && deps.hooks?.cycleMode ? bindManagedAgentKeys(
       inputStream,
-      () => enqueue(async () => { await deps.hooks!.cycleMode!(ctx, agent); }),
+      () => enqueue(async () => { await deps.hooks!.cycleMode!(ctx, agent, surface); }),
       () => { if (!closed && !inputClosed) rl.prompt(true); },
-      (error) => { out.write(theme.yellow(sanitizeTerm(managedAgentError(error))) + "\n"); },
+      (error) => { surface.write(theme.yellow(sanitizeTerm(managedAgentError(error))) + "\n"); },
     ) : () => {};
     const stop = (): void => { closed = true; controller.abort(); rl.close(); };
     rl.on("SIGINT", stop);
@@ -294,19 +325,21 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
           await enqueue(async () => {
             if (input === "/refresh") await refresh();
             else if (input.startsWith("/")) {
-              if (!(await deps.hooks?.onChatCommand?.(ctx, agent, input))) {
-                out.write("Use /refresh or /exit. Configure this agent with `aether agent configure`.\n");
+              if (!(await deps.hooks?.onChatCommand?.(ctx, agent, input, surface))) {
+                surface.write("Use /refresh or /exit. Configure this agent with `aether agent configure`.\n");
               }
             } else if (input) { await send(input); await refresh(); }
           });
         } catch (error) {
           const message = sanitizeTerm(managedAgentError(error));
-          out.write(ctx.flags.json ? JSON.stringify({ type: "command_error", message }) + "\n" : theme.yellow(message) + "\n");
+          if (ctx.flags.json) out.write(JSON.stringify({ type: "command_error", message }) + "\n");
+          else surface.write(theme.yellow(message) + "\n");
         }
         if (terminal && !inputClosed) rl.prompt();
       }
     } finally {
       closed = true;
+      reader = undefined;
       removeKeys();
       await operations;
       signal.removeEventListener("abort", stop);
@@ -320,6 +353,7 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
     (deps.err ?? process.stderr).write(ctx.flags.json ? JSON.stringify({ error: message }) + "\n" : `✗ ${message}\n`);
     return 1;
   } finally {
+    surfaceClosed = true;
     if (timer) clearInterval(timer);
     controller.abort();
     if (closeSession) {

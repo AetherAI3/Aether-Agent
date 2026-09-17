@@ -27,7 +27,19 @@ The scan returns `{state:'scanned',directory,compiler,strategies,execution_enabl
 
 ## Browser and settings
 
-`createBrowserObserver({env?})` uses `aether-browser@0.2.2`, with `AGENT_BROWSER_URL`, `AGENT_BROWSER_CONTROLLER_TOKEN` and `AGENT_BROWSER_OBSERVER_TOKEN`. Run a compatible browser server separately. The observer validates server readiness, owns one browser session, exposes its noVNC viewer when locally reachable, and takes bounded periodic snapshots. It reports stale observations and exhausted vision budgets separately; reconnection or a new budget requires an explicit new session. A remote server's loopback viewer cannot be opened on the client machine automatically. Closing the observer releases its exact session.
+`createBrowserObserver({env?})` uses `aether-browser@0.2.2`. Run a compatible browser runtime separately and check it with `aether-browser doctor`. The default API is `http://127.0.0.1:8092`; this strict numeric-loopback profile supports token-free local use. A remote API requires HTTPS and environment credentials (`AGENT_BROWSER_CONTROLLER_TOKEN`, optionally the role-specific `AGENT_BROWSER_OBSERVER_TOKEN`). Credentials never belong in URLs or chat. `AGENT_BROWSER_URL` selects the API.
+
+Opening validates readiness and creates one owned session. Only a fresh, matching native snapshot with a validated PNG, viewport, timestamp and budget can become `observing`; health or a launched viewer alone cannot. The observer distinguishes stale frames, expiry, unavailable evidence, exhausted budget and failed cleanup. Retry explicitly closes the old session before opening another; no automatic budget renewal occurs. Closing aborts observation and releases that exact session. The adapter supplies a bounded transport around the pinned SDK: deadline and cancellation cover the entire streamed body, responses are capped at 18 MiB, and redirects are refused.
+
+Native noVNC remains **unauthenticated and browser-host-local**. Open `http://127.0.0.1:6080/vnc.html` on the runtime's host. Never tunnel, proxy or publish noVNC or raw VNC. Remote authenticated API observation is supported, but it does not create a viewer on the terminal's machine. See the [Agent Browser security contract](https://github.com/AetherAI3/agent-browser/blob/9981040b2e873b4120d0bc57850cbbb917603708/docs/SECURITY.md).
+
+Inside managed-agent chat, `/browser setup [URL]`, `open`, `status`, `refresh`, `stop` and `retry` control this lifecycle. `/ats browser` is an alias. ATS chat opens its configured view after memory verification; ordinary managed agents load browser support on demand. Background status redraws preserve the terminal draft and cursor.
+
+### Read-only visual skill
+
+`createBrowserVisionSkill(observer)` returns the opt-in `aether_browser_observe` tool. A host must already own and admit the observer. `invoke({max_text_chars:4096}, {signal})` takes a fresh capture and returns a PNG plus bounded page text under `trust: 'untrusted_page_data'` and `authority: 'observation_only'`. Its source receipt includes the session, sequence, capture time, image SHA-256, origin, dimensions and remaining budget. The tool accepts no click, navigation, trading or memory-write arguments.
+
+Page text and pixels can contain hostile instructions. A consuming host must preserve their lower-trust placement and independently check every action. The return value can contain private page information; it is never logged, uploaded or attached to Cloud chat automatically. The current Cloud managed-agent executor has no local visual-tool bridge, so creating this skill does not make the DM model see the browser. That adapter and real model behavior require separate qualification.
 
 This adapter exposes observations, not browser clicks or financial actions. Generic browser access is not ATS admission, and the package cannot bypass account entitlements or native execution gates. See [SETTINGS.md](SETTINGS.md) for independent UI permission labels, native execution requests and data configuration.
 

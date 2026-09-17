@@ -5,10 +5,10 @@ import { resolve, join, dirname } from "node:path";
 import type { AppContext } from "../core/context.js";
 import { configDir } from "../core/config.js";
 import { ManagedAgentsClient, type ManagedAgent, type ManagedAgentConfig } from "../core/managed_agents.js";
-import type { ManagedAgentHooks } from "./managed_agents.js";
+import type { ManagedAgentHooks, ManagedChatSurface } from "./managed_agents.js";
 import { theme } from "../ui/theme.js";
 import { sanitizeTerm } from "../ui/text.js";
-import { openBrowserTyped } from "../core/browser.js";
+import { AgentBrowserSession, type AgentBrowserObserver } from "../core/agent_browser_session.js";
 
 export const ATS_PROFILE_MARKER = "aether.ats.profile/1";
 
@@ -37,18 +37,12 @@ interface AtsSettings {
 interface AtsPackage {
   initializeMemory(input: MemorySetup): Promise<Record<string, unknown>>;
   scanStrategies(input: { directory: string; python?: string }): Promise<Record<string, unknown>>;
-  createBrowserObserver(input?: Record<string, unknown>): Promise<BrowserObserver>;
-  observeBrowser(observer: BrowserObserver, input: { signal: AbortSignal; intervalMs: number }): AsyncIterable<unknown>;
+  createBrowserObserver(input?: Record<string, unknown>): Promise<AgentBrowserObserver>;
+  observeBrowser(observer: AgentBrowserObserver, input: { signal: AbortSignal; intervalMs: number }): AsyncIterable<unknown>;
   loadSettings(path: string): Promise<AtsSettings>;
   saveSettings(path: string, settings: AtsSettings): Promise<unknown>;
   cyclePermissionMode(mode: string): string;
   dataStreamStatus(settings: AtsSettings): Record<string, unknown>;
-}
-interface BrowserObserver {
-  open(): Promise<{ viewUrl: string | null; state: string }>;
-  snapshot(): Promise<unknown>;
-  close(): Promise<void>;
-  status(): { state: string; viewerState?: string; ageMs?: number | null };
 }
 interface Binding {
   schema_version: "aether.ats.local/1";
@@ -65,6 +59,7 @@ export interface AtsHookDeps {
   setup?: () => Promise<{ memoryDirectory?: string; memoryGb: number; strategiesDirectory: string }>;
   output?: (text: string) => void;
   env?: NodeJS.ProcessEnv;
+  openViewer?: (url: string) => Promise<{ launched: boolean }>;
 }
 
 async function loadPackage(): Promise<AtsPackage> {
@@ -161,7 +156,19 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
   const output = deps.output ?? ((text: string) => process.stdout.write(text));
   const env = deps.env ?? process.env;
   const load = deps.load ?? loadPackage;
-  const initialize = async (ctx: AppContext, agent: ManagedAgent, options: Awaited<ReturnType<typeof askSetup>>, pack: AtsPackage): Promise<Binding> => {
+  const browsers = new Map<string, AgentBrowserSession>();
+  const key = (ctx: AppContext, agent: ManagedAgent): string => `${scope(ctx)}:${agent.agent_id}`;
+  const browser = (ctx: AppContext, agent: ManagedAgent, surface?: ManagedChatSurface): AgentBrowserSession => {
+    const id = key(ctx, agent);
+    let session = browsers.get(id);
+    if (!session) {
+      session = new AgentBrowserSession({ load, env, output: surface?.write ?? output,
+        ...(surface ? { signal: surface.signal } : {}), ...(deps.openViewer ? { openViewer: deps.openViewer } : {}) });
+      browsers.set(id, session);
+    }
+    return session;
+  };
+  const initialize = async (ctx: AppContext, agent: ManagedAgent, options: Awaited<ReturnType<typeof askSetup>>, pack: AtsPackage, write = output): Promise<Binding> => {
     const path = bindingPath(ctx, agent.agent_id, root);
     const binding: Binding = { schema_version: "aether.ats.local/1", agent_id: agent.agent_id, cloud_origin: scope(ctx),
       memory_directory: options.memoryDirectory ?? join(dirname(path), "memory"), memory_gb: options.memoryGb,
@@ -174,9 +181,9 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     await mkdir(binding.strategies_directory, { recursive: true, mode: 0o700 });
     const scan = await pack.scanStrategies({ directory: binding.strategies_directory,
       ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
-    output(renderStrategyScan(scan));
+    write(renderStrategyScan(scan));
     await saveBinding(path, binding);
-    output(theme.cyan("ATS setup saved") + ` · ${binding.memory_gb} GiB context limit · ${sanitizeTerm(binding.strategies_directory)}\n`);
+    write(theme.cyan("ATS setup saved") + ` · ${binding.memory_gb} GiB context limit · ${sanitizeTerm(binding.strategies_directory)}\n`);
     return binding;
   };
   const local = async (ctx: AppContext, agent: ManagedAgent) => {
@@ -191,15 +198,18 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
   };
   return {
     help: (agent) => agent.config.behavior?.system_prompt?.split(/\r?\n/, 1)[0] === ATS_PROFILE_MARKER
-      ? "ATS · Shift-Tab: mode · /ats mode · /ats strategies · /ats data · /ats status" : undefined,
-    cycleMode: async (ctx, agent) => {
+      ? "ATS · Shift-Tab: mode · /ats mode · /ats strategies · /ats data · /ats status\nBrowser · /browser open · /browser status · /browser setup" : "Browser · /browser setup · /browser open · /browser status",
+    cycleMode: async (ctx, agent, surface) => {
+      const output = surface?.write ?? deps.output ?? ((text: string) => process.stdout.write(text));
       const state = await local(ctx, agent);
       if (!state) return;
       state.settings.permission_mode = state.pack.cyclePermissionMode(state.settings.permission_mode);
       await state.pack.saveSettings(state.settingsPath, state.settings);
       output(`ATS mode: ${state.settings.permission_mode} · local preference · live orders remain disabled\n`);
     },
-    onChatCommand: async (ctx, agent, input) => {
+    onChatCommand: async (ctx, agent, input, surface) => {
+      const output = surface?.write ?? deps.output ?? ((text: string) => process.stdout.write(text));
+      if (/^\/(?:browser|ats\s+browser)(?:\s|$)/.test(input)) return browser(ctx, agent, surface).command(input);
       if (!/^\/ats(?:\s|$)/.test(input)) return false;
       const state = await local(ctx, agent);
       if (!state) { output("This agent has no ATS setup on this device.\n"); return true; }
@@ -251,58 +261,32 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
       output("Assign an account project and UVT limits, then activate. Local context does not replace APR project memory.\n");
       return 0;
     },
-    beforeChat: async (ctx, agent) => {
+    beforeChat: async (ctx, agent, surface) => {
+      const output = surface?.write ?? deps.output ?? ((text: string) => process.stdout.write(text));
       const path = bindingPath(ctx, agent.agent_id, root);
       let binding = await readBinding(path, ctx, agent.agent_id);
       const marked = agent.config.behavior?.system_prompt?.split(/\r?\n/, 1)[0] === ATS_PROFILE_MARKER;
-      if (!binding && !marked) return;
-      const pack = await load();
-      if (!binding) binding = await initialize(ctx, agent, await (deps.setup ?? askSetup)(), pack);
-      else {
-        await refuseLinks(binding.memory_directory);
-        const receipt = await pack.initializeMemory({ agentId: agent.agent_id, directory: binding.memory_directory, sizeGb: binding.memory_gb,
-          ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
-        verifyMemory(receipt, binding);
-      }
-      output(theme.dim("ATS · local memory verified · Cloud DM · local execution is not connected to this conversation\n"));
-      if (!env["AGENT_BROWSER_CONTROLLER_TOKEN"]) {
-        output("Browser unavailable: configure your Agent Browser connection to open its live viewer.\n");
-        return;
-      }
-      let observer: BrowserObserver;
-      try { observer = await pack.createBrowserObserver({ env }); }
-      catch (error) {
-        output(`Browser unavailable: ${sanitizeTerm(error instanceof Error ? error.message : String(error))}. Text chat remains available.\n`);
-        return;
-      }
-      const abort = new AbortController();
-      let watching: Promise<void> | undefined;
+      const session = browser(ctx, agent, surface);
+      const cleanup = async (): Promise<void> => {
+        try { await session.close(); } finally { browsers.delete(key(ctx, agent)); }
+      };
+      // Ordinary managed agents gain browser controls without loading ATS or memory.
+      if (!binding && !marked) return cleanup;
       try {
-        const opened = await observer.open();
-        if (opened.viewUrl) {
-          const result = await openBrowserTyped(opened.viewUrl);
-          output(`Browser ${result.launched ? "viewer launched" : "viewer available"}: ${sanitizeTerm(opened.viewUrl)}\n`);
-        } else output("Browser connected remotely. Its loopback viewer needs a local tunnel before it can be opened here.\n");
-        watching = (async () => {
-          try {
-            for await (const _ of pack.observeBrowser(observer, { signal: abort.signal, intervalMs: 5000 })) {
-              if (observer.status().state === "budget_exhausted") output("Browser observation paused: this session's vision budget is exhausted.\n");
-            }
-          } catch (error) {
-            if (!abort.signal.aborted) output(`Browser observation stopped: ${sanitizeTerm(error instanceof Error ? error.message : String(error))}\n`);
-          }
-        })();
-      } catch (error) {
-        abort.abort();
-        output(`Browser unavailable: ${sanitizeTerm(error instanceof Error ? error.message : String(error))}. Text chat remains available.\n`);
-        try { await observer.close(); }
-        catch {
-          output("Browser cleanup needs attention. Release will be retried when this chat closes.\n");
-          return async () => { await observer.close(); };
+        const pack = await load();
+        if (!binding) binding = await initialize(ctx, agent, await (deps.setup ?? askSetup)(), pack, output);
+        else {
+          await refuseLinks(binding.memory_directory);
+          const receipt = await pack.initializeMemory({ agentId: agent.agent_id, directory: binding.memory_directory, sizeGb: binding.memory_gb,
+            ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
+          verifyMemory(receipt, binding);
         }
-        return;
-      }
-      return async () => { abort.abort(); try { await observer.close(); } finally { await watching; } };
+        output(theme.dim("ATS · local memory verified · Cloud DM · local execution is not connected to this conversation\n"));
+        // Strict local loopback runtimes intentionally support unauthenticated setup.
+        // Remote browser credentials are validated before any request or launch.
+        await session.command("/browser open");
+        return cleanup;
+      } catch (error) { await cleanup(); throw error; }
     },
   };
 }

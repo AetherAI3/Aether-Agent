@@ -5796,5 +5796,91 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "note": "Creates an account agent through the shared Cloud registry."
     },
     "args": "[ATS] <name>"
+  },
+  {
+    "key": "slash:browser",
+    "surface": "slash",
+    "sessionScope": "managed-agent",
+    "name": "browser",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "status|setup [URL]|open|refresh|stop|retry",
+    "summary": "manage the visual browser in a managed agent chat",
+    "detailedHelp": "/browser status|setup [URL]|open|refresh|stop|retry\nConfigure or open the host-local visual viewer, inspect fresh observation state, request a bounded capture, stop, or explicitly retry with a new session. Available inside aether agent chat <id>; /ats browser is also supported. Remote API observation leaves the viewer on its runtime host.",
+    "section": "Managed agent chat",
+    "hidden": false,
+    "permissionClass": "network",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": [
+        "aether.hosted"
+      ]
+    },
+    "telemetryName": "slash.browser",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:browser",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "browser",
+      "usage": "/browser status|setup [URL]|open|refresh|stop|retry",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Managed-agent chat owns execution; coding sessions provide a scoped entry-point hint."
+    }
+  },
+  {
+    "key": "slash:ats",
+    "surface": "slash",
+    "sessionScope": "managed-agent",
+    "name": "ats",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "status|mode|strategies|data|browser",
+    "summary": "configure ATS setup inside a managed agent chat",
+    "detailedHelp": "/ats status|mode|strategies|data|browser\nInspect local memory and strategy setup, select plan|skip|danger preference, configure data sources, or manage the browser. Available inside aether agent chat <id> for a locally configured ATS agent. These preferences do not enable live orders.",
+    "section": "Managed agent chat",
+    "hidden": false,
+    "permissionClass": "local-write",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": [
+        "aether.hosted"
+      ]
+    },
+    "telemetryName": "slash.ats",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:ats",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "ats",
+      "usage": "/ats status|mode|strategies|data|browser",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Managed-agent chat owns execution; coding sessions provide a scoped entry-point hint."
+    }
   }
 ];

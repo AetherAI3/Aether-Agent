@@ -153,3 +153,23 @@ test("an invalid additive surface returns errors instead of throwing", () => {
   assert.doesNotThrow(() => validateCommandManifest([invalid]));
   assert.ok(validateCommandManifest([invalid]).some((error) => error.includes("invalid surface")));
 });
+
+test("browser and ATS commands declare managed-agent scope and a visible release disposition", () => {
+  for (const name of ["browser", "ats"]) {
+    const entry = findManifestCommand("slash", name);
+    assert.ok(entry, `/${name} must be registered`);
+    assert.equal(entry.sessionScope, "managed-agent");
+    assert.ok(entry.availability.capabilityRequirements.includes("aether.hosted"));
+    assert.equal(entry.docs.visible, true);
+    assert.equal(entry.release?.disposition, "new");
+    assert.match(entry.detailedHelp, /aether agent chat/);
+  }
+});
+
+
+test("managed-agent command scope cannot be declared on shell commands or without its capability", () => {
+  const browser = findManifestCommand("slash", "browser")!;
+  assert.match(validateCommandManifest([{ ...browser, availability: { state: "runtime-dependent", capabilityRequirements: [] } }]).join("\n"), /scope requires/);
+  const shell = findManifestCommand("shell", "agent")!;
+  assert.match(validateCommandManifest([{ ...shell, sessionScope: "managed-agent" }]).join("\n"), /scope requires/);
+});
