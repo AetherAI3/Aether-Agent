@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { AtsBrowserObserver, validateBrowserUrl } from "./browser.js";
 import { createBrowserFetch } from "./browser_transport.js";
 export { AtsBrowserObserver, validateBrowserUrl, observeBrowser } from "./browser.js";
+export { BrowserSessionRecovery } from "./browser_recovery.js";
 export { createBrowserFetch } from "./browser_transport.js";
 export { createBrowserVisionSkill } from "./vision_skill.js";
 export * from "./settings.js";
@@ -15,7 +16,10 @@ const require = createRequire(import.meta.url);
 const bridge = fileURLToPath(new URL("../python/bridge.py", import.meta.url));
 const MAX_OUTPUT = 4 * 1024 * 1024;
 
-function run(command, args, { input, timeoutMs = 30_000, env = process.env } = {}) {
+function abortError() { return Object.assign(new Error("ATS native operation cancelled."), { name: "AbortError" }); }
+
+function run(command, args, { input, timeoutMs = 30_000, env = process.env, signal } = {}) {
+  if (signal?.aborted) return Promise.reject(abortError());
   return new Promise((resolve, reject) => {
     // A dedicated process group lets an interrupted context launcher clean up
     // its own pip/venv descendants without touching unrelated Python processes.
@@ -25,6 +29,7 @@ function run(command, args, { input, timeoutMs = 30_000, env = process.env } = {
     const finish = (error, result) => {
       if (finished) return;
       finished = true; clearTimeout(timer); clearTimeout(escalation);
+      signal?.removeEventListener("abort", onAbort);
       if (error) reject(error); else resolve(result);
     };
     const settleFailure = () => { if (closed && cleanupDone) finish(failure); };
@@ -49,6 +54,9 @@ function run(command, args, { input, timeoutMs = 30_000, env = process.env } = {
       }, 250);
     };
     const timer = setTimeout(() => stop(new Error("ATS native operation timed out.")), timeoutMs);
+    const onAbort = () => stop(abortError());
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
     child.on("error", error => { if (!child.pid) finish(error); else stop(error); });
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", chunk => {
@@ -75,7 +83,8 @@ function managedPython(env) {
   return join(root, process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "python.exe" : "python");
 }
 
-async function pythonCommand(explicit, env) {
+async function pythonCommand(explicit, env, signal) {
+  if (signal?.aborted) throw abortError();
   const configured = explicit || env.AETHER_ATS_PYTHON || env.AETHER_CONTEXT_PYTHON;
   if (configured) return { command: configured, args: [] };
   const managed = managedPython(env);
@@ -83,19 +92,19 @@ async function pythonCommand(explicit, env) {
   const candidates = process.platform === "win32" ? [{ command: "py", args: ["-3"] }, { command: "python", args: [] }, { command: "python3", args: [] }] : [{ command: "python3", args: [] }, { command: "python", args: [] }];
   for (const candidate of candidates) {
     try {
-      const version = await run(candidate.command, [...candidate.args, "-I", "-c", "import sys; print(1 if (3,10) <= sys.version_info[:2] < (3,15) else 0)"], { env, timeoutMs: 5000 });
+      const version = await run(candidate.command, [...candidate.args, "-I", "-c", "import sys; print(1 if (3,10) <= sys.version_info[:2] < (3,15) else 0)"], { env, signal, timeoutMs: 5000 });
       if (version.code === 0 && version.stdout.trim() === "1") return candidate;
-    } catch {}
+    } catch (error) { if (error.name === "AbortError") throw error; }
   }
   throw new Error("Python 3.10–3.14 is required. Select it with AETHER_ATS_PYTHON.");
 }
 
 async function native(operation, options, selectedPython) {
   const env = options.env || process.env;
-  const python = selectedPython || await pythonCommand(options.python, env);
+  const python = selectedPython || await pythonCommand(options.python, env, options.signal);
   let response;
   try {
-    response = await run(python.command, [...python.args, "-I", bridge], { input: JSON.stringify({ ...options, operation, python: undefined, env: undefined, bootstrap: undefined }), env });
+    response = await run(python.command, [...python.args, "-I", bridge], { input: JSON.stringify({ ...options, operation, python: undefined, env: undefined, bootstrap: undefined, signal: undefined }), env, signal: options.signal });
   } catch (error) {
     if (error.code === "ENOENT") throw new Error("Python 3.10+ is required. Select it with AETHER_ATS_PYTHON.");
     throw error;
@@ -115,7 +124,7 @@ export async function initializeMemory(options) {
   // Calling its version command provisions that engine without an interactive session.
   const launcher = join(dirname(require.resolve("aether-context/package.json")), "bin", "aether-context.js");
   const env = options.env || process.env;
-  const installed = await run(process.execPath, [launcher, "--version"], { env: { ...env, AETHER_CONTEXT_VERSION: "0.3.1" }, timeoutMs: 180_000 });
+  const installed = await run(process.execPath, [launcher, "--version"], { env: { ...env, AETHER_CONTEXT_VERSION: "0.3.1" }, timeoutMs: 180_000, signal: options.signal });
   if (installed.code !== 0) return { ...result, message: "The pinned aether-context engine could not be installed. Select a working interpreter with AETHER_ATS_PYTHON." };
   return native("initialize_memory", options, { command: managedPython(env), args: [] });
 }
@@ -127,9 +136,9 @@ export async function scanStrategies(options) {
 }
 
 /** The observer deliberately exposes no click, trade or arbitrary browser action API. */
-export async function createBrowserObserver({ env = process.env, maxVisionSteps = 100, maxAgeMs = 15_000 } = {}) {
+export async function createBrowserObserver({ env = process.env, maxVisionSteps = 100, maxAgeMs = 15_000, recovery } = {}) {
   const baseUrl = validateBrowserUrl(env.AGENT_BROWSER_URL || "http://127.0.0.1:8092");
   const { AgentBrowser } = await import("aether-browser");
   const browser = new AgentBrowser({ env, baseUrl, timeoutMs: 15_000, fetch: createBrowserFetch() });
-  return new AtsBrowserObserver({ browser, baseUrl, maxVisionSteps, maxAgeMs });
+  return new AtsBrowserObserver({ browser, baseUrl, maxVisionSteps, maxAgeMs, recovery });
 }

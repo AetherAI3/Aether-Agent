@@ -64,7 +64,10 @@ aether agent configure <agent-id> purpose "Review my trading strategies"
 aether agent chat <agent-id>
 ```
 
-ATS setup asks for a local memory folder, a memory size and a strategy folder.
+ATS setup asks for a local memory folder, a memory size, a strategy folder and
+data provider/symbol settings. Local resources belong to the verified account
+and agent; rotating a token preserves that identity. Switching accounts while
+chat is open closes its local resources and requires reopening the conversation.
 The packaged adapters verify storage and report native Nano compiler results.
 Inside ATS chat, type /ats status, /ats strategies or /ats data to inspect the
 workspace. Shift-Tab cycles the
@@ -77,7 +80,9 @@ opens it. Use `/browser status`, `/browser refresh`, `/browser stop` or
 `/browser retry` to manage the view; `/ats browser` is an alias. Status updates
 preserve your draft and cursor. LIVE requires a fresh validated screenshot;
 an open window alone is not proof of observation. Retry starts a new bounded
-session after releasing the old one.
+session after releasing the old one. Cleanup receipts survive restarts. If a
+creation response was lost, an idle runtime cannot prove that request finished;
+the terminal retains the receipt and blocks replacement until cleanup is known.
 
 The local API defaults to `http://127.0.0.1:8092`. Run
 `npx aether-browser@0.2.2 doctor` to check the separately installed runtime.

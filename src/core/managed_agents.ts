@@ -8,6 +8,7 @@ export const MANAGED_AGENTS_PATH = "/agent/managed";
 export const MANAGED_AGENT_ID = /^mag_[0-9a-f]{16}$/;
 
 export interface ManagedAgentConfig {
+  profile?: { schema_version: "aether.managed-agent.profile/1"; kind: "ats" } | null;
   identity: { display_name: string; purpose?: string; avatar_id?: string };
   behavior?: { system_prompt?: string; tone?: string; response_length?: string; output_format?: string };
   model_policy?: { routing: string; models: string[]; fallback?: string };
@@ -65,12 +66,18 @@ function readAgent(value: unknown): ManagedAgent {
       typeof runtime["observation"] !== "string" || typeof runtime["tile_state"] !== "string") {
     throw new Error("Cloud returned an invalid managed-agent record.");
   }
+  if (config["profile"] != null) {
+    const profile = record(config["profile"]);
+    if (profile["schema_version"] !== "aether.managed-agent.profile/1" || profile["kind"] !== "ats" || Object.keys(profile).some(key => !["schema_version", "kind"].includes(key))) {
+      throw new Error("Cloud returned an unsupported managed-agent profile. Update the terminal before opening local tools.");
+    }
+  }
   return value as ManagedAgent;
 }
 
 function envelope(value: unknown): Record<string, unknown> {
   const e = record(value);
-  if (e["schema_version"] !== "aether.managed-agents/1" || e["availability"] !== "ok") {
+  if (!["aether.managed-agents/1", "aether.managed-agents/1.1"].includes(String(e["schema_version"])) || e["availability"] !== "ok") {
     throw new Error("Managed agents are unavailable on this server. Check your account's Agents page and try again.");
   }
   return e;
@@ -78,6 +85,16 @@ function envelope(value: unknown): Record<string, unknown> {
 
 export class ManagedAgentsClient {
   constructor(private readonly api: ApiClient) {}
+
+  /** Never cache this account identity: credentials can rotate or change accounts. */
+  async identity(signal?: AbortSignal): Promise<string> {
+    const value = record(await this.api.getJson<unknown>(`${MANAGED_AGENTS_PATH}/identity`, signal));
+    if (value["schema_version"] !== "aether.terminal-account/1" || typeof value["account_subject"] !== "string"
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value["account_subject"])) {
+      throw new Error("Cloud returned an invalid canonical account identity. Update Cloud terminal compatibility before local setup.");
+    }
+    return value["account_subject"];
+  }
 
   async list(signal?: AbortSignal): Promise<ManagedAgent[]> {
     const agents: ManagedAgent[] = [];
@@ -98,7 +115,9 @@ export class ManagedAgentsClient {
   }
 
   async get(id: string, signal?: AbortSignal): Promise<ManagedAgent> {
-    return readAgent(envelope(await this.api.getJson<unknown>(agentPath(id), signal))["agent"]);
+    const agent = readAgent(envelope(await this.api.getJson<unknown>(agentPath(id), signal))["agent"]);
+    if (agent.agent_id !== id) throw new Error("Cloud returned a different agent than requested.");
+    return agent;
   }
 
   async create(config: ManagedAgentConfig, key: string = randomUUID(), signal?: AbortSignal): Promise<ManagedAgent> {

@@ -111,10 +111,14 @@ export class AtsBrowserObserver {
   #expires = null;
   #externalAbort = null;
   #externalSignal = null;
+  #recovery = null;
+  #receiptStarted = false;
+  #sessionRecorded = false;
 
-  constructor({ browser, baseUrl, maxVisionSteps = 100, maxAgeMs = 15_000, now = Date.now }) {
+  constructor({ browser, baseUrl, maxVisionSteps = 100, maxAgeMs = 15_000, now = Date.now, recovery = null }) {
     if (!integer(maxVisionSteps, 1, 100)) throw new Error("Browser vision budget must be an integer from 1 to 100.");
     if (!integer(maxAgeMs, 1000, 300_000)) throw new Error("Browser observation freshness must be 1–300 seconds.");
+    this.#recovery = recovery;
     this.browser = browser;
     this.baseUrl = validateBrowserUrl(baseUrl);
     this.maxVisionSteps = maxVisionSteps;
@@ -129,9 +133,20 @@ export class AtsBrowserObserver {
 
   async #endSession() {
     if (this.#ending) return this.#ending;
-    if (!this.#session) return;
+    if (!this.#session && !this.#receiptStarted) return;
     const session = this.#session;
-    this.#ending = Promise.resolve().then(() => session.end()).then(() => { if (this.#session === session) this.#session = null; });
+    this.#ending = Promise.resolve().then(async () => {
+      if (this.#recovery && this.#receiptStarted) {
+        if (session && !this.#sessionRecorded) {
+          // Persistence failed after creation: first release the exact identity
+          // still held in memory, then reconcile the durable uncertain receipt.
+          await session.end();
+        }
+        await this.#recovery.reconcile(this.browser);
+        this.#receiptStarted = false;
+      } else if (session) await session.end();
+      if (this.#session === session) this.#session = null;
+    });
     try { await this.#ending; } finally { this.#ending = null; }
   }
 
@@ -144,17 +159,33 @@ export class AtsBrowserObserver {
     this.state = "connecting";
     this.#opening = (async () => {
       try {
+        if (this.#recovery) {
+          const receipt = await this.#recovery.status();
+          if (validateBrowserUrl(receipt.baseUrl) !== this.baseUrl || validateBrowserUrl(this.browser.baseUrl) !== this.baseUrl) throw new Error("Browser recovery must use the observer's configured endpoint.");
+          if (receipt.pending) throw Object.assign(new Error("Reconcile pending browser cleanup before opening another session."), { code: "BROWSER_RECOVERY_PENDING" });
+        }
         const health = await this.browser.health({ signal: this.#lifetime.signal });
-        if (health?.api_version !== "v1" || health.status !== "ok" || health.browser_ready !== true || health.session_active !== false || health.slots_available !== 1) throw new Error("The browser runtime is not ready or its session is already in use.");
+        if (health?.api_version !== "v1" || health.status !== "ok" || health.browser_ready !== true || health.session_active !== false || health.slots_available !== 1) {
+          throw Object.assign(new Error("The browser runtime is not ready or its session is already in use."), { code: health?.api_version === "v1" && health.status === "ok" && health.session_active === true ? "SESSION_CAPACITY_REACHED" : "BROWSER_NOT_READY" });
+        }
         if (this.#closed) throw new Error("Browser opening cancelled.");
         // Do not abort creation after admission: receive the identity and then
         // release that exact session if cancelled. The transport bounds this wait.
+        if (this.#recovery) {
+          await this.#recovery.begin({ maxVisionSteps: this.maxVisionSteps, maxAgeMs: this.maxAgeMs });
+          this.#receiptStarted = true;
+        }
         const session = await this.browser.createSession({ maxVisionSteps: this.maxVisionSteps });
-        this.#session = session;
-        if (this.#closed) throw new Error("Browser opening cancelled.");
+        // An invalid returned ID cannot authorize an exact-session cleanup.
+        if (UUID.test(session.id)) this.#session = session;
         const created = utc(session.createdAt), expires = utc(session.expiresAt);
         if (!UUID.test(session.id) || !integer(session.maxVisionSteps, 1, this.maxVisionSteps)
             || !Number.isFinite(created) || !Number.isFinite(expires) || created > this.now() + 5000 || expires <= created || expires <= this.now()) throw new Error("Browser session answered with an invalid identity, expiry, or vision budget.");
+        if (this.#recovery) {
+          await this.#recovery.record(session);
+          this.#sessionRecorded = true;
+        }
+        if (this.#closed) throw new Error("Browser opening cancelled.");
         const viewer = viewerUrl(session.viewUrl);
         this.#expires = expires;
         if (!isLoopback(new URL(this.baseUrl).hostname)) {
@@ -165,14 +196,32 @@ export class AtsBrowserObserver {
         this.state = "connected";
         return { sessionId: session.id, viewUrl: this.viewUrl, state: this.state };
       } catch (error) {
+        if (this.#recovery && this.#receiptStarted && !this.#session) {
+          // A timed-out create may still be starting remotely. Retain the
+          // uncertainty; only an explicit cleanup attempt may check for idle.
+          try { await this.#recovery.markCleanupRequired(); } catch {}
+          this.state = "cleanup_required";
+          throw new Error("Browser create outcome is unknown; reconcile its pending cleanup before retrying.", { cause: error });
+        }
         try { await this.#endSession(); }
         catch { this.state = "cleanup_required"; throw new Error("Browser setup failed and its session could not be closed.", { cause: error }); }
-        this.state = this.#closed ? "closed" : "unavailable";
+        this.state = this.#closed ? "closed" : error?.code === "BROWSER_RECOVERY_PENDING" ? "cleanup_required" : error?.code === "SESSION_CAPACITY_REACHED" || error?.code === "BROWSER_RECOVERY_BUSY" ? "busy" : "unavailable";
         this.#externalSignal?.removeEventListener("abort", this.#externalAbort);
         throw error;
       } finally { this.#opening = null; }
     })();
     return this.#opening;
+  }
+
+  /** Explicit cleanup only: the pinned SDK has no session reattachment API. */
+  async reconcile({ signal } = {}) {
+    if (!this.#recovery) throw new Error("This browser observer has no durable cleanup receipt.");
+    if (this.#session || this.#opening || this.#closing) throw new Error("Close this observer before reconciling a previous browser session.");
+    try {
+      const result = await this.#recovery.reconcile(this.browser, { signal });
+      this.state = this.#closed ? "closed" : "disconnected";
+      return result;
+    } catch (error) { this.state = "cleanup_required"; throw error; }
   }
 
   status() {

@@ -1,5 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { visibleWidth } from "../src/ui/text.js";
 import { Writable } from "node:stream";
 import { ManagedAgentsClient, managedAgentError, type ManagedAgent } from "../src/core/managed_agents.js";
 import { ApiClient } from "../src/core/transport.js";
@@ -7,7 +11,7 @@ import { StaticTokenStore } from "../src/core/auth.js";
 import { HttpError } from "../src/core/errors.js";
 import { DEFAULT_CONFIG } from "../src/core/config.js";
 import type { AppContext } from "../src/core/context.js";
-import { configureManagedAgent, cmdManagedAgents, cmdManagedAgentChat, renderManagedAgents } from "../src/commands/managed_agents.js";
+import { configureManagedAgent, cmdManagedAgents, cmdManagedAgentChat, renderManagedAgents, renderManagedContext } from "../src/commands/managed_agents.js";
 import { handleSlash } from "../src/commands/slash.js";
 
 const ID = "mag_0123456789abcdef";
@@ -146,13 +150,22 @@ test("signed-out and local-only commands refuse without network calls", async ()
 
 test("agent-create slash command creates a synchronized draft, and ATS delegates setup", async () => {
   const output = capture();
-  await stubFetch((_url, init) => {
-    assert.equal(JSON.parse(String(init.body)).config.identity.display_name, "Research friend");
-    return json(envelope({ agent }), 201);
-  }, async () => { await handleSlash(context(), "/agent-create Research friend", output.out); });
-  let name = "";
-  assert.equal(await cmdManagedAgents(context(), ["create", "ATS", "Market", "Scout"], { hooks: { createATS: async (_ctx, value) => { name = value; return 0; } } }), 0);
-  assert.equal(name, "Market Scout");
+  const root = await mkdtemp(join(tmpdir(), "aether-create-slash-"));
+  const previous = process.env["AETHER_CONFIG_DIR"];
+  process.env["AETHER_CONFIG_DIR"] = root;
+  try {
+    await stubFetch((_url, init) => {
+      if (_url.pathname.endsWith("/identity")) return json({ schema_version: "aether.terminal-account/1", account_subject: "11111111-1111-4111-8111-111111111111" });
+      if (init.method === "POST") assert.equal(JSON.parse(String(init.body)).config.identity.display_name, "Research friend");
+      return json(envelope({ agent }), init.method === "POST" ? 201 : 200);
+    }, async () => { await handleSlash(context(), "/agent-create Research friend", output.out); });
+    let name = "";
+    assert.equal(await cmdManagedAgents(context(), ["create", "ATS", "Market", "Scout"], { hooks: { createATS: async (_ctx, value) => { name = value; return 0; } } }), 0);
+    assert.equal(name, "Market Scout");
+  } finally {
+    if (previous === undefined) delete process.env["AETHER_CONFIG_DIR"]; else process.env["AETHER_CONFIG_DIR"] = previous;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("untrusted labels are sanitized and runtime unavailable stays visible", () => {
@@ -161,4 +174,44 @@ test("untrusted labels are sanitized and runtime unavailable stays visible", () 
   assert.match(rows, /unavailable/);
   assert.match(managedAgentError(new HttpError(403, "aek_secret", { token: "aek_secret" })), /not enabled/);
   assert.equal(managedAgentError(new HttpError(403, "aek_secret")).includes("aek_secret"), false);
+});
+
+for (const columns of [40, 60, 80, 120]) {
+  test(`managed list and context stay within ${columns} columns`, () => {
+    const untrusted = { ...agent, runtime: { ...agent.runtime, tile_state: "draft\x1b]52;c;secret\x07", observation: "unavailable" }, config: { identity: { display_name: "長い名前".repeat(30) + "\x1b]52;c;secret\x07" } } };
+    const list = renderManagedAgents([untrusted], columns);
+    const context = renderManagedContext(untrusted, { chat: "paused", memory: "verified 5 GiB", mode: "plan requested", browser: "stale", data: "unverified" }, columns);
+    for (const line of [...list.split("\n"), ...context.split("\n")]) assert.ok(visibleWidth(line) <= columns, line);
+    assert.ok(list.includes(ID));
+    assert.match(context, /chat paused/);
+    assert.doesNotMatch(list + context, /\x1b\]52/);
+  });
+}
+
+test("canonical readback refuses a different agent identity", async () => {
+  await stubFetch(() => json(envelope({ agent: { ...agent, agent_id: "mag_aaaaaaaaaaaaaaaa" } })), async () => {
+    await assert.rejects(new ManagedAgentsClient(api()).get(ID), /different agent/);
+  });
+});
+
+test("identity contract validates canonical subjects and is fetched on every call", async () => {
+  let calls = 0;
+  await stubFetch(url => { assert.equal(url.pathname, "/cloud/agent/managed/identity"); calls++; return json({ schema_version: "aether.terminal-account/1", account_subject: "11111111-1111-4111-8111-111111111111" }); }, async () => {
+    const client = new ManagedAgentsClient(api()); assert.equal(await client.identity(), await client.identity()); assert.equal(calls, 2);
+  });
+  for (const value of [{ schema_version: "aether.terminal-account/2", account_subject: "11111111-1111-4111-8111-111111111111" }, { schema_version: "aether.terminal-account/1", account_subject: "../account" }]) {
+    await stubFetch(() => json(value), async () => { await assert.rejects(new ManagedAgentsClient(api()).identity(), /canonical account/); });
+  }
+});
+
+test("inventory accepts both additive contracts and rejects unknown typed profiles", async () => {
+  for (const version of ["aether.managed-agents/1", "aether.managed-agents/1.1"]) {
+    await stubFetch(() => json({ ...envelope({ agents: [agent] }), schema_version: version }), async () => { assert.equal((await new ManagedAgentsClient(api()).list()).length, 1); });
+  }
+  const profile = { schema_version: "aether.managed-agent.profile/1", kind: "ats" } as const;
+  const typed = { ...agent, config: { ...agent.config, profile } };
+  assert.deepEqual(configureManagedAgent(typed.config, "prompt", "New prompt").profile, profile);
+  for (const invalid of [{ ...profile, kind: "root" }, { ...profile, permission: "trade" }, { ...profile, schema_version: "unknown" }]) {
+    await stubFetch(() => json(envelope({ agents: [{ ...agent, config: { ...agent.config, profile: invalid } }] })), async () => { await assert.rejects(new ManagedAgentsClient(api()).list(), /unsupported managed-agent profile/); });
+  }
 });

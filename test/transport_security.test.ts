@@ -18,17 +18,23 @@ test("isCredentialSafeUrl: https any host ok; http only loopback; junk unsafe", 
   assert.equal(isCredentialSafeUrl(""), false);
 });
 
-test("ApiClient refuses to send the bearer over insecure transport (no network)", async () => {
+test("ApiClient refuses to send the bearer over insecure transport (no network)", async (t) => {
+  const network = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("This fixture must never reach the network");
+  });
   const api = new ApiClient("http://evil.example.com", new StaticTokenStore("aek_test_synthetic"));
   await assert.rejects(() => api.getJson("/models"), /insecure transport/);
+  assert.equal(network.mock.callCount(), 0);
 });
 
-test("ApiClient with no token does not throw the insecure-transport guard", async () => {
-  // Empty token store → no Authorization header → guard is skipped. The call will
-  // fail at the network layer, but it must NOT be the InsecureTransportError.
+test("ApiClient with no token skips the transport guard without network access", async (t) => {
+  // Validate the request at an entirely in-process fetch boundary. A DNS or
+  // HTTP failure cannot prove which credential headers would have been sent.
+  const network = t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    assert.equal(new Headers(init?.headers).has("authorization"), false);
+    return new Response(JSON.stringify({ models: [] }), { status: 200 });
+  });
   const api = new ApiClient("http://evil.example.com", new StaticTokenStore(""));
-  await assert.rejects(
-    () => api.getJson("/models"),
-    (err: unknown) => !/insecure transport/.test(String((err as Error)?.message)),
-  );
+  assert.deepEqual(await api.getJson("/models"), { models: [] });
+  assert.equal(network.mock.callCount(), 1);
 });

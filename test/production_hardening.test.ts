@@ -55,6 +55,7 @@ const pack: PackReport = {
     "node_modules/aether-ats-skills/package.json",
     "node_modules/aether-ats-skills/src/index.js",
     "node_modules/aether-ats-skills/src/browser.js",
+    "node_modules/aether-ats-skills/src/browser_recovery.js",
     "node_modules/aether-ats-skills/src/browser_transport.js",
     "node_modules/aether-ats-skills/src/vision_skill.js",
     "node_modules/aether-ats-skills/src/settings.js",
@@ -65,7 +66,7 @@ const pack: PackReport = {
     "node_modules/aether-context/package.json",
     "node_modules/aether-context/bin/aether-context.js",
     "packages/ats-skills-source.json",
-    ...["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"].map((path) => `packages/ats-skills/${path}`),
+    ...["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"].map((path) => `packages/ats-skills/${path}`),
   ].map((path) => ({ path, size: 1 })),
 };
 
@@ -86,6 +87,8 @@ test("release manifest binds the tag and exact bundled runtime dependency contra
 test("package must contain the reviewed ATS/browser/context runtime and no other bundled package", () => {
   const missing = { ...pack, files: pack.files.filter((file) => file.path !== "node_modules/aether-browser/src/index.js") };
   assert.match(validatePack(missing, manifest).join("\n"), /missing bundled runtime entry/);
+  const withoutRecovery = { ...pack, files: pack.files.filter((file) => file.path !== "node_modules/aether-ats-skills/src/browser_recovery.js") };
+  assert.match(validatePack(withoutRecovery, manifest).join("\n"), /missing ATS runtime file src\/browser_recovery.js/);
   const extra = { ...pack, files: [...pack.files, { path: "node_modules/unreviewed/index.js", size: 1 }] };
   assert.match(validatePack(extra, manifest).join("\n"), /unexpected package content/);
   const secret = { ...pack, files: [...pack.files, { path: "node_modules/aether-ats-skills/.env", size: 1 }] };

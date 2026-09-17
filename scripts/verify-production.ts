@@ -57,7 +57,7 @@ const ALLOWED_PUBLIC_ASSETS = new Set<string>(REQUIRED_PUBLIC_ASSETS);
 
 const MAX_UNPACKED_BYTES = 5_000_000;
 const ATS_DEPENDENCY = { "aether-ats-skills": "file:packages/ats-skills" };
-const ATS_SOURCE_FILES = ["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"];
+const ATS_SOURCE_FILES = ["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"];
 const RUNTIME_PACKAGES = {
   "aether-ats-skills": { version: "0.1.0", entry: "src/index.js" },
   "aether-browser": { version: "0.2.2", entry: "src/index.js" },
@@ -179,7 +179,7 @@ export function validatePack(report: PackReport, manifest: PackageManifest): str
     if (roots.length !== 1) errors.push(`package must bundle exactly one ${name} manifest`);
     for (const prefix of roots) if (!paths.has(`${prefix}${RUNTIME_PACKAGES[name].entry}`)) errors.push(`package is missing bundled runtime entry ${prefix}${RUNTIME_PACKAGES[name].entry}`);
   }
-  for (const path of ["src/browser.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"]) {
+  for (const path of ["src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"]) {
     if (!paths.has(`node_modules/aether-ats-skills/${path}`)) errors.push(`package is missing ATS runtime file ${path}`);
   }
   for (const path of ["packages/ats-skills-source.json", ...ATS_SOURCE_FILES.map((file) => `packages/ats-skills/${file}`)]) {

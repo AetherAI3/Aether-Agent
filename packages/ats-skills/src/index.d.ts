@@ -1,6 +1,6 @@
-export interface NativeOptions { python?: string; env?: Record<string, string | undefined>; }
-export interface MemoryOptions extends NativeOptions { agentId: string; directory: string; sizeGb: number; bootstrap?: boolean; }
-export interface MemoryReceipt extends Record<string, unknown> { state: "ready" | "unavailable"; agent_id?: string; directory?: string; size_gb?: number; ceiling_bytes?: number; persistence_verified?: boolean; }
+export interface NativeOptions { python?: string; env?: Record<string, string | undefined>; signal?: AbortSignal; }
+export interface MemoryOptions extends NativeOptions { agentId: string; directory: string; sizeGb: number; bootstrap?: boolean; ownerScope?: { cloudOrigin: string; accountSubject: string }; }
+export interface MemoryReceipt extends Record<string, unknown> { state: "ready" | "unavailable"; agent_id?: string; directory?: string; size_gb?: number; ceiling_bytes?: number; persistence_verified?: boolean; runtime_version?: string; code?: string; lock_scope?: "ats_setup_only"; runtime_exclusivity_verified?: false; verification_kind?: "native_pool_init_and_snapshot_reopen" | "persisted_snapshot_reopen"; owner_scope?: { account_subject: string; cloud_origin: string }; }
 export interface StrategyRecord { file: string; state: "compiled" | "rejected" | "needs_conversion" | "unavailable"; source_sha256?: string; source_bytes?: number; code?: string; diagnostics?: Array<{line: number; column: number; message: string; severity: string}>; [key: string]: unknown; }
 export interface StrategyScan extends Record<string, unknown> { state: "scanned"; directory: string; compiler: "native_ats" | "unavailable"; strategies: StrategyRecord[]; execution_enabled: false; recursive: false; }
 export declare function initializeMemory(options: MemoryOptions): Promise<MemoryReceipt>;
@@ -11,14 +11,25 @@ export interface BrowserObservation {
   screenshotBytes: number; width: number; height: number;
 }
 export interface BrowserStatus { state: string; sessionId: string | null; viewUrl: string | null; viewerState: string; ageMs: number | null; visionStepsRemaining: number | null; expiresAt: string | null; observation: BrowserObservation | null; }
+export interface BrowserRecoveryOwner { origin: string; accountSubject: string; agentId: string; deviceId: string; }
+export interface BrowserRecoveryStatus { state: "none" | "opening" | "owned" | "cleanup_required" | "closed" | "expired"; pending: boolean; sessionId: string | null; expiresAt: string | null; baseUrl: string; outcome: string | null; }
+export declare class BrowserSessionRecovery {
+  constructor(options: { directory: string; owner: BrowserRecoveryOwner; baseUrl: string; now?: () => number });
+  status(): Promise<BrowserRecoveryStatus>;
+  begin(options: { maxVisionSteps: number; maxAgeMs: number }): Promise<void>;
+  record(session: { id: string; createdAt: string; expiresAt: string; maxVisionSteps: number }): Promise<void>;
+  markCleanupRequired(): Promise<void>;
+  reconcile(browser: unknown, options?: { signal?: AbortSignal }): Promise<BrowserRecoveryStatus>;
+}
 export declare class AtsBrowserObserver {
-  constructor(options: { browser: unknown; baseUrl: string; maxVisionSteps?: number; maxAgeMs?: number; now?: () => number });
+  constructor(options: { browser: unknown; baseUrl: string; maxVisionSteps?: number; maxAgeMs?: number; now?: () => number; recovery?: BrowserSessionRecovery });
   open(options?: { signal?: AbortSignal }): Promise<{ sessionId: string; viewUrl: string | null; state: string }>;
   snapshot(options?: { signal?: AbortSignal }): Promise<unknown>;
   close(): Promise<void>;
+  reconcile(options?: { signal?: AbortSignal }): Promise<BrowserRecoveryStatus | undefined>;
   status(): BrowserStatus;
 }
-export declare function createBrowserObserver(options?: { env?: Record<string,string | undefined>; maxVisionSteps?: number; maxAgeMs?: number }): Promise<AtsBrowserObserver>;
+export declare function createBrowserObserver(options?: { env?: Record<string,string | undefined>; maxVisionSteps?: number; maxAgeMs?: number; recovery?: BrowserSessionRecovery }): Promise<AtsBrowserObserver>;
 export declare function observeBrowser(observer: AtsBrowserObserver, options?: { intervalMs?: number; signal?: AbortSignal }): AsyncGenerator<unknown>;
 export declare function createBrowserFetch(options?: { fetch?: typeof globalThis.fetch; timeoutMs?: number; maxResponseBytes?: number }): typeof globalThis.fetch;
 export interface BrowserVisualContext {

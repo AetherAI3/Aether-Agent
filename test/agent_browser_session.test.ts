@@ -148,6 +148,52 @@ test("a delayed viewer launch cannot write after session cleanup", async () => {
   assert.equal(closing, 1); assert.equal(output, saved);
 });
 
+test("durable prior cleanup blocks open until explicit reconciliation and updates the context bar", async () => {
+  let pending = true, opens = 0, reconciles = 0, closes = 0, output = "";
+  const states: string[] = [];
+  const owner = { origin: "https://cloud.example", accountSubject: "account", agentId: "agent", deviceId: "device" };
+  const observer: AgentBrowserObserver = {
+    open: async () => { assert.equal(pending, false); opens++; return {state:"connected",viewUrl:null}; },
+    reconcile: async () => { reconciles++; pending = false; },
+    close: async () => { closes++; }, snapshot: async () => ({}), status: () => ({state:"connected"}),
+  };
+  const session = new AgentBrowserSession({env:{},output:text => {output+=text;},recovery:{directory:"/private/browser",owner},onStatus:state=>states.push(state),
+    load:async()=>({BrowserSessionRecovery:class { async status() {return {pending,state:pending?"cleanup_required":"closed"};} },
+      createBrowserObserver:async input=>{assert.ok(input?.["recovery"]);return observer;},observeBrowser:async function*(){}})});
+  try {
+    await session.command("/browser open");
+    assert.equal(opens,0);assert.equal(reconciles,0);assert.equal(session.status().state,"cleanup-required");
+    await session.command("/browser open");assert.equal(opens,0);
+    await session.command("/browser retry");
+    assert.equal(reconciles,1);assert.equal(opens,1);assert.equal(closes,1);
+    assert.ok(states.includes("cleanup-required"));assert.match(output,/previous browser session/);
+  } finally {await session.close();}
+});
+
+test("uncertain cleanup survives closing chat and rejects replacement with actionable status", async () => {
+  let opens = 0, output = "";
+  const session = new AgentBrowserSession({env:{},output:text=>{output+=text;},recovery:{directory:"/private/browser",owner:{origin:"https://cloud.example",accountSubject:"account",agentId:"agent",deviceId:"device"}},
+    load:async()=>({BrowserSessionRecovery:class{async status(){return {pending:true,state:"cleanup_required"};}},
+      createBrowserObserver:async()=>({open:async()=>{opens++;return {state:"connected",viewUrl:null};},
+        reconcile:async()=>{throw Object.assign(new Error("private runtime details"),{code:"BROWSER_RECOVERY_UNKNOWN_CREATE"});},
+        close:async()=>{},snapshot:async()=>({}),status:()=>({state:"closed"})}),observeBrowser:async function*(){}})});
+  await session.command("/browser open");await session.command("/browser retry");
+  assert.equal(opens,0);assert.equal(session.status().state,"cleanup-required");
+  assert.match(output,/automatic replacement is blocked/);assert.doesNotMatch(output,/private runtime details/);
+  await session.close();assert.equal(session.status().state,"cleanup-required");
+});
+
+test("legacy uncertain receipt is cleanup-required even when preparation cannot create an observer", async () => {
+  let created=0,output="";
+  const session = new AgentBrowserSession({env:{},output:text=>{output+=text;},recovery:{directory:"/private/browser",owner:{origin:"https://cloud.example",accountSubject:"account",agentId:"agent",deviceId:"device"}},
+    load:async()=>({BrowserSessionRecovery:class{async status():Promise<{pending:boolean;state:string}>{throw Object.assign(new Error("hidden storage details"),{code:"BROWSER_RECOVERY_UNKNOWN_CREATE"});}},
+      createBrowserObserver:async()=>{created++;throw new Error("must not create");},observeBrowser:async function*(){}})});
+  await session.command("/browser open");assert.equal(session.status().state,"cleanup-required");
+  await session.command("/browser stop");assert.equal(created,0);
+  assert.match(output,/Idle health cannot release it/);assert.doesNotMatch(output,/hidden storage details|Browser unavailable/);
+  await session.close();assert.equal(session.status().state,"cleanup-required");
+});
+
 async function realObserverCtor(): Promise<new (options: Record<string, unknown>) => AgentBrowserObserver> {
   const dependency = "aether-ats-skills";
   return (await import(dependency)).AtsBrowserObserver;

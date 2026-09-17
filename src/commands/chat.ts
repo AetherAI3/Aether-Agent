@@ -1020,6 +1020,7 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
   // but repaint is suppressed — a mid-stream "\r\x1b[2K" would stomp the line
   // the answer is currently streaming onto.
   let busy = false;
+  let setupOwnsInput = false;
   const renderHudLine = (): void => {
     if (!process.stdout.isTTY) return;
     const reg = getRegistry();
@@ -1317,6 +1318,8 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
       busy = true;
       if (t.startsWith("/")) {
         slashAbort = new AbortController();
+        setupOwnsInput = /^\/agent-create\s+ATS(?:\s|$)/i.test(t);
+        if (setupOwnsInput) process.stdout.write("\x1b[?2004l");
         try {
           const res = await handleSlash(ctx, t, process.stdout, slashAbort.signal);
           if (res.exit) {
@@ -1335,6 +1338,8 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
             printError(err, ctx.cfg.baseUrl);
           }
         } finally {
+          if (setupOwnsInput) process.stdout.write("\x1b[?2004h");
+          setupOwnsInput = false;
           busy = false;
           slashAbort = null;
         }
@@ -1575,6 +1580,7 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
     // decoded as two replacement chars.
     const decoder = new StringDecoder("utf8");
     const onData = (chunk: Buffer): void => {
+      if (setupOwnsInput) { if (chunk.includes(3)) slashAbort?.abort(); return; }
       let data = carry + decoder.write(chunk);
       carry = "";
       const partial = PARTIAL_ESC_RE.exec(data);
@@ -1583,6 +1589,7 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
         data = data.slice(0, partial.index);
       }
       for (const seq of splitKeys(data)) {
+        if (setupOwnsInput) break;
         processSeq(seq);
       }
     };

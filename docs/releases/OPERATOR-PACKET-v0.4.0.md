@@ -11,10 +11,10 @@ before evaluating release readiness.
 | Proposed tag | `v0.4.0` |
 | Release scope | Shared Cloud managed-agent inventory, creation, customization and Online DM chat; guided ATS device setup, native strategy preparation and bounded browser observation. |
 | Version decision | A minor release for the new account-agent workflow and bundled ATS runtime dependency. |
-| Source identity | Canonical ATS adapter commit `eaf11bf367dd6aeb7ba354e59d8cfb4a84b3387a`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
+| Source identity | Canonical ATS adapter commit `d6909b55c99f70ffe389d01b83b5b537fea68d9a`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
 | Runtime dependency policy | Exactly `aether-ats-skills` 0.1.0 from `file:packages/ats-skills`, bundled into the CLI. Its exact registry dependencies are `aether-browser` 0.2.2 and `aether-context` 0.3.1. No additional runtime, optional or peer dependencies; no installation hooks. |
 | Source custody | ATS owns the canonical source. The Agent copy must match its recorded upstream source and digest; it is not a separate implementation. |
-| Required Cloud companion | `/agent/managed` terminal adapter with canonical account authentication, owner-scoped agents, revision checks, exact conversation binding and existing admission gates. |
+| Required Cloud companion | Cloud #1691 at `023c7a414e8b14dbeb096469226855a15bbdf2f3`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
 | Local prerequisites | The ATS Python engine and a reachable Agent Browser runtime are separate prerequisites. The npm context dependency is a launcher, not proof that Python memory is installed or verified. |
 | Platform evidence | Linux packed offline installation and CLI selftest passed in this workspace. Windows packed-install/terminal/browser qualification remains required. |
 | Archive evidence | Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending. |
@@ -85,6 +85,34 @@ command, not through a second agent registry.
 - `aether config`
 
 ## Local validation record
+
+### LOOP-16 v2 follow-up
+
+- Four isolated builders completed before sequential collection; independent
+  review reproduced and drove fixes for corrupt-vector readiness, delayed
+  browser creation, cleanup persistence, and account-switch races.
+- Integrated ATS package: **103 passed, zero skipped**, using actual Context
+  0.3.1 and native ATS/Nano. Hosted `ats-skills / node-native` also passed at
+  `d6909b55c99f70ffe389d01b83b5b537fea68d9a` (run 35277715410).
+- Cloud: **204 independently rerun tests passed**, including canonical full
+  OpenAPI regeneration. Account integration: **68 focused tests passed**;
+  browser controller: **16 tests passed**. Final Agent full-suite and package
+  results belong to the current PR handoff, not these earlier subsets.
+- LF-pinned adapter bytes pass the vendor digest gate in a fresh
+  `core.autocrlf=true` checkout. This is newline conversion evidence, not an
+  actual Windows native-runtime or viewer qualification.
+- Memory setup validates native persisted structure and original-byte
+  preservation; its kernel lock covers ATS setup only. Direct Context writers
+  still need a shared runtime lease before connected execution.
+- Typed profiles replace prompt-marker detection. Legacy ownerless bindings,
+  create intents and idle-only browser closures are retained and refused for
+  silent migration. Unknown browser creation requires owner reconciliation;
+  cleanup does not guess from health, expiry or PID death.
+- One admitted Cloud-to-local ATS tool run, multimodal model delivery, data
+  probes, strategy activation and runtime-confirmed permission changes remain
+  separate implementation/qualification gates. Local setup does not enable them.
+
+### Earlier candidate history
 
 - Native ATS package: 61 tests passed with zero skips using published Context 0.3.1, the existing pinned Nano compiler, and the actual ATS compile seam. Browser/transport/visual subset: 34 passed. Full-pool memory preservation and process-tree cleanup regressions passed.
 - Agent terminal/controller/managed suites: 45 tests passed; manifest/slash/generated-doc suites: 48 passed; release/package/coherence/public-document suites: 65 passed. Build and all six generated documentation checks passed.

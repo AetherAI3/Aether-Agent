@@ -29,7 +29,9 @@ export type AsyncRun = (cmd: string, args: readonly string[], cwd?: string) => P
 export function spawnAsyncRun(): AsyncRun {
   return (cmd, args, cwd) =>
     new Promise<RunResult>((resolve) => {
-      const child = spawn(cmd, [...args], { cwd, shell: false });
+      // AsyncRun accepts no input. Use the null device for stdin so a child
+      // exiting before this process resumes cannot leave a broken write pipe.
+      const child = spawn(cmd, [...args], { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";
       child.stdout.setEncoding("utf8");
@@ -42,7 +44,6 @@ export function spawnAsyncRun(): AsyncRun {
       });
       child.on("error", (err: Error) => resolve({ status: 127, stdout, stderr: err.message }));
       child.on("close", (code) => resolve({ status: code ?? 1, stdout, stderr }));
-      child.stdin.end("");
     });
 }
 
