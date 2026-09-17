@@ -1,0 +1,14 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "AetherReleaseNotesCandidateUnattached",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "HAS_RELEASE_CANDIDATE", "operator": ">=", "value": 1 },
+    { "type": "Condition", "signal": "HAS_SOURCE_ATTACHMENT", "operator": "<=", "value": 0 },
+    { "type": "Condition", "signal": "PENDING_AGE_SECONDS", "operator": ">=", "value": 3600 },
+    { "type": "Intent", "action": "OBSERVE" },
+    { "type": "Agent", "name": "ReleaseDesk" }
+  ]
+}

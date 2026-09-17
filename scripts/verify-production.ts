@@ -57,9 +57,9 @@ const ALLOWED_PUBLIC_ASSETS = new Set<string>(REQUIRED_PUBLIC_ASSETS);
 
 const MAX_UNPACKED_BYTES = 5_000_000;
 const ATS_DEPENDENCY = { "aether-ats-skills": "file:packages/ats-skills" };
-const ATS_SOURCE_FILES = ["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"];
+const ATS_SOURCE_FILES = ["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"];
 const RUNTIME_PACKAGES = {
-  "aether-ats-skills": { version: "0.1.0", entry: "src/index.js" },
+  "aether-ats-skills": { version: "0.2.0", entry: "src/index.js" },
   "aether-browser": { version: "0.2.2", entry: "src/index.js" },
   "aether-context": { version: "0.3.1", entry: "bin/aether-context.js" },
 } as const;
@@ -76,8 +76,14 @@ function runtimeRoots(name: keyof typeof RUNTIME_PACKAGES): string[] {
 }
 
 function allowedRuntimePath(path: string): boolean {
+  const strategyAsset = (relative: string): boolean => relative === "strategies/catalog.json" || relative === "strategies/NANO-LICENSE"
+    || relative === "strategies/NANO-STRATEGY-LIBRARY.md" || relative === "strategies/manifest.json"
+    || /^strategies\/library\/[a-z0-9_]+\/[a-z0-9_]+(?:_ir\.json|\.nano)$/.test(relative);
   if (path === "packages/ats-skills-source.json") return true;
-  if (path.startsWith("packages/ats-skills/")) return ATS_SOURCE_FILES.includes(path.slice("packages/ats-skills/".length));
+  if (path.startsWith("packages/ats-skills/")) {
+    const relative = path.slice("packages/ats-skills/".length);
+    return ATS_SOURCE_FILES.includes(relative) || strategyAsset(relative);
+  }
   for (const name of Object.keys(RUNTIME_PACKAGES) as (keyof typeof RUNTIME_PACKAGES)[]) {
     for (const prefix of runtimeRoots(name)) {
       if (!path.startsWith(prefix)) continue;
@@ -86,7 +92,7 @@ function allowedRuntimePath(path: string): boolean {
       if (name === "aether-ats-skills" && relative === "SETTINGS.md") return true;
       if (name === "aether-context") return relative === "bin/aether-context.js";
       if (/^src\/[A-Za-z0-9_-]+\.(?:js|d\.ts)$/.test(relative)) return true;
-      if (name === "aether-ats-skills" && ["python/bridge.py", "bin/aether-ats-skills.js"].includes(relative)) return true;
+      if (name === "aether-ats-skills" && (["python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"].includes(relative) || strategyAsset(relative))) return true;
     }
   }
   return false;
@@ -179,7 +185,7 @@ export function validatePack(report: PackReport, manifest: PackageManifest): str
     if (roots.length !== 1) errors.push(`package must bundle exactly one ${name} manifest`);
     for (const prefix of roots) if (!paths.has(`${prefix}${RUNTIME_PACKAGES[name].entry}`)) errors.push(`package is missing bundled runtime entry ${prefix}${RUNTIME_PACKAGES[name].entry}`);
   }
-  for (const path of ["src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"]) {
+  for (const path of ["src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "strategies/manifest.json", "strategies/catalog.json", "bin/aether-ats-skills.js"]) {
     if (!paths.has(`node_modules/aether-ats-skills/${path}`)) errors.push(`package is missing ATS runtime file ${path}`);
   }
   for (const path of ["packages/ats-skills-source.json", ...ATS_SOURCE_FILES.map((file) => `packages/ats-skills/${file}`)]) {

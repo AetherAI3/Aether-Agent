@@ -6,14 +6,18 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { AtsBrowserObserver, validateBrowserUrl } from "./browser.js";
 import { createBrowserFetch } from "./browser_transport.js";
+import { startMemoryLease } from "./memory_lease.js";
 export { AtsBrowserObserver, validateBrowserUrl, observeBrowser } from "./browser.js";
 export { BrowserSessionRecovery } from "./browser_recovery.js";
 export { createBrowserFetch } from "./browser_transport.js";
 export { createBrowserVisionSkill } from "./vision_skill.js";
+export { listBundledStrategies, installBundledStrategies, NANO_LIBRARY_REVISION, STARTER_STRATEGIES } from "./strategy_library.js";
+export { appendJournalEvent, readJournal, formatJournal } from "./journal.js";
 export * from "./settings.js";
 
 const require = createRequire(import.meta.url);
 const bridge = fileURLToPath(new URL("../python/bridge.py", import.meta.url));
+const memoryLeaseHelper = fileURLToPath(new URL("../python/memory_lease.py", import.meta.url));
 const MAX_OUTPUT = 4 * 1024 * 1024;
 
 function abortError() { return Object.assign(new Error("ATS native operation cancelled."), { name: "AbortError" }); }
@@ -133,6 +137,14 @@ export async function initializeMemory(options) {
 export async function scanStrategies(options) {
   if (!options || !isAbsolute(options.directory || "")) throw new Error("Choose an absolute strategy directory.");
   return native("scan_strategies", options);
+}
+
+/** Hold the real runtime writer lock for the lifetime of the returned lease. */
+export async function acquireMemoryWriterLease(options) {
+  if (!options || !isAbsolute(options.directory || "")) throw new Error("Choose an absolute memory directory.");
+  const env = options.env || process.env;
+  const python = await pythonCommand(options.python, env, options.signal);
+  return startMemoryLease({ ...options, command: python.command, args: python.args, helper: memoryLeaseHelper, env });
 }
 
 /** The observer deliberately exposes no click, trade or arbitrary browser action API. */

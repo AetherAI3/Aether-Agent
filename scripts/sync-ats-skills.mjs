@@ -38,11 +38,11 @@ if (process.argv[2] === '--check') {
   const source = resolve(sourceArg);
   if ((await lstat(source)).isSymbolicLink() || source === target) throw new Error('Choose the canonical ATS adapter source.');
   const pkg = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'));
-  if (pkg.name !== 'aether-ats-skills' || pkg.version !== '0.1.0' || pkg.license !== 'Apache-2.0'
+  if (pkg.name !== 'aether-ats-skills' || pkg.version !== '0.2.0' || pkg.license !== 'Apache-2.0'
       || pkg.dependencies?.['aether-browser'] !== '0.2.2' || pkg.dependencies?.['aether-context'] !== '0.3.1') throw new Error('Unexpected ATS adapter contract.');
   const selected = [];
   for (const path of ['package.json', 'README.md', 'LICENSE', 'SETTINGS.md']) selected.push(path);
-  for (const dir of ['src', 'python', 'bin']) selected.push(...(await files(join(source, dir))).map(path => `${dir}/${path}`));
+  for (const dir of ['src', 'python', 'bin', 'strategies']) selected.push(...(await files(join(source, dir))).map(path => `${dir}/${path}`));
   const contents = new Map();
   for (const path of selected.sort()) {
     const stat = await lstat(join(source, path));

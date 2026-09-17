@@ -1,0 +1,14 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "SupertrendFlipLong",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "15m" },
+    { "type": "Condition", "signal": "SUPERTREND_FLIP_BULL", "operator": ">=", "value": 1 },
+    { "type": "Condition", "signal": "ATR_PCT", "operator": ">=", "value": 0.05 },
+    { "type": "Condition", "signal": "STOP_DISTANCE_ATR", "operator": ">=", "value": 0.5 },
+    { "type": "Condition", "signal": "TARGET_R", "operator": ">=", "value": 2.33 },
+    { "type": "Intent", "action": "BUY", "asset": "MNQ", "confidence": 0.7 }
+  ]
+}

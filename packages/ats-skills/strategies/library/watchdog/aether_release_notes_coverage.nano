@@ -1,0 +1,50 @@
+// Merge-coverage guard: hold release-note publication whenever the host's scan
+// of merged pull requests is anything other than a completed scan. The host
+// publishes its five-value coverage vocabulary as five independent 0/1 facts -
+// MERGE_COVERAGE_AVAILABLE, _EMPTY, _UNAVAILABLE, _ERROR, _STALE - exactly one
+// of which is 1 on any bar. `empty` means the forge answered and there was
+// nothing to count; `unavailable` and `error` mean it did not answer.
+// The rule names the two states that PERMIT publication and holds on
+// everything else. That is an allow-list, and it is the whole point: a sixth
+// coverage state added to the host tomorrow publishes 0 for both of these and
+// is held, where a rule naming _UNAVAILABLE / _ERROR / _STALE would wave the
+// new state straight through. Same posture as WATCHDOG_OPS in
+// nano/watchdog/profile.py, adopted here for the same reason.
+// This rule gates release-note publication and nothing else. It must never be
+// wired to a branch, a deploy, or an engineering merge: "the merge list could
+// not be read" is not a reason to stop shipping software, only a reason to
+// stop claiming the notes cover everything that shipped.
+// REGIME: all of them. Coverage is a property of the host's own scan, not of
+// whatever the scan is looking at.
+// CONDITIONS: the host publishes exactly one coverage fact as 1 on every bar,
+// and derives it from the API response rather than from the parsed result. An
+// error path that returns an empty list must publish MERGE_COVERAGE_ERROR and
+// never MERGE_COVERAGE_EMPTY - that substitution is the outage this rule
+// exists to catch.
+// INVALIDATION: the scan completing. The rule does not latch and does not
+// decide when the hold ends; the host does.
+// SHAPE: 5m, the cadence the merge scan itself runs on. Reading coverage
+// faster than the scan that produces it only re-reads the same answer.
+// NOT aether_release_notes_batch_unaccounted: that rule reads the count and
+// fires when the scan worked and found merges nobody wrote up. This one fires
+// when there is no trustworthy count to read, and it deliberately does not
+// read the count - an outage must never arrive at the batch rule as a zero.
+// CALIBRATED ON: nothing numeric; both comparisons are against the host's own
+// booleans. What does not travel is the vocabulary itself. A host with a
+// different set of coverage states publishes its own and re-derives which of
+// them are complete scans before reusing this rule.
+strategy AetherReleaseNotesCoverage {
+
+    agent ReleaseDesk
+
+    every 5m {
+
+        if MERGE_COVERAGE_AVAILABLE <= 0 and MERGE_COVERAGE_EMPTY <= 0 {
+
+            pause()
+
+        }
+
+    }
+
+}

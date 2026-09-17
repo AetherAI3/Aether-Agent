@@ -1,0 +1,30 @@
+// Donchian channel breakout. DONCHIAN_POS = (close - lower) / (upper - lower)
+// over the 20-period channel, provided by the host data feed.
+// A value at or above 1 means close broke the prior 20-period high.
+// REGIME: expansion. Do NOT fire in a range - inside a range the 20-period
+// high IS the range ceiling, so every touch mean-reverts and this becomes a
+// systematic top-buyer. Range versus expansion is the whole decision here.
+// CONDITIONS: a prior contraction to break out of, and participation behind
+// the break (rising volume or range).
+// INVALIDATION: a close back inside the channel. A breakout that does not hold
+// is a failed breakout and usually resolves the other way.
+// SHAPE: 1d; a clean push through a flat multi-week ceiling.
+// NOT bb_squeeze_breakout: that anticipates expansion while still compressed;
+// this confirms expansion once it has begun. Sequence, not synonym - if both
+// fire, the squeeze fired first and this is its confirmation.
+// CALIBRATED ON: crypto, daily. DONCHIAN_POS is scale-free, so the threshold
+// travels cleanly; what does not travel is the gap behaviour of a
+// session-bound instrument, where the open can clear the channel outright.
+strategy DonchianBreakout {
+
+    every 1d {
+
+        if DONCHIAN_POS(20) >= 1 {
+
+            buy(ETHUSD, 0.8)
+
+        }
+
+    }
+
+}

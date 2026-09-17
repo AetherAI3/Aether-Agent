@@ -222,7 +222,7 @@ export function packageClaimsFromFiles(files: Readonly<Record<string, string>>):
         if (item === "packages/ats-skills") {
           claims.push({ id: "package.json#files:packages/ats-skills", source: "package.json#files", requiredPaths: [
             "package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts",
-            "src/browser.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js",
+            "src/browser.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "strategies/manifest.json", "strategies/catalog.json", "bin/aether-ats-skills.js",
           ].map((path) => `packages/ats-skills/${path}`) });
           continue;
         }

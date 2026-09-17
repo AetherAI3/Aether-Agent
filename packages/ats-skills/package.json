@@ -1,6 +1,6 @@
 {
   "name": "aether-ats-skills",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Aether ATS setup, native Nano strategy preparation and verified local context adapters.",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
   "types": "./src/index.d.ts",
   "exports": { ".": { "types": "./src/index.d.ts", "import": "./src/index.js" } },
   "bin": { "aether-ats-skills": "bin/aether-ats-skills.js" },
-  "files": ["src", "python/bridge.py", "bin", "README.md", "SETTINGS.md", "LICENSE"],
+  "files": ["src", "python/bridge.py", "python/memory_lease.py", "strategies", "bin", "README.md", "SETTINGS.md", "LICENSE"],
   "engines": { "node": ">=20" },
   "scripts": { "test": "node --test test/*.test.mjs", "check": "node --check src/index.js && node --check bin/aether-ats-skills.js" },
   "dependencies": { "aether-browser": "0.2.2", "aether-context": "0.3.1" },

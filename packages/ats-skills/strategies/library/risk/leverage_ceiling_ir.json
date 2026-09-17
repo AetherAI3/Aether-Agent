@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "LeverageCeiling",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "GROSS_LEVERAGE", "operator": ">=", "value": 3 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "RiskDesk" }
+  ]
+}

@@ -1,0 +1,39 @@
+// Uncovered-merge alert: raise for review when a change lands on the canonical
+// branch of the canonical repository and no release candidate covers it yet.
+// MERGED, CANONICAL_REPOSITORY and CANONICAL_BASE are the host's 0/1 facts
+// about the pull request being examined; IS_RELEASE_NOTES_PR is 1 for the
+// release-note pull request itself, which is excluded because a release note
+// describing itself is not coverage; HAS_RELEASE_CANDIDATE is 1 once some
+// draft release note mentions this merge.
+// REGIME: all of them. This is bookkeeping about a merge that already
+// happened, not a forecast about anything.
+// CONDITIONS: the host has decided which repository and which base branch are
+// canonical before publishing these facts. Both are policy, and a host that
+// publishes 1 for every repository turns this rule into noise.
+// INVALIDATION: a release candidate picking the merge up. HAS_RELEASE_CANDIDATE
+// goes to 1 and the rule stops firing, with no memory of having fired - the
+// host owns the follow-up, not this rule.
+// SHAPE: 5m; merges arrive when they arrive, and five minutes is fast enough
+// that the author is still around to answer.
+// NOT aether_release_notes_batch_unaccounted: that one reads the batch-scope
+// count and proposes a hold on publication. This one looks at a single merge
+// and deliberately only observes - a missing changelog line is a thing to
+// notice, not a thing to stop the world over.
+// CALIBRATED ON: nothing numeric; every comparison is against a host boolean.
+// What does not travel is the canonical repository and base, which are
+// per-programme decisions and belong to whoever runs the release.
+strategy AetherReleaseNotesUncoveredMerge {
+
+    agent ReleaseDesk
+
+    every 5m {
+
+        if MERGED >= 1 and CANONICAL_REPOSITORY >= 1 and CANONICAL_BASE >= 1 and IS_RELEASE_NOTES_PR <= 0 and HAS_RELEASE_CANDIDATE <= 0 {
+
+            observe()
+
+        }
+
+    }
+
+}

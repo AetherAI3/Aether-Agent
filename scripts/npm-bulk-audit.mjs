@@ -18,7 +18,7 @@ const MAX_REQUEST_BYTES = 1_000_000;
 const ATS_NAME = "aether-ats-skills";
 const ATS_LOCATION = `node_modules/${ATS_NAME}`;
 const ATS_TARGET = "packages/ats-skills";
-const ATS_VERSION = "0.1.0";
+const ATS_VERSION = "0.2.0";
 const ATS_DEPENDENCIES = Object.freeze({ "aether-browser": "0.2.2", "aether-context": "0.3.1" });
 
 function isRecord(value) {

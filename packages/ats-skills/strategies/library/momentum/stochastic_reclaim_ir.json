@@ -1,0 +1,30 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "1.0.0",
+  "name": "StochasticReclaim",
+  "tier": "nano",
+  "determinism": {"clock": "injected", "entropy": "injected", "fastmath": false},
+  "params": [{"name": "window", "type": "int", "value": 14}, {"name": "oversold", "type": "float", "value": 20.0}],
+  "inputs": [{"name": "high", "type": "series<float>"}, {"name": "low", "type": "series<float>"}, {"name": "close", "type": "series<float>"}],
+  "warmup": 14,
+  "entries": ["n14"],
+  "provenance": {"compiler": {"name": "nnc", "version": "1.0.0"}, "sourceHash": "sha256:d05c9495b69e02f8d08e858d91c092bca0bd3c85be8f0973b6f8cd9bddce9cb9"},
+  "moduleHash": "sha256:4cf75200e6085b91ef76f0c1a3667821cd385c17a579b1cc7eea60da1300dea7",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "id": "n1", "op": "input.ref", "inputs": [], "attrs": {"name": "high"}, "type": "series<float>" },
+    { "id": "n2", "op": "input.ref", "inputs": [], "attrs": {"name": "low"}, "type": "series<float>" },
+    { "id": "n3", "op": "input.ref", "inputs": [], "attrs": {"name": "close"}, "type": "series<float>" },
+    { "id": "n4", "op": "indicator", "inputs": ["n1", "n2", "n3"], "attrs": {"name": "STOCH_K", "periods": [14], "lookback": 13, "lifted": false}, "type": "series<float>" },
+    { "id": "n5", "op": "let", "inputs": ["n4"], "attrs": {"name": "k"}, "type": "series<float>" },
+    { "id": "n6", "op": "schedule", "inputs": [], "attrs": {"interval": "1h"} },
+    { "id": "n7", "op": "param.ref", "inputs": [], "attrs": {"name": "oversold"}, "type": "float" },
+    { "id": "n8", "op": "compare.ge", "inputs": ["n5", "n7"], "type": "series<bool>" },
+    { "id": "n9", "op": "series.index", "inputs": ["n5"], "attrs": {"offset": 1}, "type": "series<float>" },
+    { "id": "n10", "op": "compare.lt", "inputs": ["n9", "n7"], "type": "series<bool>" },
+    { "id": "n11", "op": "logic.and", "inputs": ["n8", "n10"], "type": "series<bool>" },
+    { "id": "n12", "op": "intent.emit", "inputs": [], "attrs": {"action": "BUY", "asset": "BTCUSD", "confidence": 0.6} },
+    { "id": "n13", "op": "block", "inputs": ["n12"] },
+    { "id": "n14", "op": "rule", "inputs": ["n6", "n11", "n13"] }
+  ]
+}

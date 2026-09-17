@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "DonchianBreakout",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1d" },
+    { "type": "Condition", "signal": "DONCHIAN_POS", "operator": ">=", "value": 1 },
+    { "type": "Intent", "action": "BUY", "asset": "ETHUSD", "confidence": 0.8 }
+  ]
+}

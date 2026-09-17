@@ -1,0 +1,44 @@
+// Public-release copy guard: hold publication while a release note bound for a
+// public surface has copy nobody has validated. PUBLIC_CANDIDATE is 1 when the
+// candidate is going somewhere outside the organisation; COPY_VALIDATED is 1
+// once the text itself has passed whatever check the host requires - a human
+// read, a link check, a claims review.
+// This is the second half of PUBLIC_RELEASE_NOT_PROVEN. Baseline Nano IR
+// carries an and-chain and has no `or` node, so the disjunction "no proof or
+// no validated copy" is two entries; aether_release_notes_proof_missing is the
+// first. Both map to the same reason code, and deploying one without the other
+// deploys half a guard.
+// This rule gates release-note publication and nothing else. It must never be
+// wired to a branch, a deploy, or an engineering merge: unreviewed copy is a
+// reason not to publish a claim, never a reason to block engineering work.
+// REGIME: all of them, for public surfaces only. An internal candidate has
+// PUBLIC_CANDIDATE 0 and this rule is silent on it by construction.
+// CONDITIONS: the host publishes COPY_VALIDATED 0 until a validation has
+// actually run. A default of 1 makes this rule vacuous and the vacuity is
+// invisible from outside, because a rule that never fires and a rule with
+// nothing to report look identical.
+// INVALIDATION: the validation completing. The rule proposes a hold; it does
+// not latch and does not decide when the hold ends.
+// SHAPE: 5m, matching the rest of the release-note family so one batch is
+// evaluated by every rule on the same tick.
+// NOT aether_release_notes_proof_missing: that is the other half of the same
+// disjunction and asks whether the evidence can be fetched. This one asks
+// whether anybody read the words.
+// CALIBRATED ON: nothing numeric; both comparisons are against host booleans.
+// What does not travel is what validation means - a one-person read and a
+// formal claims review both publish the same 1, and the host owns which it is.
+strategy AetherReleaseNotesCopyUnvalidated {
+
+    agent ReleaseDesk
+
+    every 5m {
+
+        if PUBLIC_CANDIDATE >= 1 and COPY_VALIDATED <= 0 {
+
+            pause()
+
+        }
+
+    }
+
+}

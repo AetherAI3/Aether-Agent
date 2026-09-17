@@ -1,0 +1,32 @@
+// Bollinger squeeze breakout. BB_WIDTH = (upper - lower) / middle * 100
+// (band width percent); MOM = close - close[10] momentum. A tight squeeze
+// with positive momentum anticipates an upside expansion.
+// REGIME: contraction, on the edge of expansion. Do NOT fire once expansion is
+// already underway - by then the bands are wide, the edge is gone, and the
+// entry is late.
+// CONDITIONS: band width at the low end of its own recent range, and momentum
+// already leaning positive. The squeeze alone is directionless; MOM is what
+// picks the side, and it is the weaker half of the pair.
+// INVALIDATION: width expanding while price resolves downward. A squeeze
+// resolves in some direction, and being early is not the same as being right.
+// SHAPE: 1h; bands pinched to a narrow ribbon, price coiled against the top.
+// NOT bollinger_band_touch: same indicator, opposite regime - that one needs
+// the range to hold, this one is betting it breaks. NOT donchian_breakout:
+// this anticipates the expansion, that confirms it after the fact.
+// CALIBRATED ON: crypto, 1h. BB_WIDTH < 4 is an absolute percentage and does
+// NOT travel - band width percent scales with the instrument's own
+// volatility, so on a quieter instrument 4 percent is permanently satisfied
+// and the squeeze condition stops discriminating at all.
+strategy BbSqueezeBreakout {
+
+    every 1h {
+
+        if BB_WIDTH(20) < 4 and MOM(10) > 0 {
+
+            buy(BTCUSD, 0.7)
+
+        }
+
+    }
+
+}

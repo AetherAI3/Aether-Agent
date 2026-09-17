@@ -1,0 +1,28 @@
+// Bollinger lower-band touch. BB_PCT_B = (close - lower) / (upper - lower),
+// Pine's ta.bb %B, provided by the host data feed. Below 0 = close under
+// the lower band.
+// REGIME: range-bound with stable band width. Do NOT fire in a downtrend or a
+// volatility expansion - %B sits below 0 for long runs in a trend, and every
+// touch there is a knife-catch.
+// CONDITIONS: band width flat or contracting, and the prior swing low still
+// holding on the timeframe above.
+// INVALIDATION: a second consecutive close below the lower band, or band width
+// expanding while price falls. Both mean continuation, not reversion.
+// SHAPE: 1h; a wick piercing the lower band that closes back inside it.
+// NOT bb_squeeze_breakout: same indicator family, opposite intent. That one
+// enters on expansion out of compression; this one needs the range to hold.
+// CALIBRATED ON: US large-cap equity ETF, 1h. %B itself is scale-free, but
+// "band width is stable" is not - re-derive it for a new instrument class.
+strategy BollingerBandTouch {
+
+    every 1h {
+
+        if BB_PCT_B(20) <= 0 {
+
+            buy(SPY, 0.8)
+
+        }
+
+    }
+
+}

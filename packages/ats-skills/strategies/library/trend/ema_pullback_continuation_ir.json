@@ -1,0 +1,28 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "1.0.0",
+  "name": "EmaPullbackContinuation",
+  "tier": "nano",
+  "determinism": {"clock": "injected", "entropy": "injected", "fastmath": false},
+  "params": [{"name": "fast", "type": "int", "value": 20}, {"name": "slow", "type": "int", "value": 50}],
+  "inputs": [{"name": "close", "type": "series<float>"}],
+  "warmup": 49,
+  "entries": ["n12"],
+  "provenance": {"compiler": {"name": "nnc", "version": "1.0.0"}, "sourceHash": "sha256:998e25f03fa369193c64f8d7b5c4daf2e871277ea3fe3d504ffbdabc2d4976d8"},
+  "moduleHash": "sha256:b17b9644d0c144f3dca13fe2060de2aa5d5e98b3d78c3b2bd672cc8962ad1756",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "id": "n1", "op": "input.ref", "inputs": [], "attrs": {"name": "close"}, "type": "series<float>" },
+    { "id": "n2", "op": "indicator", "inputs": ["n1"], "attrs": {"name": "EMA", "periods": [20], "lookback": 19, "lifted": false}, "type": "series<float>" },
+    { "id": "n3", "op": "let", "inputs": ["n2"], "attrs": {"name": "fast_ma"}, "type": "series<float>" },
+    { "id": "n4", "op": "indicator", "inputs": ["n1"], "attrs": {"name": "EMA", "periods": [50], "lookback": 49, "lifted": false}, "type": "series<float>" },
+    { "id": "n5", "op": "let", "inputs": ["n4"], "attrs": {"name": "slow_ma"}, "type": "series<float>" },
+    { "id": "n6", "op": "schedule", "inputs": [], "attrs": {"interval": "1d"} },
+    { "id": "n7", "op": "compare.le", "inputs": ["n1", "n3"], "type": "series<bool>" },
+    { "id": "n8", "op": "compare.gt", "inputs": ["n1", "n5"], "type": "series<bool>" },
+    { "id": "n9", "op": "logic.and", "inputs": ["n7", "n8"], "type": "series<bool>" },
+    { "id": "n10", "op": "intent.emit", "inputs": [], "attrs": {"action": "BUY", "asset": "SPY", "confidence": 0.65} },
+    { "id": "n11", "op": "block", "inputs": ["n10"] },
+    { "id": "n12", "op": "rule", "inputs": ["n6", "n9", "n11"] }
+  ]
+}

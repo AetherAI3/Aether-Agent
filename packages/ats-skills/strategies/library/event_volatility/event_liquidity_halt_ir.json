@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "EventLiquidityHalt",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1s" },
+    { "type": "Condition", "signal": "SPREAD_STRESS", "operator": ">", "value": 0.8 },
+    { "type": "Intent", "action": "PAUSE" }
+  ]
+}

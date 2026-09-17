@@ -1,0 +1,31 @@
+// On-balance-volume trend confirmation. OBV_SLOPE = linear-regression slope
+// of OBV over the lookback window, provided by the host data feed.
+// A positive slope confirms accumulation.
+// REGIME: any directional regime. This is a CONFIRMATION input and is weak on
+// its own - a positive OBV slope is true through most of any advance, so
+// firing it standalone is close to firing on "the market went up".
+// CONDITIONS: compose it with a directional trigger and let this gate the
+// trigger. It answers "is there participation behind the move", nothing else.
+// INVALIDATION: slope flattening or turning negative while price still rises -
+// the classic distribution divergence, and the one case where this input is
+// genuinely informative on its own.
+// SHAPE: 4h; OBV grinding upward underneath a rising price.
+// NOT volume_spike_confirmation: that is a single-bar capitulation event, this
+// is sustained accumulation across a window. Opposite time scales.
+// CALIBRATED ON: crypto, 4h - and volume is the least portable series in this
+// library. Crypto volume is per-venue and unaudited; futures volume is
+// exchange-consolidated; equity volume fragments across lit and dark venues.
+// An OBV slope computed on one is not comparable to the other.
+strategy ObvTrend {
+
+    every 4h {
+
+        if OBV_SLOPE(20) > 0 {
+
+            buy(ETHUSD, 0.7)
+
+        }
+
+    }
+
+}

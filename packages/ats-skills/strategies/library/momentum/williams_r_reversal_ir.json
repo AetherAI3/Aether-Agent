@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "WilliamsRReversal",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1h" },
+    { "type": "Condition", "signal": "WILLR_POS", "operator": "<", "value": 20 },
+    { "type": "Intent", "action": "BUY", "asset": "SOLUSD", "confidence": 0.75 }
+  ]
+}

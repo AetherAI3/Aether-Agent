@@ -1,0 +1,33 @@
+// Second-leg acceleration, short side. Mirror of event_second_leg_long.
+// SECOND_LEG_SCORE = post-retracement extension beyond the first impulse
+// extreme after a 30-90s compression, 0..1; direction is supplied by the
+// impulse and flow terms, so the same sequence score serves both branches.
+// DOWNSIDE_IMPULSE_ATR = first-impulse magnitude lower in pre-event 1m ATRs.
+// BEAR_FLOW_CONFIRM = futures order-flow confirmation, 0..1.
+// REGIME: CPI, NFP, and FOMC statement legs where the real move lower
+// develops after the first shakeout. Do NOT fire on the first impulse itself.
+// CONDITIONS: armed event, open entry window, decisive first impulse down,
+// completed second-leg sequence, bearish flow, normalized liquidity.
+// INVALIDATION: host event risk model owns stop, hard flat, and re-entry
+// lock. Reclaiming the compression is the natural stop reference.
+// SHAPE: 5s cadence; impulse down, 30-90s compression holding most of the
+// move, then a break of the first impulse low.
+// NOT event_false_first_move_short: that rule sells a failed UPSIDE breakout;
+// this one sells continuation of a proven DOWNSIDE impulse after compression.
+// CALIBRATED ON: MES/MNQ around US red-folder releases, 5s cadence.
+// Sequence-based score travels across event types; re-verify thresholds.
+strategy EventSecondLegShort {
+
+    agent MacroEvent
+
+    every 5s {
+
+        if EVENT_READY > 0.5 and ENTRY_WINDOW_OPEN > 0.5 and DOWNSIDE_IMPULSE_ATR > 0.8 and SECOND_LEG_SCORE > 0.7 and BEAR_FLOW_CONFIRM > 0.55 and LIQUIDITY_OK > 0.5 {
+
+            sell(MES, 0.7)
+
+        }
+
+    }
+
+}

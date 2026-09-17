@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "EventReleaseIntegrityHalt",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1s" },
+    { "type": "Condition", "signal": "RELEASE_CONFLICT", "operator": ">", "value": 0.5 },
+    { "type": "Intent", "action": "PAUSE" }
+  ]
+}

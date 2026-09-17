@@ -1,0 +1,57 @@
+// Selling-climax reversal. Three measurements on the same bar: volume against
+// its own twenty-bar average, bar range against ATR, and where the close sits
+// inside that range. The third is the one that separates a climax from a
+// breakdown, and it is a ratio of two differences - arithmetic the feed-signal
+// form cannot express without the host precomputing the whole idea.
+// REGIME: capitulation at the end of a decline. Do NOT fire on the first heavy
+// bar of a breakdown - the shape is identical for one bar, and only what
+// happens afterwards distinguishes them. Requiring the close under the
+// fifty-bar average is what keeps this a reversal rule and not a breakout rule.
+// INPUTS: high, low, close, volume (series<float>). Volume must be a real
+// traded quantity; a synthetic or tick-count proxy changes what the surge
+// multiple means.
+// CONDITIONS: volume at least three times its twenty-bar average, range at
+// least twice ATR, close in the top 40 percent of the bar, and price below its
+// fifty-bar average. A flat bar has zero range and yields no close position at
+// all, so such a bar is absent rather than counted as satisfying the test.
+// INVALIDATION: a lower low on ordinary volume within a few bars. Climax
+// volume that does not mark the low was distribution, not exhaustion.
+// SHAPE: 1d; a wide, enormous-volume down bar that closes near its high.
+// NOT volume_spike_confirmation: that pairs a host VOL_RATIO with an RSI gate
+// on baseline IR and is a confirmation filter for an entry that already exists.
+// This is a standalone reversal pattern about the shape of one bar, and it says
+// nothing about any oscillator. NOT obv_trend: that is a cumulative flow
+// measure over many bars; this is a single-bar event.
+// CALIBRATED ON: liquid US equities, daily. The 3x surge and 2x range multiples
+// are conventions and are the two numbers most in need of re-fitting per
+// instrument - a thin name prints 3x volume routinely. The close-position
+// threshold of 0.6 is scale-free and travels.
+strategy VolumeClimaxReversal {
+
+    param volume_window: int = 20
+    param surge: float = 3.0
+    param atr_window: int = 14
+    param range_mult: float = 2.0
+    param trend_window: int = 50
+
+    input high: series<float>
+    input low: series<float>
+    input close: series<float>
+    input volume: series<float>
+
+    let surge_ok = volume >= SMA(volume, volume_window) * surge
+    let wide_bar = high - low >= ATR(high, low, close, atr_window) * range_mult
+    let close_position = (close - low) / (high - low)
+    let below_trend = close < SMA(close, trend_window)
+
+    every 1d {
+
+        if surge_ok and wide_bar and close_position >= 0.6 and below_trend {
+
+            buy(SPY, 0.55)
+
+        }
+
+    }
+
+}

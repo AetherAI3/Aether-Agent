@@ -1,0 +1,29 @@
+// MACD histogram flip to positive (Pine: ta.macd histogram > 0).
+// MACD_HIST = MACD line - signal line, provided by the host data feed.
+// REGIME: trend initiation, or resumption after a pullback. Do NOT fire in
+// chop - the histogram oscillates around zero in a range, so it flips
+// constantly and produces a stream of one-bar signals that mean nothing.
+// CONDITIONS: a directional context on the timeframe above; the flip is a
+// timing input and needs a trend to be timing into.
+// INVALIDATION: the histogram dropping back below zero within a bar or two.
+// A flip that does not persist was noise around the zero line.
+// SHAPE: 4h; histogram bars crossing from below zero to above and staying.
+// NOT golden_cross: that is a persistent state on a slow average pair, this is
+// a discrete event on a fast one. NOT roc_momentum: that measures the size of
+// a move already underway, this measures a change in its direction.
+// CALIBRATED ON: crypto, 4h. The zero crossing is scale-free and travels, but
+// flip frequency scales with noise, so a choppier instrument will produce many
+// more of these for the same amount of real trend.
+strategy MacdHistogramFlip {
+
+    every 4h {
+
+        if MACD_HIST(9) > 0 {
+
+            buy(BTCUSD, 0.75)
+
+        }
+
+    }
+
+}

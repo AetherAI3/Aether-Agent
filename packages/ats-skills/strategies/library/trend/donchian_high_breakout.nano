@@ -1,0 +1,55 @@
+// Donchian channel breakout, computed. HIGHEST(high, 20) includes the current
+// bar, so a new high is trivially equal to its own maximum and `close >
+// HIGHEST(high, 20)` can never be true. Reading the channel at [1] is what
+// makes the comparison mean "cleared the prior twenty bars" - this is the
+// clearest case in the library where an offset is correctness, not decoration.
+// REGIME: expansion out of a contraction. Do NOT fire inside a range - the
+// twenty-bar extreme IS the range boundary there, so both arms fire at the
+// edges of a market that is going nowhere and each is faded immediately.
+// INPUTS: high, low, close (series<float>). No other host signal.
+// CONDITIONS: a close beyond the prior twenty-bar extreme. The else arm is the
+// mirror, so this rule is symmetric by construction: one channel, two sides,
+// and they can never both be true on one bar because the channel top is never
+// below the channel floor.
+// INVALIDATION: a close back inside the channel on the following bar. A
+// breakout that does not hold is a failed breakout, and this rule proposes
+// entries only - the host owns the stop and the exit.
+// SHAPE: 1d; a push through a flat multi-week ceiling or floor.
+// NOT donchian_breakout: that is the same idea on baseline IR, reading a
+// host-computed DONCHIAN_POS ratio and firing long only. This computes the
+// channel from raw bars, so the host contract is just OHLC, and it carries the
+// short arm the ratio form cannot express without a second signal.
+// CALIBRATED ON: crypto and futures, daily. Twenty is Donchian's published
+// convention. The rule assumes a continuously traded instrument: on a
+// session-bound one the open can gap clear through the channel, which makes
+// the breakout price unreachable and turns every signal into a chase.
+strategy DonchianHighBreakout {
+
+    param channel: int = 20
+
+    input high: series<float>
+    input low: series<float>
+    input close: series<float>
+
+    let prior_top = HIGHEST(high, channel)[1]
+    let prior_floor = LOWEST(low, channel)[1]
+
+    every 1d {
+
+        if close > prior_top {
+
+            buy(ETHUSD, 0.7)
+
+        } else {
+
+            if close < prior_floor {
+
+                sell(ETHUSD, 0.7)
+
+            }
+
+        }
+
+    }
+
+}

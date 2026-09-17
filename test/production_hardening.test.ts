@@ -59,6 +59,12 @@ const pack: PackReport = {
     "node_modules/aether-ats-skills/src/browser_transport.js",
     "node_modules/aether-ats-skills/src/vision_skill.js",
     "node_modules/aether-ats-skills/src/settings.js",
+    "node_modules/aether-ats-skills/src/strategy_library.js",
+    "node_modules/aether-ats-skills/src/journal.js",
+    "node_modules/aether-ats-skills/src/memory_lease.js",
+    "node_modules/aether-ats-skills/python/memory_lease.py",
+    "node_modules/aether-ats-skills/strategies/manifest.json",
+    "node_modules/aether-ats-skills/strategies/catalog.json",
     "node_modules/aether-ats-skills/python/bridge.py",
     "node_modules/aether-ats-skills/bin/aether-ats-skills.js",
     "node_modules/aether-browser/package.json",
@@ -66,7 +72,7 @@ const pack: PackReport = {
     "node_modules/aether-context/package.json",
     "node_modules/aether-context/bin/aether-context.js",
     "packages/ats-skills-source.json",
-    ...["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "python/bridge.py", "bin/aether-ats-skills.js"].map((path) => `packages/ats-skills/${path}`),
+    ...["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"].map((path) => `packages/ats-skills/${path}`),
   ].map((path) => ({ path, size: 1 })),
 };
 

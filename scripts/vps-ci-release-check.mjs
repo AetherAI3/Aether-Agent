@@ -33,7 +33,7 @@ assert.equal(lockRoot?.version, packageManifest.version);
 assert.deepEqual(lockRoot?.dependencies, runtimeDependency);
 const atsManifest = await readJson("packages/ats-skills/package.json");
 assert.equal(atsManifest.name, "aether-ats-skills");
-assert.equal(atsManifest.version, "0.1.0");
+assert.equal(atsManifest.version, "0.2.0");
 assert.deepEqual(atsManifest.dependencies, { "aether-browser": "0.2.2", "aether-context": "0.3.1" });
 assert.deepEqual(atsManifest.optionalDependencies ?? {}, {});
 assert.deepEqual(atsManifest.peerDependencies ?? {}, {});

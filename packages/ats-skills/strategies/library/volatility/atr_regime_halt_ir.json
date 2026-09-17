@@ -1,0 +1,32 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "1.0.0",
+  "name": "AtrRegimeHalt",
+  "tier": "nano",
+  "determinism": {"clock": "injected", "entropy": "injected", "fastmath": false},
+  "params": [{"name": "window", "type": "int", "value": 14}, {"name": "baseline_window", "type": "int", "value": 100}, {"name": "expansion", "type": "float", "value": 2.0}],
+  "inputs": [{"name": "high", "type": "series<float>"}, {"name": "low", "type": "series<float>"}, {"name": "close", "type": "series<float>"}],
+  "warmup": 113,
+  "entries": ["n16"],
+  "provenance": {"compiler": {"name": "nnc", "version": "1.0.0"}, "sourceHash": "sha256:b3a979534db20753f0e61fbc7c001993ea0092c74f6120e979b424c620324cf5"},
+  "moduleHash": "sha256:47833df9ed1d4b551b4c046fba086a43b6a4a5e8d67e8553b8a9bc01beb3d469",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "id": "n1", "op": "input.ref", "inputs": [], "attrs": {"name": "high"}, "type": "series<float>" },
+    { "id": "n2", "op": "input.ref", "inputs": [], "attrs": {"name": "low"}, "type": "series<float>" },
+    { "id": "n3", "op": "input.ref", "inputs": [], "attrs": {"name": "close"}, "type": "series<float>" },
+    { "id": "n4", "op": "indicator", "inputs": ["n1", "n2", "n3"], "attrs": {"name": "ATR", "periods": [14], "lookback": 14, "lifted": false}, "type": "series<float>" },
+    { "id": "n5", "op": "let", "inputs": ["n4"], "attrs": {"name": "atr_now"}, "type": "series<float>" },
+    { "id": "n6", "op": "indicator", "inputs": ["n5"], "attrs": {"name": "SMA", "periods": [100], "lookback": 113, "lifted": false}, "type": "series<float>" },
+    { "id": "n7", "op": "let", "inputs": ["n6"], "attrs": {"name": "atr_baseline"}, "type": "series<float>" },
+    { "id": "n8", "op": "agent", "inputs": [], "attrs": {"name": "RiskDesk"} },
+    { "id": "n9", "op": "schedule", "inputs": [], "attrs": {"interval": "5m"} },
+    { "id": "n10", "op": "param.ref", "inputs": [], "attrs": {"name": "expansion"}, "type": "float" },
+    { "id": "n11", "op": "arith.mul", "inputs": ["n7", "n10"], "type": "series<float>" },
+    { "id": "n12", "op": "compare.ge", "inputs": ["n5", "n11"], "type": "series<bool>" },
+    { "id": "n13", "op": "intent.emit", "inputs": [], "attrs": {"action": "PAUSE"} },
+    { "id": "n14", "op": "intent.emit", "inputs": [], "attrs": {"action": "OBSERVE"} },
+    { "id": "n15", "op": "block", "inputs": ["n13", "n14"] },
+    { "id": "n16", "op": "rule", "inputs": ["n9", "n12", "n15"] }
+  ]
+}

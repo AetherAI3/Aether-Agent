@@ -1,0 +1,39 @@
+// False-first-move reversal, long side. The release first breaks the
+// pre-event range DOWN, the breakout fails, and price reclaims the event
+// anchor with bullish flow. PRE_EVENT_RANGE_BREAK_DOWN = downside break of
+// the versioned T-5m pre-event range, 0..1. BREAK_FAILURE_SCORE = excursion
+// outside the range followed by a deterministic close/reclaim back through
+// the boundary, 0..1. EVENT_ANCHOR_RECLAIM = reclaim strength of the event
+// anchor (median executable mid, T-10s..T-1s), 0..1. BULL_FLOW_CONFIRM =
+// futures order-flow confirmation from the existing feature fabric, 0..1.
+// REGIME: red-folder releases where the first move traps breakout sellers -
+// common on headline/core disagreement. Do NOT fire on a clean downside
+// continuation; BREAK_FAILURE_SCORE and EVENT_ANCHOR_RECLAIM must both prove
+// the failure first.
+// CONDITIONS: armed event, open entry window, downside range break, proven
+// break failure, anchor reclaim, bullish flow, normalized liquidity.
+// INVALIDATION: host event risk model owns stop, hard flat, and re-entry
+// lock. Losing the reclaimed anchor is the natural stop reference.
+// SHAPE: 5s cadence; spike down through the pre-event low, sharp rejection,
+// reclaim of anchor, then reversal higher.
+// NOT event_impulse_pullback_long: that rule needs an upward first impulse;
+// this one requires the first impulse to have been DOWN and to have failed.
+// They cannot both qualify on the same event path.
+// CALIBRATED ON: MES/MNQ around US red-folder releases, 5s cadence.
+// Break/reclaim scores are range-relative and travel across index futures;
+// re-verify before promotion.
+strategy EventFalseFirstMoveLong {
+
+    agent MacroEvent
+
+    every 5s {
+
+        if EVENT_READY > 0.5 and ENTRY_WINDOW_OPEN > 0.5 and PRE_EVENT_RANGE_BREAK_DOWN > 0.6 and BREAK_FAILURE_SCORE > 0.7 and EVENT_ANCHOR_RECLAIM > 0.6 and BULL_FLOW_CONFIRM > 0.55 and LIQUIDITY_OK > 0.5 {
+
+            buy(MES, 0.74)
+
+        }
+
+    }
+
+}

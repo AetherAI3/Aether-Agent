@@ -1,0 +1,28 @@
+// Mean-reversion z-score entry. Nano numbers are non-negative, so the feed
+// provides the negated series: ZSCORE_NEG = -((close - sma) / stdev).
+// ZSCORE_NEG >= 2 means price is 2+ standard deviations BELOW the mean.
+// REGIME: statistically stationary - a range whose mean is flat. Do NOT fire
+// during a trend or a repricing event: once the mean itself moves, distance
+// from it stops being information.
+// CONDITIONS: the 20-period mean roughly flat, and stdev not expanding.
+// INVALIDATION: ZSCORE_NEG holding at or above 2 across several bars, or the
+// mean turning down. Both say the distribution moved rather than the price.
+// SHAPE: 4h; a visible stretch away from a horizontal mean.
+// NOT cci_extreme: the same idea measured more strictly and more slowly, so it
+// produces far fewer signals. If both fire, that is one setup, not two.
+// CALIBRATED ON: crypto, 4h - continuous trading, no session boundaries, and a
+// higher baseline volatility than an index future. On a session-bound
+// instrument the 20-period window straddles the overnight gap.
+strategy ZscoreReversion {
+
+    every 4h {
+
+        if ZSCORE_NEG(20) >= 2 {
+
+            buy(ETHUSD, 0.7)
+
+        }
+
+    }
+
+}

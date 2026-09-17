@@ -1,0 +1,41 @@
+// Reaction-only red-folder continuation. Requires no release values: the host
+// event engine verifies a scheduled high-impact window (EVENT_READY), then
+// measures the first post-release impulse. UPSIDE_IMPULSE_ATR = max upward
+// excursion from the event anchor (median executable mid, T-10s..T-1s)
+// divided by the pre-event 1m ATR. RETRACE_HOLD_SCORE = 1 - retracement /
+// impulse, clamped to 0..1. BULL_CROSS_CONFIRM = deterministic MES/MNQ and
+// futures-flow agreement, 0..1. ENTRY_WINDOW_OPEN = 1 only inside the
+// host-enforced T+5s..T+180s entry window. LIQUIDITY_OK = 1 when spread and
+// depth have renormalized.
+// REGIME: scheduled macro releases (CPI, PPI, NFP, FOMC stage A) with a
+// decisive first impulse that holds its retracement. Do NOT fire outside an
+// armed event window - EVENT_READY and ENTRY_WINDOW_OPEN are host gates, not
+// suggestions.
+// CONDITIONS: armed event, open entry window, upward impulse at least 0.8
+// pre-event ATRs, at least 60 percent of the impulse held through the first
+// pullback, cross-market agreement, normalized liquidity.
+// INVALIDATION: host event risk model owns stop, hard flat at T+10m, and the
+// one-position-per-event lock. This rule only proposes.
+// SHAPE: 5s decision cadence after the observe-only impulse window; a strong
+// leg up, a shallow pullback that holds, then continuation.
+// NOT cpi_impulse_pullback_long: that variant additionally requires a
+// CONFIRMED release packet and a cool CPI print. This one trades the tape
+// reaction alone so it can run while the release adapter is unavailable.
+// CALIBRATED ON: MES/MNQ around US red-folder releases, 5s cadence. Impulse
+// and retrace thresholds are event-scaled (ATR-relative) and travel better
+// than absolute points, but re-verify per event type before promotion.
+strategy EventImpulsePullbackLong {
+
+    agent MacroEvent
+
+    every 5s {
+
+        if EVENT_READY > 0.5 and ENTRY_WINDOW_OPEN > 0.5 and UPSIDE_IMPULSE_ATR > 0.8 and RETRACE_HOLD_SCORE > 0.6 and BULL_CROSS_CONFIRM > 0.55 and LIQUIDITY_OK > 0.5 {
+
+            buy(MES, 0.78)
+
+        }
+
+    }
+
+}

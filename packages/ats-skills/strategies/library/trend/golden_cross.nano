@@ -1,0 +1,31 @@
+// Golden cross as a spread signal. Nano cannot compute crosses in-language;
+// the feed provides SMA_SPREAD = SMA(50) - SMA(200). Positive spread means
+// the fast average is above the slow one (post-golden-cross regime).
+// REGIME: established uptrend. Read this as a REGIME FILTER, not an entry.
+// The distinction matters: a positive spread is a persistent state that stays
+// true for months, so treating it as a trigger fires it on every single bar of
+// a bull market. Use it to permit or veto other setups, not to open a trade.
+// CONDITIONS: none beyond the spread itself - that is precisely the problem
+// with using it alone.
+// INVALIDATION: the spread crossing back through zero, which is a death cross
+// and a regime change rather than a stop on a position.
+// SHAPE: 1d; the slow pair of averages fanned apart and holding.
+// NOT macd_histogram_flip: that is an event on a fast pair and marks a moment;
+// this is a state on a slow pair and marks a season. If both are true, only
+// the MACD flip carries timing information.
+// CALIBRATED ON: US large-cap equity ETF, daily, where the 50/200 pair is the
+// convention. On a 24/7 instrument "200 days" spans a different amount of
+// price action than it does on a session-bound one.
+strategy GoldenCross {
+
+    every 1d {
+
+        if SMA_SPREAD(50) > 0 {
+
+            buy(SPY, 0.9)
+
+        }
+
+    }
+
+}

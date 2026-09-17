@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "TrustedRouteGuard",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1m" },
+    { "type": "Condition", "signal": "TRUSTED_ROUTE_DOWN", "operator": ">=", "value": 1 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "SecurityDesk" }
+  ]
+}

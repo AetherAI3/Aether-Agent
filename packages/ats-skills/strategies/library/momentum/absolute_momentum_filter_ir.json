@@ -1,0 +1,32 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "1.0.0",
+  "name": "AbsoluteMomentumFilter",
+  "tier": "nano",
+  "determinism": {"clock": "injected", "entropy": "injected", "fastmath": false},
+  "params": [{"name": "long_window", "type": "int", "value": 126}, {"name": "short_window", "type": "int", "value": 21}],
+  "inputs": [{"name": "close", "type": "series<float>"}],
+  "warmup": 126,
+  "entries": ["n16"],
+  "provenance": {"compiler": {"name": "nnc", "version": "1.0.0"}, "sourceHash": "sha256:245bdbcccbe964e61375f6fcfdf0fd8d1e03df7856d78072bda9894e6eeec550"},
+  "moduleHash": "sha256:907976861bc4383f41388fc16282904d0c076e23e0ac207810566cb229847bf6",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "id": "n1", "op": "input.ref", "inputs": [], "attrs": {"name": "close"}, "type": "series<float>" },
+    { "id": "n2", "op": "indicator", "inputs": ["n1"], "attrs": {"name": "ROC", "periods": [126], "lookback": 126, "lifted": false}, "type": "series<float>" },
+    { "id": "n3", "op": "let", "inputs": ["n2"], "attrs": {"name": "long_return"}, "type": "series<float>" },
+    { "id": "n4", "op": "indicator", "inputs": ["n1"], "attrs": {"name": "ROC", "periods": [21], "lookback": 21, "lifted": false}, "type": "series<float>" },
+    { "id": "n5", "op": "let", "inputs": ["n4"], "attrs": {"name": "short_return"}, "type": "series<float>" },
+    { "id": "n6", "op": "schedule", "inputs": [], "attrs": {"interval": "1d"} },
+    { "id": "n7", "op": "const", "inputs": [], "attrs": {"value": 0}, "type": "int" },
+    { "id": "n8", "op": "compare.gt", "inputs": ["n3", "n7"], "type": "series<bool>" },
+    { "id": "n9", "op": "const", "inputs": [], "attrs": {"value": 0}, "type": "int" },
+    { "id": "n10", "op": "compare.gt", "inputs": ["n5", "n9"], "type": "series<bool>" },
+    { "id": "n11", "op": "logic.and", "inputs": ["n8", "n10"], "type": "series<bool>" },
+    { "id": "n12", "op": "intent.emit", "inputs": [], "attrs": {"action": "BUY", "asset": "SPY", "confidence": 0.55} },
+    { "id": "n13", "op": "block", "inputs": ["n12"] },
+    { "id": "n14", "op": "intent.emit", "inputs": [], "attrs": {"action": "OBSERVE"} },
+    { "id": "n15", "op": "block", "inputs": ["n14"] },
+    { "id": "n16", "op": "rule", "inputs": ["n6", "n11", "n13", "n15"] }
+  ]
+}

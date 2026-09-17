@@ -1,0 +1,32 @@
+// Consecutive loss circuit: after four losing closed decisions in a row, pause
+// and escalate to the risk desk for review.
+// REGIME: all of them, though it is most informative in a regime the strategy
+// was not built for - which is precisely when a run of losses appears.
+// CONDITIONS: none. The host decides what closes a decision and what counts as
+// a loss; Nano only reads the count.
+// INVALIDATION: none. The counter is reset by the host, deliberately, after
+// review.
+// SHAPE: 5m; the count only changes when a decision closes, so a faster cadence
+// re-reads an unchanged number.
+// NOT daily_loss_limit: that measures magnitude, this measures sequence. Four
+// small losses in a row can cost almost nothing and still be the clearest
+// evidence available that the regime has changed. A book can trip this while
+// nowhere near any loss limit, which is the point.
+// CALIBRATED ON: strategies that close decisions discretely. A continuously
+// rebalanced book has no natural notion of a consecutive loss and should not
+// arm this.
+strategy ConsecutiveLossCircuit {
+
+    agent RiskDesk
+
+    every 5m {
+
+        if CONSECUTIVE_LOSSES >= 4 {
+
+            pause()
+
+        }
+
+    }
+
+}

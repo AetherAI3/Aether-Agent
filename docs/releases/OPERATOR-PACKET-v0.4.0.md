@@ -11,12 +11,12 @@ before evaluating release readiness.
 | Proposed tag | `v0.4.0` |
 | Release scope | Shared Cloud managed-agent inventory, creation, customization and Online DM chat; guided ATS device setup, native strategy preparation and bounded browser observation. |
 | Version decision | A minor release for the new account-agent workflow and bundled ATS runtime dependency. |
-| Source identity | Canonical ATS adapter commit `d6909b55c99f70ffe389d01b83b5b537fea68d9a`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
-| Runtime dependency policy | Exactly `aether-ats-skills` 0.1.0 from `file:packages/ats-skills`, bundled into the CLI. Its exact registry dependencies are `aether-browser` 0.2.2 and `aether-context` 0.3.1. No additional runtime, optional or peer dependencies; no installation hooks. |
+| Source identity | Canonical ATS adapter commit `2c38586b7fb011163281fb964b2b9585398717e8`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
+| Runtime dependency policy | Exactly `aether-ats-skills` 0.2.0 from `file:packages/ats-skills`, bundled into the CLI. Its exact registry dependencies are `aether-browser` 0.2.2 and `aether-context` 0.3.1. No additional runtime, optional or peer dependencies; no installation hooks. |
 | Source custody | ATS owns the canonical source. The Agent copy must match its recorded upstream source and digest; it is not a separate implementation. |
-| Required Cloud companion | Cloud #1691 at `023c7a414e8b14dbeb096469226855a15bbdf2f3`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
+| Required Cloud companion | Cloud #1691 at `df731408a3b66b9e2009b0564cbcb1a509cfc77f`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`, restacked after Cloud #1687 without replacing its admission/runtime ownership. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
 | Local prerequisites | The ATS Python engine and a reachable Agent Browser runtime are separate prerequisites. The npm context dependency is a launcher, not proof that Python memory is installed or verified. |
-| Platform evidence | Linux packed offline installation and CLI selftest passed in this workspace. Windows packed-install/terminal/browser qualification remains required. |
+| Platform evidence | Linux packed offline installation, CLI selftest and process-held writer lease passed in this workspace. The exact Agent head must pass its Linux/Windows matrix, which now runs the shipped writer-lease test with Python. Native headed Browser/noVNC remains Linux/POSIX-only; a Windows client is not a native Windows browser-host qualification. |
 | Archive evidence | Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending. |
 | Hosted checks | Required exact-commit CI, CodeQL, supply-chain audit, generated-documentation, production-package and release-truth checks pending. |
 | Live service evidence | Deployment of the Cloud adapter, actual web/terminal DM sync, model/UVT execution and broker connectivity are not established by local tests. |
@@ -54,9 +54,12 @@ refresh, stop and retry are explicit; cancellation propagates from chat through
 setup and streamed observation. Background updates preserve the terminal draft.
 The read-only visual skill returns untrusted page data and image provenance;
 Cloud model dispatch and browser actions are not connected by this candidate.
-Strategy scanning does not execute Python or PineScript
-inputs, and unsupported translation stays visible. ATS permission modes are
-local preferences; they do not authorize live broker orders.
+Strategy scanning does not execute Python or PineScript inputs, and unsupported
+translation stays visible. Fresh setup installs six reviewed native Nano starter
+sources from the exact 55-source Nano 1.0.12 corpus; sources grant neither
+execution nor permission. ATS permission modes are local preferences; they do
+not authorize live broker orders. The bounded local journal records setup and
+lifecycle facts without prompts, page content, source code or credentials.
 
 This candidate is not evidence for autonomous trading. No provider session,
 real credential, paid account, live broker or market order is used by the local
@@ -91,9 +94,10 @@ command, not through a second agent registry.
 - Four isolated builders completed before sequential collection; independent
   review reproduced and drove fixes for corrupt-vector readiness, delayed
   browser creation, cleanup persistence, and account-switch races.
-- Integrated ATS package: **103 passed, zero skipped**, using actual Context
-  0.3.1 and native ATS/Nano. Hosted `ats-skills / node-native` also passed at
-  `d6909b55c99f70ffe389d01b83b5b537fea68d9a` (run 35277715410).
+- Integrated ATS package at the prior source head: **103 passed, zero skipped**,
+  using actual Context 0.3.1 and native ATS/Nano. Hosted `ats-skills /
+  node-native` passed at `d6909b55c99f70ffe389d01b83b5b537fea68d9a`
+  (run 35277715410). Exact-head hosted evidence for `2c38586b` is pending.
 - Cloud: **204 independently rerun tests passed**, including canonical full
   OpenAPI regeneration. Account integration: **68 focused tests passed**;
   browser controller: **16 tests passed**. Final Agent full-suite and package
@@ -102,8 +106,9 @@ command, not through a second agent registry.
   `core.autocrlf=true` checkout. This is newline conversion evidence, not an
   actual Windows native-runtime or viewer qualification.
 - Memory setup validates native persisted structure and original-byte
-  preservation; its kernel lock covers ATS setup only. Direct Context writers
-  still need a shared runtime lease before connected execution.
+  preservation. Its setup lock remains explicitly setup-only; Agent chat now
+  separately holds a process-lifetime `ats_runtime_writer` kernel lease, with
+  exclusivity tests and parent-death release semantics on POSIX and Windows.
 - Typed profiles replace prompt-marker detection. Legacy ownerless bindings,
   create intents and idle-only browser closures are retained and refused for
   silent migration. Unknown browser creation requires owner reconciliation;

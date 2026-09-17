@@ -39,7 +39,14 @@ function fakePackage(overrides: Partial<Package> = {}): Package {
   return {
     BrowserSessionRecovery,
     initializeMemory: async (input) => memoryReceipt(input),
-    scanStrategies: async () => ({ state: "scanned", strategies: [] }),
+    acquireMemoryWriterLease: async (input) => ({ receipt: { state: "leased", lock_scope: "ats_runtime_writer", runtime_exclusivity_verified: true,
+      agent_id: input.agentId, directory: input.directory, owner_scope: input.ownerScope }, close: async () => {} }),
+    scanStrategies: async () => ({ state: "scanned", compiler: "unavailable", strategies: [{ file: "existing.nano", state: "unavailable" }] }),
+    listBundledStrategies: async () => ({ revision: "76c91e4b926c0aa8416cbb6b8724031d8141a8d9", nano_version: "1.0.12", strategies: [], execution_enabled: false }),
+    installBundledStrategies: async ({ directory }) => ({ revision: "76c91e4b926c0aa8416cbb6b8724031d8141a8d9", installed: [{ id: "risk/stale_data_halt", file: join(directory, "risk--stale_data_halt.nano") }], execution_enabled: false, permission_granted: false }),
+    appendJournalEvent: async () => ({}),
+    readJournal: async () => [],
+    formatJournal: () => "ATS journal · no local events\n",
     createBrowserObserver: async () => ({ open: async () => ({ state: "connected", viewUrl: null }), snapshot: async () => ({}), close: async () => {}, status: () => ({ state: "connected" }) }),
     observeBrowser: async function* () { yield {}; },
     loadSettings: async () => ({ permission_mode: "plan", data_stream: { provider: "none", endpoint: null, api_key_env: null, symbols: [], timeframe: "1m", poll_interval_ms: 5000 } }),
@@ -140,7 +147,24 @@ test("successful setup stores an account-scoped binding only after memory and st
     assert.equal(saved.account_subject, SUBJECT);
     assert.equal(saved.schema_version, "aether.ats.local/2");
     assert.equal(saved.memory_gb, 5);
-    assert.deepEqual(calls, ["memory", "scan"]);
+    assert.deepEqual(calls, ["memory", "scan", "scan"]);
+  });
+});
+
+test("empty first setup installs the reviewed Nano starter pack and journals the result", async () => {
+  await fixture(async dir => {
+    let scans = 0; let installs = 0; const events: string[] = []; let output = "";
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+      load: async () => fakePackage({
+        scanStrategies: async () => ({ state: "scanned", compiler: "unavailable", strategies: scans++ ? [{ file: "risk--stale_data_halt.nano", state: "unavailable" }] : [] }),
+        installBundledStrategies: async ({ directory }) => { installs++; return { revision: "76c91e4b926c0aa8416cbb6b8724031d8141a8d9", installed: [{ id: "risk/stale_data_halt", file: join(directory, "risk--stale_data_halt.nano") }], execution_enabled: false, permission_granted: false }; },
+        appendJournalEvent: async (_path, event) => { events.push(event.type); return {}; },
+      }) });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Atlas"), 0); });
+    assert.equal(installs, 1); assert.equal(scans, 2);
+    assert.deepEqual(events, ["strategy.library_installed", "setup.ready"]);
+    assert.match(output, /no execution authority granted/);
   });
 });
 
@@ -242,6 +266,34 @@ test("chat without a browser connection keeps storage ready and reports unavaila
     await cleanup!();
     assert.match(output, /Browser unavailable/);
     assert.match(output, /local execution is not connected/);
+  });
+});
+
+test("ATS chat holds the runtime memory writer lease until its resources close", async () => {
+  await fixture(async dir => {
+    await binding(dir); let acquired = 0; let released = 0; let memoryContext = "";
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, load: async () => fakePackage({
+      acquireMemoryWriterLease: async input => { acquired++; return { receipt: { state: "leased", lock_scope: "ats_runtime_writer", runtime_exclusivity_verified: true, directory: input.directory }, close: async () => { released++; } }; },
+    }) });
+    const cleanup = await hooks.beforeChat!(context(), agent(), { write: () => {}, signal: new AbortController().signal,
+      setContext: context => { memoryContext = context.memory ?? memoryContext; } });
+    assert.equal(acquired, 1); assert.equal(released, 0); assert.match(memoryContext, /writer leased 5 GiB/);
+    await cleanup!(); assert.equal(released, 1);
+  });
+});
+
+test("a second local chat cannot steal the first chat's writer lease or browser", async () => {
+  await fixture(async dir => {
+    await binding(dir); let releases = 0; let browserCloses = 0;
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, load: async () => fakePackage({
+      acquireMemoryWriterLease: async input => ({ receipt: { state: "leased", lock_scope: "ats_runtime_writer", runtime_exclusivity_verified: true, directory: input.directory }, close: async () => { releases++; } }),
+      createBrowserObserver: async () => ({ open: async () => ({ state: "connected", viewUrl: null }), snapshot: async () => ({}), close: async () => { browserCloses++; }, status: () => ({ state: "connected" }) }),
+    }) });
+    const first = { write: () => {}, signal: new AbortController().signal };
+    const cleanup = await hooks.beforeChat!(context(), agent(), first);
+    await assert.rejects(hooks.beforeChat!(context(), agent(), { write: () => {}, signal: new AbortController().signal }), /already has an open local chat/);
+    assert.equal(releases, 0); assert.equal(browserCloses, 0);
+    await cleanup!(); assert.equal(releases, 1); assert.equal(browserCloses, 1);
   });
 });
 
@@ -546,7 +598,7 @@ test("setup checkpoint resumes a verified custom memory location after strategy 
     assert.equal(pending.memory_verification.persistence_verified, true);
     const cleanup = await createAtsHooks(deps).beforeChat!(context(), agent());
     await cleanup!();
-    assert.equal(questions, 1); assert.equal(scans, 2);
+    assert.equal(questions, 1); assert.equal(scans, 3);
     assert.equal(JSON.parse(await readFile(settingsPath(dir), "utf8")).memory_directory, memory);
     await assert.rejects(readFile(settingsPath(dir) + ".pending"), { code: "ENOENT" });
   });
@@ -647,7 +699,7 @@ test("ATS memory and strategy setup receive the operation cancellation signal an
       scanStrategies: async input => { assert.equal(input.signal, controller.signal); calls.push("strategies"); return { state: "scanned", strategies: [] }; },
     }) });
     await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Atlas", controller.signal), 0); });
-    assert.deepEqual(calls, ["memory", "strategies"]);
+    assert.deepEqual(calls, ["memory", "strategies", "strategies"]);
   });
 });
 

@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:ac0a53cbdd900ad0e05841f5d5bae1f29ef4ecd0be6da4b220c56a3b1052d3ab -->
+<!-- manifest-digest: sha256:bac0c87b17edec9474a3f4dc01b4083ae60cc00a91f14c76f7787eeabcba2140 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -763,7 +763,7 @@ manage the visual browser in a managed agent chat
 
 Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.browser` · Requires: `aether.hosted`
 
-#### `/ats status|mode|strategies|data|browser`
+#### `/ats status|mode|strategies|library|data|journal|browser`
 
 configure ATS setup inside a managed agent chat
 

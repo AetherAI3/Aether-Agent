@@ -1,0 +1,18 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "EventFalseFirstMoveShort",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5s" },
+    { "type": "Condition", "signal": "EVENT_READY", "operator": ">", "value": 0.5 },
+    { "type": "Condition", "signal": "ENTRY_WINDOW_OPEN", "operator": ">", "value": 0.5 },
+    { "type": "Condition", "signal": "PRE_EVENT_RANGE_BREAK_UP", "operator": ">", "value": 0.6 },
+    { "type": "Condition", "signal": "BREAK_FAILURE_SCORE", "operator": ">", "value": 0.7 },
+    { "type": "Condition", "signal": "EVENT_ANCHOR_REJECT", "operator": ">", "value": 0.6 },
+    { "type": "Condition", "signal": "BEAR_FLOW_CONFIRM", "operator": ">", "value": 0.55 },
+    { "type": "Condition", "signal": "LIQUIDITY_OK", "operator": ">", "value": 0.5 },
+    { "type": "Intent", "action": "SELL", "asset": "MES", "confidence": 0.74 },
+    { "type": "Agent", "name": "MacroEvent" }
+  ]
+}

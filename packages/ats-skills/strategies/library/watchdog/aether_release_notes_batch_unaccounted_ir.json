@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "AetherReleaseNotesBatchUnaccounted",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "UNACCOUNTED_MERGE_COUNT", "operator": ">=", "value": 1 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "ReleaseDesk" }
+  ]
+}

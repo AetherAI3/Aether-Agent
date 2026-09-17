@@ -1,0 +1,53 @@
+// Relative ATR expansion halt. Compares the fourteen-bar ATR with a hundred-bar
+// average of that same ATR: a ratio, not a level. When current volatility is
+// twice its own recent baseline the book pauses and the excursion is flagged
+// for review. A ratio of an indicator to a moving average of itself is not
+// expressible as one feed signal, which is why this rule is computed.
+// REGIME: all of them, and it outranks every directional rule beneath it. Do
+// NOT expect it to fire during a slow grind higher in volatility - a baseline
+// that drifts up with the market is a baseline the ratio never clears, and
+// that is a deliberate limitation of any self-referential measure.
+// INPUTS: high, low, close (series<float>). No other host signal.
+// CONDITIONS: ATR at or above twice its own hundred-bar average. Nothing else.
+// A control with a second condition is a control that can be argued with.
+// INVALIDATION: none. This is a circuit breaker, not a view. It emits PAUSE
+// and OBSERVE and proposes no direction; the host decides what a pause means.
+// SHAPE: 5m. The cadence bounds how long a volatility shock can go unnoticed.
+// NOT atr_volatility_halt: that reads a host-supplied ATR_PCT against an
+// absolute 5 percent ceiling, so it is calibrated per instrument and silent on
+// anything quieter than its threshold. This is relative to the instrument's
+// own history, so it arms everywhere - and correspondingly it will not catch an
+// instrument that is dangerously volatile all the time, which the absolute rule
+// will. Ship both; they fail in opposite directions.
+// CALIBRATED ON: liquid continuously traded instruments, 5m bars. The 2.0
+// multiple is a convention. The hundred-bar baseline assumes a session long
+// enough to contain it; on a session-bound instrument the baseline straddles
+// the overnight gap and the first bars of a session read as an expansion.
+strategy AtrRegimeHalt {
+
+    param window: int = 14
+    param baseline_window: int = 100
+    param expansion: float = 2.0
+
+    input high: series<float>
+    input low: series<float>
+    input close: series<float>
+
+    agent RiskDesk
+
+    let atr_now = ATR(high, low, close, window)
+    let atr_baseline = SMA(atr_now, baseline_window)
+
+    every 5m {
+
+        if atr_now >= atr_baseline * expansion {
+
+            pause()
+
+            observe()
+
+        }
+
+    }
+
+}

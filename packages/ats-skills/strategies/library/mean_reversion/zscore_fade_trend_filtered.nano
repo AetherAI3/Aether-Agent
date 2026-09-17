@@ -1,0 +1,52 @@
+// Trend-filtered z-score fade. ZSCORE(close, 20) is the close's distance from
+// its own twenty-bar mean in units of its own twenty-bar dispersion; the fade
+// is only taken while the close is above its two-hundred-bar average. The
+// negative threshold is written as `-entry_z` because v1.0 has unary minus -
+// baseline IR cannot carry a negative literal at all, which is why the older
+// entries in this directory ship a pre-negated ZSCORE_NEG feed signal instead.
+// REGIME: a pullback inside an uptrend. Do NOT fire in a downtrend - that is
+// exactly what the two-hundred-bar filter exists to prevent, because an
+// unfiltered z-score fade in a bear leg buys every step down and each one is
+// cheaper than the last.
+// INPUTS: close (series<float>). No other host signal.
+// CONDITIONS: close above the long average, the z-score at or beyond two
+// standard deviations below the short mean, and the z-score higher than one bar
+// ago. The final term waits for the flush to start reclaiming instead of buying
+// each deeper reading.
+// INVALIDATION: a close below the two-hundred-bar average, which disarms the
+// rule outright, or a z-score that keeps falling - dispersion-relative cheapness
+// that gets cheaper is a regime change, not an opportunity.
+// SHAPE: 1d; a sharp two-sigma flush that starts reclaiming inside an intact
+// uptrend.
+// NOT zscore_reversion: that is the same statistic on baseline IR, using a
+// host-negated ZSCORE_NEG signal and no regime filter. The whole difference is
+// the filter, and it is the difference between a mean-reversion rule and a
+// falling-knife rule. NOT bollinger_lower_reclaim: same distance-from-mean
+// idea, but that one waits for the excursion to end and this one enters into
+// it. If both fire, this one fired first.
+// CALIBRATED ON: liquid US equity index proxies, daily. 20/200 and 2.0 sigma
+// are conventions. The z-score is unit-free so the threshold travels; the
+// 200-bar filter does not travel to intraday cadences, where 200 bars can be a
+// single session and the "trend" it measures is noise.
+strategy ZscoreFadeTrendFiltered {
+
+    param window: int = 20
+    param trend_window: int = 200
+    param entry_z: float = 2.0
+
+    input close: series<float>
+
+    let z = ZSCORE(close, window)
+    let regime_ok = close > SMA(close, trend_window)
+
+    every 1d {
+
+        if regime_ok and z <= -entry_z and z > z[1] {
+
+            buy(SPY, 0.6)
+
+        }
+
+    }
+
+}

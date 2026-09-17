@@ -1,0 +1,13 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "CorrelationClusterGuard",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "15m" },
+    { "type": "Condition", "signal": "CLUSTER_EXPOSURE_PCT", "operator": ">=", "value": 40 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Intent", "action": "OBSERVE" },
+    { "type": "Agent", "name": "RiskDesk" }
+  ]
+}

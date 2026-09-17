@@ -11,6 +11,9 @@ Standalone preparation:
 ```sh
 aether-ats-skills memory mag_0123456789abcdef /absolute/drive/atlas-memory 5
 aether-ats-skills scan /absolute/strategies
+aether-ats-skills library list
+aether-ats-skills library install starter /absolute/strategies
+aether-ats-skills journal dump /absolute/agent/journal.jsonl 100
 ```
 
 Memory requires Python 3.10+ and the real `aether-context` engine. With no configured interpreter, the pinned npm launcher provisions version 0.3.1 into its private cache environment when needed; it never installs globally. `AETHER_ATS_PYTHON` or the API's `python` option selects an already provisioned interpreter. `bootstrap:false` disables provisioning. If Python or the engine cannot be installed, setup reports unavailable and does not pretend a settings file is initialized memory.
@@ -21,16 +24,26 @@ Existing memory is reverified by reopening a digest-checked private copy with th
 
 `ownerScope: {cloudOrigin,accountSubject}` binds device storage to the verified canonical account supplied by the host. Another scope, or silently attaching an old unscoped pool to a scope, is refused. No bearer credential belongs in this record. `signal` cancels both native calls and optional provisioning and waits for this invocation's process cleanup; `scanStrategies` accepts the same cancellation option.
 
-A persistent versioned kernel lock coordinates **ATS setup processes only** and releases automatically on process death. The lock file remains after success; do not unlink it to bypass a live owner. An empty legacy or unknown marker has no proof of a dead owner and is refused with recovery guidance; stop older setup processes before manually recovering such a marker. The current Context engine does not take this lock, so receipts explicitly report `lock_scope: ats_setup_only` and `runtime_exclusivity_verified: false`. Snapshot verification detects concurrent changes but does not grant a live writer lease, run admission, subscription access or the Cloud hosted-context witness. A connected ATS host must establish those separately.
+A persistent versioned kernel lock coordinates **ATS setup processes only** and releases automatically on process death. The lock file remains after success; do not unlink it to bypass a live owner. An empty legacy or unknown marker has no proof of a dead owner and is refused with recovery guidance; stop older setup processes before manually recovering such a marker. Setup receipts therefore continue to report `lock_scope: ats_setup_only` and `runtime_exclusivity_verified: false`.
+
+`acquireMemoryWriterLease({agentId,directory,ownerScope,python?,signal?})` is the separate runtime boundary. It starts a small Python helper that validates the persisted ready binding, takes an OS kernel lock (`flock` on POSIX, `msvcrt.locking` on Windows), and holds it until `lease.close()` or parent-process death. A second process is refused. Its receipt reports `lock_scope: ats_runtime_writer` and `runtime_exclusivity_verified: true`. A host must retain this lease for the entire live Context writer lifetime. The lease establishes local writer exclusivity only; it grants no run admission, subscription access, UVT, tool or trading authority.
 
 
 ## Strategy preparation
+
+Version 0.2 bundles the exact paired Nano strategy corpus from [`AetherAI3/Nano@76c91e4`](https://github.com/AetherAI3/Nano/tree/76c91e4b926c0aa8416cbb6b8724031d8141a8d9/nano/library): 55 sources and 55 canonical IR artifacts across momentum, mean reversion, trend, volatility, volume, risk, event-volatility and watchdog categories. `strategies/manifest.json` pins every byte and retains Nano's MIT license. This is a conformance/learning corpus, not performance evidence or investment advice.
+
+`listBundledStrategies({category?})` reads verified metadata. `installBundledStrategies({directory,selection:'starter'|'all'})` or exact `ids` copies original `.nano` sources into the selected direct-child strategy directory without overwriting anything. The six-source starter pack spans momentum, mean reversion, trend, volatility and two risk controls. Installation sets neither execution nor permission; compile the copied source and review its required host signals and diagnostics.
 
 `scanStrategies({directory,python?})` scans direct regular files only: at most 100 strategies, 1,024 directory entries, and 16 KiB per file. It refuses symlinks and oversized inputs, retains source digests, and invokes **`llmre.nano_compile.compile_proposal`** for `.nano` source, preserving native effect admission and positioned compiler diagnostics. Install the entitled ATS runtime in the selected Python environment or set `AETHER_ATS_RUNTIME_PATH` to its absolute repository root. The bridge never imports modules from the strategy directory.
 
 `.py`, `.pine` and `.pinescript` return `needs_conversion`; they are never executed or claimed equivalent to a Nano strategy. Produce reviewed `.nano` source alongside the original and rescan it. There is no verified Pine/Python converter in this package. A compiled result is preparation evidence, not permission to execute or proof of a live data feed.
 
 The scan returns `{state:'scanned',directory,compiler,strategies,execution_enabled:false,recursive:false}`. Each strategy has `file` and `state` (`compiled`, `rejected`, `needs_conversion`, `unavailable`) plus source digest and diagnostics where available. The package does not mutate source files or the native strategy catalog.
+
+## Local journal
+
+`appendJournalEvent`, `readJournal` and `formatJournal` provide a bounded account-agent JSONL journal for setup and operator-visible status. Each entry has a UUID, timestamp, type, level, summary and small scalar details. Credential-shaped keys, control characters, oversized records, symlinks and files over 4 MiB are refused. `/ats journal [limit]` prints a concise tail; `/ats journal --json [limit]` and the standalone `journal dump` command produce a versioned JSON export. The journal never records browser pixels/page text, strategy source, prompts or credential values, and it is diagnostic evidence rather than execution authority.
 
 ## Browser and settings
 
@@ -39,6 +52,8 @@ The scan returns `{state:'scanned',directory,compiler,strategies,execution_enabl
 Opening validates readiness and creates one owned session. Only a fresh, matching native snapshot with a validated PNG, viewport, timestamp and budget can become `observing`; health or a launched viewer alone cannot. The observer distinguishes stale frames, expiry, unavailable evidence, exhausted budget and failed cleanup. Retry explicitly closes the old session before opening another; no automatic budget renewal occurs. Closing aborts observation and releases that exact session. The adapter supplies a bounded transport around the pinned SDK: deadline and cancellation cover the entire streamed body, responses are capped at 18 MiB, and redirects are refused.
 
 Native noVNC remains **unauthenticated and browser-host-local**. Open `http://127.0.0.1:6080/vnc.html` on the runtime's host. Never tunnel, proxy or publish noVNC or raw VNC. Remote authenticated API observation is supported, but it does not create a viewer on the terminal's machine. See the [Agent Browser security contract](https://github.com/AetherAI3/agent-browser/blob/9981040b2e873b4120d0bc57850cbbb917603708/docs/SECURITY.md).
+
+The current Agent Browser runtime contract is native Linux/POSIX. Windows Aether-Agent can use the typed client against a separately qualified Linux browser host, but that does not establish a local Windows headed/noVNC runtime. Do not label fixture screenshots or Windows client tests as that proof.
 
 Inside managed-agent chat, `/browser setup [URL]`, `open`, `status`, `refresh`, `stop` and `retry` control this lifecycle. `/ats browser` is an alias. ATS chat opens its configured view after memory verification; ordinary managed agents load browser support on demand. Background status redraws preserve the terminal draft and cursor.
 

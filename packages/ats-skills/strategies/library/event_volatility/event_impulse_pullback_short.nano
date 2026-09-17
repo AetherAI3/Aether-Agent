@@ -1,0 +1,35 @@
+// Bearish mirror of event_impulse_pullback_long. DOWNSIDE_IMPULSE_ATR = max
+// downward excursion from the event anchor divided by the pre-event 1m ATR.
+// BEAR_CROSS_CONFIRM = deterministic MES/MNQ and futures-flow agreement on
+// the downside, 0..1. All signals are nonnegative host measurements; bull and
+// bear terms are published separately so the two branches stay mutually
+// exclusive and inspectable.
+// REGIME: scheduled macro releases with a decisive first impulse lower that
+// holds its retracement. Do NOT fire outside an armed event window.
+// CONDITIONS: armed event, open entry window, downward impulse at least 0.8
+// pre-event ATRs, at least 60 percent of the impulse held through the first
+// pullback, bearish cross-market agreement, normalized liquidity.
+// INVALIDATION: host event risk model owns stop, hard flat at T+10m, and the
+// one-position-per-event lock.
+// SHAPE: 5s decision cadence after the observe-only impulse window; a strong
+// leg down, a shallow bounce that fails, then continuation.
+// NOT event_false_first_move_short: that rule sells a FAILED upside breakout;
+// this one sells confirmed downside continuation. The host's mutually
+// exclusive impulse terms prevent both arming on the same tape.
+// CALIBRATED ON: MES/MNQ around US red-folder releases, 5s cadence.
+// ATR-relative thresholds; re-verify per event type before promotion.
+strategy EventImpulsePullbackShort {
+
+    agent MacroEvent
+
+    every 5s {
+
+        if EVENT_READY > 0.5 and ENTRY_WINDOW_OPEN > 0.5 and DOWNSIDE_IMPULSE_ATR > 0.8 and RETRACE_HOLD_SCORE > 0.6 and BEAR_CROSS_CONFIRM > 0.55 and LIQUIDITY_OK > 0.5 {
+
+            sell(MES, 0.78)
+
+        }
+
+    }
+
+}

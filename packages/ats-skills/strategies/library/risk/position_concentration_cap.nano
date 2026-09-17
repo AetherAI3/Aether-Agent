@@ -1,0 +1,28 @@
+// Position concentration cap: pause when any single position exceeds 25
+// percent of the book.
+// REGIME: all of them. Concentration risk does not care about trend.
+// CONDITIONS: none. Armed whenever the book is open.
+// INVALIDATION: none. It is reset by the book changing shape, not by a signal.
+// SHAPE: 5m; position weights move on fills, not on ticks, so a faster cadence
+// would add checks without adding information.
+// NOT leverage_ceiling: that measures total size against equity, this measures
+// distribution. A book at 1x gross with everything in one name is fully inside
+// the leverage limit and is exactly the situation this rule exists for.
+// CALIBRATED ON: nothing instrument-specific. 25 percent is a book-level
+// figure. A concentrated book by mandate should raise it deliberately rather
+// than disarm the rule.
+strategy PositionConcentrationCap {
+
+    agent RiskDesk
+
+    every 5m {
+
+        if MAX_POSITION_PCT >= 25 {
+
+            pause()
+
+        }
+
+    }
+
+}

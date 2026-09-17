@@ -1,0 +1,33 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "1.0.0",
+  "name": "ZscoreFadeTrendFiltered",
+  "tier": "nano",
+  "determinism": {"clock": "injected", "entropy": "injected", "fastmath": false},
+  "params": [{"name": "window", "type": "int", "value": 20}, {"name": "trend_window", "type": "int", "value": 200}, {"name": "entry_z", "type": "float", "value": 2.0}],
+  "inputs": [{"name": "close", "type": "series<float>"}],
+  "warmup": 199,
+  "entries": ["n17"],
+  "provenance": {"compiler": {"name": "nnc", "version": "1.0.0"}, "sourceHash": "sha256:50713d5aff1348aed867f3a171518b774ac909bde81d14767b64de360c69bc50"},
+  "moduleHash": "sha256:3e02babcbfff958d6161c7ff89a0b25b4698bdf9cfc29d99de5305da11706872",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "id": "n1", "op": "input.ref", "inputs": [], "attrs": {"name": "close"}, "type": "series<float>" },
+    { "id": "n2", "op": "indicator", "inputs": ["n1"], "attrs": {"name": "ZSCORE", "periods": [20], "lookback": 19, "lifted": false}, "type": "series<float>" },
+    { "id": "n3", "op": "let", "inputs": ["n2"], "attrs": {"name": "z"}, "type": "series<float>" },
+    { "id": "n4", "op": "indicator", "inputs": ["n1"], "attrs": {"name": "SMA", "periods": [200], "lookback": 199, "lifted": false}, "type": "series<float>" },
+    { "id": "n5", "op": "compare.gt", "inputs": ["n1", "n4"], "type": "series<bool>" },
+    { "id": "n6", "op": "let", "inputs": ["n5"], "attrs": {"name": "regime_ok"}, "type": "series<bool>" },
+    { "id": "n7", "op": "schedule", "inputs": [], "attrs": {"interval": "1d"} },
+    { "id": "n8", "op": "param.ref", "inputs": [], "attrs": {"name": "entry_z"}, "type": "float" },
+    { "id": "n9", "op": "arith.neg", "inputs": ["n8"], "type": "float" },
+    { "id": "n10", "op": "compare.le", "inputs": ["n3", "n9"], "type": "series<bool>" },
+    { "id": "n11", "op": "logic.and", "inputs": ["n6", "n10"], "type": "series<bool>" },
+    { "id": "n12", "op": "series.index", "inputs": ["n3"], "attrs": {"offset": 1}, "type": "series<float>" },
+    { "id": "n13", "op": "compare.gt", "inputs": ["n3", "n12"], "type": "series<bool>" },
+    { "id": "n14", "op": "logic.and", "inputs": ["n11", "n13"], "type": "series<bool>" },
+    { "id": "n15", "op": "intent.emit", "inputs": [], "attrs": {"action": "BUY", "asset": "SPY", "confidence": 0.6} },
+    { "id": "n16", "op": "block", "inputs": ["n15"] },
+    { "id": "n17", "op": "rule", "inputs": ["n7", "n14", "n16"] }
+  ]
+}

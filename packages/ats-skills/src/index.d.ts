@@ -4,7 +4,20 @@ export interface MemoryReceipt extends Record<string, unknown> { state: "ready" 
 export interface StrategyRecord { file: string; state: "compiled" | "rejected" | "needs_conversion" | "unavailable"; source_sha256?: string; source_bytes?: number; code?: string; diagnostics?: Array<{line: number; column: number; message: string; severity: string}>; [key: string]: unknown; }
 export interface StrategyScan extends Record<string, unknown> { state: "scanned"; directory: string; compiler: "native_ats" | "unavailable"; strategies: StrategyRecord[]; execution_enabled: false; recursive: false; }
 export declare function initializeMemory(options: MemoryOptions): Promise<MemoryReceipt>;
+export interface MemoryWriterLeaseReceipt { schema_version: 'aether.ats.memory-writer-lease/1'; state: 'leased'; lease_id: string; agent_id: string; directory: string; owner_scope: { account_subject: string; cloud_origin: string }; pid: number; started_at: string; lock_scope: 'ats_runtime_writer'; runtime_exclusivity_verified: true; }
+export interface MemoryWriterLease { receipt: MemoryWriterLeaseReceipt; close(): Promise<void>; }
+export declare function acquireMemoryWriterLease(options: MemoryOptions): Promise<MemoryWriterLease>;
 export declare function scanStrategies(options: NativeOptions & { directory: string }): Promise<StrategyScan>;
+export interface BundledStrategy { id: string; name: string; category: string; ir_maturity: string; required_host_signals: string[]; starter: boolean; }
+export declare const NANO_LIBRARY_REVISION: string;
+export declare const STARTER_STRATEGIES: readonly string[];
+export declare function listBundledStrategies(options?: { category?: string }): Promise<{ schema_version: 'aether.ats.nano-library-list/1'; repository: string; revision: string; nano_version: string; strategies: BundledStrategy[]; performance_claimed: false; execution_enabled: false }>;
+export declare function installBundledStrategies(options: { directory: string; selection?: 'starter' | 'all'; ids?: string[] }): Promise<{ schema_version: 'aether.ats.nano-library-install/1'; repository: string; revision: string; nano_version: string; directory: string; installed: Array<{id: string; file: string}>; execution_enabled: false; permission_granted: false }>;
+export interface AtsJournalEvent { agentId: string; type: string; level?: 'info' | 'warning' | 'error'; summary: string; details?: Record<string, string | number | boolean | null>; }
+export interface AtsJournalRow { schema_version: 'aether.ats.journal/1'; event_id: string; recorded_at: string; agent_id: string; type: string; level: 'info' | 'warning' | 'error'; summary: string; details: Record<string, string | number | boolean | null>; }
+export declare function appendJournalEvent(file: string, event: AtsJournalEvent, options?: { now?: () => Date }): Promise<AtsJournalRow>;
+export declare function readJournal(file: string, options?: { limit?: number }): Promise<AtsJournalRow[]>;
+export declare function formatJournal(rows: AtsJournalRow[], options?: { json?: boolean }): string;
 export declare function validateBrowserUrl(value: string, base?: string): string;
 export interface BrowserObservation {
   sequence: number; capturedAt: string; origin: string; title: string;

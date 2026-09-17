@@ -1,0 +1,32 @@
+// Release integrity circuit breaker. RELEASE_CONFLICT = 1 when the host's
+// release plane detects any integrity failure: conflicting values between
+// sources, a CONFLICTED or LATE MacroReleasePacket status, calendar/source
+// disagreement about the schedule, or a failed payload hash check. The host
+// folds every integrity failure into this single flag so the halt cannot
+// miss a new failure mode.
+// REGIME: any armed macro event window. Control only - emits PAUSE, never
+// promoted, never counted as a setup. The host's fail-closed gates enforce
+// the same rule directly; this published rule is the auditable explanation.
+// CONDITIONS: none beyond the conflict flag.
+// INVALIDATION: none - releases only if the host downgrades the conflict,
+// which in v1 it does not do during the event window.
+// SHAPE: 1s, so a conflicted release halts proposals before the first 5s
+// qualify tick can act on poisoned numbers.
+// NOT event_liquidity_halt: that halts on market conditions; this halts on
+// data trust. A perfectly liquid tape with a conflicted release must still
+// halt every release-aware branch.
+// CALIBRATED ON: not calibrated - the flag is binary by contract and travels
+// unchanged across all event types and instruments.
+strategy EventReleaseIntegrityHalt {
+
+    every 1s {
+
+        if RELEASE_CONFLICT > 0.5 {
+
+            pause()
+
+        }
+
+    }
+
+}
