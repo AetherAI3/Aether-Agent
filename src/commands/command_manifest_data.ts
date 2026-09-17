@@ -90,9 +90,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "code"
     ],
     "deprecatedAliases": [],
-    "args": "[task]",
-    "summary": "run the coding agent or open its REPL",
-    "detailedHelp": "aether agent [task]\nrun the coding agent or open its REPL",
+    "args": "[task | list | create | show | configure | chat | activate | pause | resume]",
+    "summary": "run the coding agent or manage account agents and shared conversations",
+    "detailedHelp": "aether agent list | create [ATS] <name> | show <id> | configure <id> <key> <value> | chat [id] | activate|pause|resume <id>\nManaged agents sync with your account and use the shared Online DM. Legacy coding tasks remain supported with aether agent <task> or aether code <task>.",
     "section": "Start",
     "hidden": false,
     "permissionClass": "local-write",
@@ -151,13 +151,13 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "agent",
-      "usage": "aether agent [task]",
+      "usage": "aether agent [task | list | create | show | configure | chat | activate | pause | resume]",
       "visible": true,
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
+      "disposition": "changed",
+      "note": "Adds account-managed agents and shared Online conversations."
     }
   },
   {
@@ -169,7 +169,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "deprecatedAliases": [],
     "args": "[prompt]",
     "summary": "start chat or send one prompt",
-    "detailedHelp": "aether chat [prompt]\nstart chat or send one prompt",
+    "detailedHelp": "aether chat [prompt]\nstart chat or send one prompt\nUse --agent mag_<id> to open an account agent’s shared Online conversation.",
     "section": "Start",
     "hidden": false,
     "permissionClass": "network",
@@ -233,8 +233,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
+      "disposition": "changed",
+      "note": "Adds account-managed agents and shared Online conversations."
     }
   },
   {
@@ -3007,8 +3007,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "summary": "active agent sessions + UVT",
-    "detailedHelp": "/agents\nactive agent sessions + UVT",
+    "summary": "list account agents synced with Online; presets lists orchestrators",
+    "detailedHelp": "/agents [presets]\nShow account agents; open their shared DM with aether agent chat <id>. Use /agents presets for model orchestrators.",
     "section": "Session",
     "hidden": false,
     "permissionClass": "unknown",
@@ -3032,14 +3032,15 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "agents",
-      "usage": "/agents",
+      "usage": "/agents [presets]",
       "visible": true,
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
-    }
+      "disposition": "changed",
+      "note": "Adds account-managed agents and shared Online conversations."
+    },
+    "args": "[presets]"
   },
   {
     "key": "slash:tier",
@@ -5755,5 +5756,45 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "disposition": "existing",
       "note": null
     }
+  },
+  {
+    "key": "slash:agent-create",
+    "surface": "slash",
+    "name": "agent-create",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "create an account agent synced with Online",
+    "detailedHelp": "/agent-create [ATS] <name>\nCreate a managed agent draft in your account.",
+    "section": "Session",
+    "hidden": false,
+    "permissionClass": "account",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.agent-create",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:agent-create",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "agent-create",
+      "usage": "/agent-create [ATS] <name>",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Creates an account agent through the shared Cloud registry."
+    },
+    "args": "[ATS] <name>"
   }
 ];

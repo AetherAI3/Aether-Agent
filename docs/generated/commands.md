@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:7a10b8ff538bf0bb2872c51dbb4ed85fb21fc8cd9243cd1baac7b14035d681c3 -->
+<!-- manifest-digest: sha256:8dcc7beca062f2e001091daf60a0f55104acae32e86b9fcd8485055f68e57c67 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -18,9 +18,9 @@ show grouped help or command detail
 
 Permission: `read-only` · Availability: `runtime-dependent` · Telemetry: `shell.help`
 
-#### `aether agent [task]`
+#### `aether agent [task | list | create | show | configure | chat | activate | pause | resume]`
 
-run the coding agent or open its REPL
+run the coding agent or manage account agents and shared conversations
 
 Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.agent` · Aliases: `aether code` · Requires: `aether.hosted-or-local`
 
@@ -323,9 +323,9 @@ switch orchestrator \(or picker\)
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.agent` · Requires: `aether.catalogue`
 
-#### `/agents`
+#### `/agents [presets]`
 
-active agent sessions \+ UVT
+list account agents synced with Online; presets lists orchestrators
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.agents` · Requires: `aether.catalogue`
 
@@ -388,6 +388,12 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 manage and diagnose MCP servers
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.mcp`
+
+#### `/agent-create [ATS] <name>`
+
+create an account agent synced with Online
+
+Permission: `account` · Availability: `runtime-dependent` · Telemetry: `slash.agent-create`
 
 ### Agent Modes
 

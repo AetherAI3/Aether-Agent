@@ -26,15 +26,30 @@ test("retired product branding and URL stay out of the repository", () => {
   // sequence it rejects and can safely scan its own source.
   const retiredUrl = ["aethersystems.net", "terminal"].join("/");
   const retiredName = ["Aether", "Terminal"].join(" ");
-  const retiredInitialism = new RegExp(`\\bA${"TS"}\\b`);
 
   for (const path of repositoryFiles(root)) {
     const text = readFileSync(path, "utf8");
     const name = relative(root, path).replaceAll("\\", "/");
     assert.equal(text.toLowerCase().includes(retiredUrl), false, `${name} contains the retired URL`);
     assert.equal(text.includes(retiredName), false, `${name} contains retired product branding`);
-    assert.equal(retiredInitialism.test(text), false, `${name} contains the retired product initialism`);
   }
+});
+
+test("ATS is documented as the current account-agent trading adapter with explicit execution limits", () => {
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    version: string;
+    dependencies?: Record<string, string>;
+  };
+  const heading = `## Account agents and ATS — ${manifest.version} source candidate`;
+  const start = readme.indexOf(heading);
+  assert.ok(start >= 0, "README must label the ATS workflow with its source-candidate version");
+  const end = readme.indexOf("\n## ", start + heading.length);
+  const ats = readme.slice(start, end < 0 ? undefined : end).replace(/\s+/gu, " ");
+  assert.match(ats, /ATS is the trading adapter for account agents\./u);
+  assert.match(ats, /aether agent create ATS/u);
+  assert.match(ats, /native Nano compiler/u);
+  assert.match(ats, /does not yet provide model-controlled broker actions or automatic live orders/u);
+  assert.equal(manifest.dependencies?.["aether-ats-skills"], "file:packages/ats-skills");
 });
 
 test("README has durable assets and canonical public repository URLs", () => {
@@ -132,7 +147,10 @@ test("README states npm and source versions in a way publishing cannot falsify",
   const sourceEnd = readme.indexOf("<!-- SOURCE-0.3-WORKFLOWS:END -->");
   assert.ok(sourceStart >= 0 && sourceEnd > sourceStart, "README source-only scope markers are missing");
   const sourceScope = readme.slice(sourceStart, sourceEnd);
-  assert.match(sourceScope, new RegExp(`Requires ${sourceVersion.replaceAll(".", "\\.")} or newer`));
+  // The existing coding workflows retain their released minimum. The new ATS
+  // workflow declares the current source-candidate requirement separately.
+  assert.match(sourceScope, /Requires 0\.3\.2 or newer/u);
+  assert.ok(sourceScope.includes(`Account agents and ATS — ${sourceVersion} source candidate`));
 });
 
 test("README fenced shell examples use registered commands and flags", () => {

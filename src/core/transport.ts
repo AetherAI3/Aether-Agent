@@ -373,6 +373,16 @@ export class ApiClient {
     return this.request<T>("POST", path, { body, signal, timeoutMs });
   }
 
+  /** Mutations that need replay protection share the normal TLS, auth and timeout path. */
+  async postIdempotentJson<T>(path: string, body: unknown, idempotencyKey: string, signal?: AbortSignal): Promise<T> {
+    if (!/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) throw new Error("Invalid idempotency key");
+    return this.request<T>("POST", path, { body, signal, idempotencyKey });
+  }
+
+  async patchJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    return this.request<T>("PATCH", path, { body, signal });
+  }
+
   async getJson<T>(path: string, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
     return this.request<T>("GET", path, { signal, timeoutMs });
   }
@@ -590,7 +600,7 @@ export class ApiClient {
   private async request<T>(
     method: string,
     path: string,
-    opts: { body?: unknown; signal?: AbortSignal; timeoutMs?: number } = {},
+    opts: { body?: unknown; signal?: AbortSignal; timeoutMs?: number; idempotencyKey?: string } = {},
   ): Promise<T> {
     // `?? ` (not `||`) so an explicit 0 (disabled) from a caller survives —
     // only an OMITTED timeoutMs falls back to the env-driven default.
@@ -618,6 +628,7 @@ export class ApiClient {
             method,
             headers: {
               ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+              ...(opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : {}),
               Accept: "application/json",
               ...(await this.authHeaders(used)),
             },

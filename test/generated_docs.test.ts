@@ -51,7 +51,10 @@ test("generated command reference is deterministic and sourced from the canonica
   const second = renderCommandReference(COMMAND_MANIFEST);
   assert.equal(first, second);
   assert.match(first, /manifest-digest: sha256:[a-f0-9]{64}/);
-  assert.match(first, /`aether agent \[task\]`/);
+  assert.match(first, /`aether agent \[task \| list \| create \| show \| configure \| chat \| activate \| pause \| resume\]`/);
+  assert.match(first, /run the coding agent or manage account agents and shared conversations/);
+  assert.match(first, /Aliases: `aether code`/);
+  assert.match(first, /`\/agent-create \[ATS\] <name>`/);
   assert.match(first, /reset <section> \[--scope global\|project\] \[--preview\]/);
   assert.match(first, /`\/model <n\|id>`/);
   assert.match(first, /Permission: `local-write`/);

@@ -14,7 +14,11 @@ npm run build
 ```
 
 Use `npm ci --ignore-scripts`, not `npm install`, for a reproducible checkout.
-The package intentionally has zero runtime dependencies.
+The runtime dependency graph is deliberately bounded to the bundled
+`aether-ats-skills` source package and its exact `aether-browser` 0.2.2 and
+`aether-context` 0.3.1 dependencies. Changes to that graph require manifest,
+lockfile, source-provenance, package-allowlist and audit review. Installation
+hooks remain forbidden. The PyPI launcher has no Python runtime dependencies.
 
 ## Repository map
 

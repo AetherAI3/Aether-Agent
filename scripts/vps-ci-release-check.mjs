@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
+import { collectNpmBulkPayload } from "./npm-bulk-audit.mjs";
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
@@ -18,13 +19,25 @@ assert.deepEqual(packageManifest.bin, {
   aether: "dist/src/main.js",
   "aether-agent": "dist/src/main.js",
 });
-assert.deepEqual(packageManifest.dependencies ?? {}, {});
+const runtimeDependency = { "aether-ats-skills": "file:packages/ats-skills" };
+assert.deepEqual(packageManifest.dependencies, runtimeDependency);
+assert.deepEqual(packageManifest.bundledDependencies, ["aether-ats-skills"]);
+assert.deepEqual(packageManifest.optionalDependencies ?? {}, {});
+assert.deepEqual(packageManifest.peerDependencies ?? {}, {});
 
 assert.equal(packageLock.lockfileVersion, 3);
 assert.equal(packageLock.name, packageManifest.name);
 assert.equal(packageLock.version, packageManifest.version);
 assert.equal(lockRoot?.name, packageManifest.name);
 assert.equal(lockRoot?.version, packageManifest.version);
+assert.deepEqual(lockRoot?.dependencies, runtimeDependency);
+const atsManifest = await readJson("packages/ats-skills/package.json");
+assert.equal(atsManifest.name, "aether-ats-skills");
+assert.equal(atsManifest.version, "0.1.0");
+assert.deepEqual(atsManifest.dependencies, { "aether-browser": "0.2.2", "aether-context": "0.3.1" });
+assert.deepEqual(atsManifest.optionalDependencies ?? {}, {});
+assert.deepEqual(atsManifest.peerDependencies ?? {}, {});
+collectNpmBulkPayload(packageLock); // Validates the one local link and every registry-backed lock entry.
 
 const typeScriptPin = packageManifest.devDependencies?.typescript;
 assert.match(typeScriptPin, /^\d+\.\d+\.\d+$/);
@@ -45,6 +58,7 @@ for (const script of [
 const forbiddenHooks = ["preinstall", "install", "postinstall", "prepare"];
 for (const forbiddenHook of forbiddenHooks) {
   assert.equal(packageManifest.scripts?.[forbiddenHook], undefined);
+  assert.equal(atsManifest.scripts?.[forbiddenHook], undefined);
 }
 
 const publishedFiles = new Set(packageManifest.files ?? []);

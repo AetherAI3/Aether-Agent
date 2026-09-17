@@ -46,6 +46,8 @@ import {
   workflowSlash, workflowTemplatesSlash, workflowTemplateSlash,
 } from "./slash_vault_workflow.js";
 import { agentsSlash, delegateSlash, treeSlash, broadcastSlash, gatherSlash } from "./slash_orchestra.js";
+import { cmdManagedAgents } from "./managed_agents.js";
+import { createAtsHooks } from "./ats_agent.js";
 import {
   photogenSlash, reframeSlash, videogenSlash, animateSlash, recutSlash,
   outputSlash, storyboardSlash,
@@ -209,7 +211,12 @@ export async function handleSlash(
       break;
     }
     case "agents": {
-      await agentsSlash(ctx, out);
+      if (arg === "presets") await agentsSlash(ctx, out);
+      else await cmdManagedAgents(ctx, ["list"], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
+      break;
+    }
+    case "agent-create": {
+      await cmdManagedAgents(ctx, ["create", ...parts.slice(1)], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
       break;
     }
     case "doctor": {

@@ -36,6 +36,8 @@ import {
   suggestManifestCommand,
 } from "./commands/command_manifest.js";
 import { commandFlags } from "./core/command_dispatch.js";
+import { cmdManagedAgents, cmdManagedAgentChat, MANAGED_AGENT_VERBS } from "./commands/managed_agents.js";
+import { createAtsHooks } from "./commands/ats_agent.js";
 
 /** Coerce a parsed flag value to string | undefined. */
 const sf = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
@@ -153,6 +155,19 @@ export async function main(argv: string[]): Promise<number> {
   };
 
   const rest = positionals.slice(1);
+
+  // Managed IDs select the shared Online DM. Model/orchestrator preset IDs
+  // keep their existing meaning, and never cross into this account registry.
+  if ((cmd === "chat" || cmd === undefined) && flags.agent?.startsWith("mag_")) {
+    return cmdManagedAgentChat(ctx, flags.agent, rest.join(" "), { hooks: createAtsHooks() });
+  }
+  if (flags.agent?.startsWith("mag_")) {
+    process.stderr.write("Managed agents use their shared conversation: aether --agent <mag_id> chat\n");
+    return 1;
+  }
+  if (cmd === "agent" && rest[0] && MANAGED_AGENT_VERBS.has(rest[0])) {
+    return cmdManagedAgents(ctx, rest, { hooks: createAtsHooks() });
+  }
 
   // Dispatch table first (cli_registry.ts DISPATCH_COMMANDS). A table entry is
   // reachable because it *is* the dispatch — not because a switch case below

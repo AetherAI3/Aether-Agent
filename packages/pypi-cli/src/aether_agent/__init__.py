@@ -13,7 +13,7 @@ dist-tag unless you pin one, so `pipx install aether-agent` and
 
 from __future__ import annotations
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 #: The npm package this launcher installs and runs.
 NPM_PACKAGE = "aether-agents"

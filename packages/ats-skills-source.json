@@ -1,0 +1,18 @@
+{
+  "schema_version": "aether.ats.vendor/1",
+  "repository": "AetherAI3/ATSv2",
+  "path": "electron-app-v2/packages/aether-ats-skills",
+  "revision": "8f8ac98e023c8cb3665d258c634e65bb0d041602",
+  "files": {
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "README.md": "f746aa0875aaf6fa52dd332a2906182f556d291ecc31c2a9dfc7dc1e479c0981",
+    "SETTINGS.md": "aa4622824e2a15798e2bf3a139c55f824db346458fc48d85c5aacf0cb555dd9f",
+    "bin/aether-ats-skills.js": "5b36f921b09f3e40968229595a20f277d5c0ff7572f1fb544843bdebc1963b5e",
+    "package.json": "93844285682272f6bf5fae22305e1dc5071ef90dc13706015444bdd9bfa52a6a",
+    "python/bridge.py": "9b22114efde704e0792e17b23715cd3b7055e9dbd38b813bc0ed1932e45951b1",
+    "src/browser.js": "69fe73f41f07ec7404946931d8a1abeceb8574ff938a8248aa338df9d88bf262",
+    "src/index.d.ts": "d460010e41fbd94eb6188801d8129569d611bd77a514337719006dc2649ee94f",
+    "src/index.js": "9ddad3176734e9b91150df16c059bd0949638b146f1b8a14a04a729cbff3f19d",
+    "src/settings.js": "4bd80f11864eca9c3edbfec324388444cb0e5f3c3c7c6fad6e225a4bc97df543"
+  }
+}
