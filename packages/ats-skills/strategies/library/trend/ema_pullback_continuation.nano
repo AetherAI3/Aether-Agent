@@ -1,0 +1,46 @@
+// EMA pullback continuation. Nano computes both averages from a declared
+// `close` input: the rule buys a close that has fallen back to the twenty-bar
+// average while the fifty-bar average still holds underneath it.
+// REGIME: an established uptrend that breathes. Do NOT fire in a downtrend or
+// in a range - in a range the two averages braid together, so the band between
+// them narrows to nothing and "pullback" and "breakdown" become the same bar.
+// INPUTS: close (series<float>). No other host signal.
+// CONDITIONS: the close at or below the fast average and above the slow one.
+// That pair IS the trend test: requiring slow < close <= fast forces the two
+// averages into uptrend order, so a separate `fast_ma > slow_ma` condition is
+// implied by the band and cannot change the outcome on any frame. One was
+// written here first and removed - a conjunct no test can isolate is
+// decoration, and this file would rather be short than look thorough.
+// INVALIDATION: a close below the slow average, which is also what disarms the
+// rule - the second condition inverts, so the rule stops on its own.
+// SHAPE: 1d; a stair-step advance that keeps returning to the 20-day line.
+// NOT golden_cross: that fires once, on the crossing bar, and says the trend
+// began. This fires repeatedly, inside a trend that already exists, and says
+// nothing about when it started. NOT rsi_oversold_reversal: that measures
+// exhaustion in an oscillator; this measures location against two averages and
+// can fire with RSI at 55.
+// CALIBRATED ON: liquid US equity index proxies, daily. 20/50 is a convention,
+// not a discovery - the pair only needs to be far enough apart that the band
+// between them is wide enough to catch a normal pullback. Both periods are
+// `param`s so a host can re-fit them without editing the rule.
+strategy EmaPullbackContinuation {
+
+    param fast: int = 20
+    param slow: int = 50
+
+    input close: series<float>
+
+    let fast_ma = EMA(close, fast)
+    let slow_ma = EMA(close, slow)
+
+    every 1d {
+
+        if close <= fast_ma and close > slow_ma {
+
+            buy(SPY, 0.65)
+
+        }
+
+    }
+
+}

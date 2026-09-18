@@ -1,0 +1,43 @@
+// Release-aware twin-armed continuation, bull branch. Armed before CPI next
+// to cpi_impulse_pullback_short; neither may open exposure before the number
+// and the host's release scores make at most one branch qualify.
+// RELEASE_CONFIRMED = 1 only when the MacroReleasePacket status is CONFIRMED
+// from the official/vendor release adapter - never from a scraped calendar.
+// CPI_COOL_SCORE = bounded 0..1 cooler-than-consensus score computed
+// deterministically from standardized forecast errors across headline and
+// core fields; the matching CPI_HOT_SCORE is published separately so the
+// branches stay mutually exclusive (both are never high together).
+// UPSIDE_IMPULSE_ATR, RETRACE_HOLD_SCORE, BULL_CROSS_CONFIRM, LIQUIDITY_OK as
+// in event_impulse_pullback_long.
+// REGIME: CPI releases where the print is genuinely cool AND the tape agrees.
+// Do NOT fire on a cool print alone - the impulse and retrace terms must
+// confirm - and do NOT fire when the release packet is missing, provisional,
+// or conflicted: RELEASE_CONFIRMED stays 0 and this branch honestly abstains.
+// CONDITIONS: armed event, open entry window, confirmed release, cool CPI,
+// upward impulse at least 0.8 pre-event ATRs, held retracement, cross-market
+// agreement, normalized liquidity.
+// INVALIDATION: host event risk model owns stop, hard flat, and the
+// one-position-per-event lock.
+// SHAPE: 5s cadence after the observe-only impulse window; cool print, leg
+// up, shallow pullback that holds, continuation.
+// NOT event_impulse_pullback_long: same tape shape, but this variant demands
+// execution-grade release provenance and the fundamental sign to match the
+// move. When both qualify, the proposal board still selects only one.
+// CALIBRATED ON: MES around US CPI, 5s cadence. The 0.72 release threshold is
+// a versioned fixed scale until enough forecast-error history exists; never
+// silently retune it between events.
+strategy CpiImpulsePullbackLong {
+
+    agent MacroEvent
+
+    every 5s {
+
+        if EVENT_READY > 0.5 and ENTRY_WINDOW_OPEN > 0.5 and RELEASE_CONFIRMED > 0.5 and CPI_COOL_SCORE > 0.72 and UPSIDE_IMPULSE_ATR > 0.8 and RETRACE_HOLD_SCORE > 0.6 and BULL_CROSS_CONFIRM > 0.55 and LIQUIDITY_OK > 0.5 {
+
+            buy(MES, 0.78)
+
+        }
+
+    }
+
+}

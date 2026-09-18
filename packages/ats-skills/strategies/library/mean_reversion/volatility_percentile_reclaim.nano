@@ -1,0 +1,56 @@
+// Volatility-percentile reclaim. The two-bar signal is the same strict
+// lower-Bollinger-band excursion and reclaim shape readers already know, but it
+// is admitted only when current ATR is below the top decile of its own preceding
+// hundred observations. PERCENTRANK excludes the current cell, so an extreme
+// current ATR can reach 1.0 and veto the trade without contaminating its baseline.
+// SOURCE: Bollinger-band conventions and Engle (1982) conditional-volatility
+// research; the regime gate is an original hypothesis, with no source code copied.
+// REGIME: range-like or orderly pullback behavior outside an exceptional
+// volatility state. Do NOT use the gate as a claim that low volatility causes
+// reversal; it only separates a familiar reclaim from a distributional shock.
+// INPUTS: high, low, close (series<float>). Bars must be contiguous: ATR resets
+// across gaps, and PERCENTRANK stays absent until a full new history is present.
+// CONDITIONS: prior close at or below its prior lower band, current close above
+// its current lower band, and ATR rank below 0.9 against exactly the preceding
+// hundred ATR values. All three terms have independent mutation controls.
+// INVALIDATION: another close below the band, or ATR entering the excluded top
+// decile. Either says the excursion is continuing or the volatility regime has
+// changed; the host, not this rule, decides what to do with an existing position.
+// SHAPE: 1d; a two-bar downside excursion and reclaim after enough contiguous
+// history to compare today's range state with the preceding hundred ATR cells.
+// NOT bollinger_lower_reclaim: that rule takes every strict lower-band reclaim.
+// This one abstains when the same price shape occurs at an extreme ATR rank; the
+// percentile gate, not a different band threshold, is the structural hypothesis.
+// NOT zscore_fade_trend_filtered: that enters while z-score remains deeply
+// negative and uses a long price trend as its regime gate. This waits for a full
+// band reclaim and gates on the instrument's own volatility distribution.
+// CALIBRATED ON: liquid US equity index proxies, daily. Bollinger 20/2 and ATR
+// 14 are published conventions; 100 observations and 0.9 define the research
+// regime split. None is a profitability claim, and cadence changes need review.
+strategy VolatilityPercentileReclaim {
+
+    param band_window: int = 20
+    param band_mult: float = 2.0
+    param atr_window: int = 14
+    param rank_window: int = 100
+    param max_atr_rank: float = 0.9
+
+    input high: series<float>
+    input low: series<float>
+    input close: series<float>
+
+    let lower = BB_LOWER(close, band_window, band_mult)
+    let atr_now = ATR(high, low, close, atr_window)
+    let atr_rank = PERCENTRANK(atr_now, rank_window)
+
+    every 1d {
+
+        if close > lower and close[1] <= lower[1] and atr_rank < max_atr_rank {
+
+            buy(SPY, 0.6)
+
+        }
+
+    }
+
+}

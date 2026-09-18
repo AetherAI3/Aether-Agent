@@ -1,0 +1,30 @@
+// Max-drawdown circuit breaker: when portfolio drawdown reaches 5 percent,
+// pause all proposals and hand control to the named risk agent.
+// REGIME: all of them. This is a control, not a directional hypothesis, and it
+// is always applicable. It must never be promoted into an execution slot or
+// counted as a setup - it emits PAUSE, never BUY or SELL.
+// CONDITIONS: none. It is armed whenever the book is open.
+// INVALIDATION: none. A breaker is not a trade and does not get invalidated;
+// it is reset by the risk agent, deliberately and outside this strategy.
+// SHAPE: 1m, so it reacts within a bar rather than after one.
+// NOT atr_volatility_halt: that one halts on market volatility, this one halts
+// on realised portfolio loss. They are not redundant - the tape can be calm
+// while the book bleeds, and violent while the book is flat. Both should be
+// armed, and neither substitutes for the other.
+// CALIBRATED ON: nothing instrument-specific. 5 percent is a portfolio-level
+// figure and is the one threshold in this library that travels unchanged.
+strategy MaxDrawdownBreaker {
+
+    agent RiskDesk
+
+    every 1m {
+
+        if DRAWDOWN >= 5 {
+
+            pause()
+
+        }
+
+    }
+
+}

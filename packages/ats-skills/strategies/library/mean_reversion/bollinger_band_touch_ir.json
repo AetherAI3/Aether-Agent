@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "BollingerBandTouch",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1h" },
+    { "type": "Condition", "signal": "BB_PCT_B", "operator": "<=", "value": 0 },
+    { "type": "Intent", "action": "BUY", "asset": "SPY", "confidence": 0.8 }
+  ]
+}

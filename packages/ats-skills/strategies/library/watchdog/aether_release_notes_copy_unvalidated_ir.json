@@ -1,0 +1,13 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "AetherReleaseNotesCopyUnvalidated",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "PUBLIC_CANDIDATE", "operator": ">=", "value": 1 },
+    { "type": "Condition", "signal": "COPY_VALIDATED", "operator": "<=", "value": 0 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "ReleaseDesk" }
+  ]
+}

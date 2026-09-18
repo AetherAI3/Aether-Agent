@@ -1,0 +1,54 @@
+// Rolling-VWAP discount reversion. VWAP(close, volume, 20) is the volume
+// weighted average price over the last twenty bars; the discount is how far
+// below it the close has fallen, expressed as a percentage of the VWAP so the
+// number is comparable across price levels. An RSI gate keeps the rule from
+// buying a discount that is still deepening fast.
+// REGIME: intraday range trading around a well-populated volume profile. Do
+// NOT fire in a trending session - in a one-way tape the close is below VWAP
+// for hours and the discount is a description of the trend, not a deviation
+// from it. This rule has no trend filter and that is its main weakness.
+// INPUTS: close, volume (series<float>). Volume must be real traded size; the
+// weighting is the entire point, and a constant-volume feed collapses VWAP to
+// a simple moving average without any error being raised.
+// CONDITIONS: at least a one-percent discount to rolling VWAP, that discount
+// narrower than it was one bar ago, and RSI under 40. The narrowing term is the
+// trigger; RSI is a brake that removes the fastest part of a decline.
+// INVALIDATION: a close that keeps making new lows while the discount widens.
+// A widening discount is the rule being wrong, not the rule being early.
+// SHAPE: 15m; a drift below the session's volume-weighted centre whose discount
+// has started to reclaim.
+// NOT bollinger_lower_reclaim: that measures distance in units of dispersion
+// and waits for the excursion to end; this measures distance as a plain
+// percentage of a volume-weighted centre and enters into it. NOT
+// rsi_oversold_reversal: RSI here is a veto with a loose threshold of 40, not
+// the trigger - this rule can fire with RSI at 39 and nothing oversold about it.
+// CALIBRATED ON: crypto, 15m, continuous session. The one-percent discount is
+// absolute and does NOT travel: on a low-volatility instrument it is never
+// reached, and on a fast one it is reached every bar. It is a `param` for
+// exactly that reason. The twenty-bar VWAP window is also a session-shape
+// assumption - it is a rolling window, not an anchored session VWAP, so it
+// carries no notion of where the session began.
+strategy VwapBandReversion {
+
+    param window: int = 20
+    param discount_pct: float = 1.0
+    param rsi_window: int = 14
+    param rsi_ceiling: float = 40.0
+
+    input close: series<float>
+    input volume: series<float>
+
+    let anchor = VWAP(close, volume, window)
+    let discount = (anchor - close) / anchor * 100
+
+    every 15m {
+
+        if discount >= discount_pct and discount < discount[1] and RSI(close, rsi_window) < rsi_ceiling {
+
+            buy(BTCUSD, 0.6)
+
+        }
+
+    }
+
+}

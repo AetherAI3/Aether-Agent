@@ -1,0 +1,13 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "AetherReleaseNotesCoverage",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "MERGE_COVERAGE_AVAILABLE", "operator": "<=", "value": 0 },
+    { "type": "Condition", "signal": "MERGE_COVERAGE_EMPTY", "operator": "<=", "value": 0 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "ReleaseDesk" }
+  ]
+}

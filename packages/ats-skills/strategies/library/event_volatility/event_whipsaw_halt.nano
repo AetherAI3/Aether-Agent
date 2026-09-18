@@ -1,0 +1,33 @@
+// Whipsaw circuit breaker. WHIPSAW_SCORE = normalized count of event-anchor
+// crossings and direction flips inside the trailing observation window,
+// 0 = one-way tape, 1 = pure churn, computed deterministically by the host
+// from the same executable-mid series that produces the impulse measurements.
+// A tape that keeps crossing its own anchor has no continuation, no failed
+// break, and no second leg to trade - every directional hypothesis degrades
+// into coin flips at event spreads.
+// REGIME: any armed macro event window. Control only - emits PAUSE, never
+// promoted, never counted as a setup. The host enforces the same churn gate
+// directly; this published rule is the auditable explanation.
+// CONDITIONS: none beyond the churn reading.
+// INVALIDATION: none - releases when the tape picks a side and WHIPSAW_SCORE
+// decays under the threshold.
+// SHAPE: 5s, matching the qualify cadence - whipsaw is a property of the
+// window, not of a single second.
+// NOT event_liquidity_halt: spreads can be perfectly normal while the tape
+// chops; churn and cost are independent reasons to stand down. Both armed.
+// CALIBRATED ON: MES/MNQ around US red-folder releases, 5s cadence. 0.7
+// tolerates the ordinary post-release shakeout but halts sustained chop;
+// the anchor-crossing normalization travels across index futures.
+strategy EventWhipsawHalt {
+
+    every 5s {
+
+        if WHIPSAW_SCORE > 0.7 {
+
+            pause()
+
+        }
+
+    }
+
+}

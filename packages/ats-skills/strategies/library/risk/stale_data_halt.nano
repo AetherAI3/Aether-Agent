@@ -1,0 +1,32 @@
+// Stale data halt: pause when the feed has not delivered an accepted tick for
+// 30 seconds, and flag the gap for review.
+// REGIME: all of them, and it outranks every directional rule. A signal
+// computed from a stale tape is not a weak signal, it is a fabricated one.
+// CONDITIONS: none. Armed whenever anything downstream is consuming the feed.
+// INVALIDATION: none. Freshness is not a view.
+// SHAPE: 1m. The cadence bounds how long a stale tape can go unnoticed, so it
+// is set to the tightest interval the library uses.
+// NOT event_liquidity_halt: that asks whether the book can be traded, this asks
+// whether the numbers describing it are real at all. A liquid market with a
+// dead feed passes that rule and fails this one.
+// CALIBRATED ON: liquid instruments on a continuous session. A thin or
+// session-bound instrument has legitimate 30-second gaps and needs a wider
+// bound, or the rule fires all day and gets disarmed - which is worse than
+// never arming it.
+strategy StaleDataHalt {
+
+    agent RiskDesk
+
+    every 1m {
+
+        if FEED_AGE_SEC >= 30 {
+
+            pause()
+
+            observe()
+
+        }
+
+    }
+
+}

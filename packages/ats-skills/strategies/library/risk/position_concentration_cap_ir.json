@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "PositionConcentrationCap",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "MAX_POSITION_PCT", "operator": ">=", "value": 25 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "RiskDesk" }
+  ]
+}

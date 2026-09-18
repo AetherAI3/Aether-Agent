@@ -1,0 +1,28 @@
+// Williams %R reversal. Pine's ta.wpr ranges -100..0; Nano numbers are
+// non-negative, so the feed provides the shifted series:
+// WILLR_POS = Williams %R + 100 (range 0..100; < 20 means oversold).
+// REGIME: range, or a pullback within an uptrend. Do NOT fire in a sustained
+// downtrend - like every position-in-range oscillator it pins at the bottom
+// and stays there.
+// CONDITIONS: a defined range with a floor that has held at least once.
+// INVALIDATION: WILLR_POS remaining under 20 while the range floor gives way.
+// SHAPE: 1h; a probe of the low of the 14-period range that recovers.
+// NOT stochastic_oversold: Williams %R is the inverted stochastic - the same
+// measurement of position within the recent range. These two agreeing is a
+// single idea counted twice, not confirmation.
+// CALIBRATED ON: high-beta crypto, 1h. The 0-100 bound travels; on a slower
+// instrument the oscillator reaches 20 far less often, so this will simply go
+// quiet rather than misfire.
+strategy WilliamsRReversal {
+
+    every 1h {
+
+        if WILLR_POS(14) < 20 {
+
+            buy(SOLUSD, 0.75)
+
+        }
+
+    }
+
+}

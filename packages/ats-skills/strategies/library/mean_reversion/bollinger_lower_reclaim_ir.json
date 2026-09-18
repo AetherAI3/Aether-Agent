@@ -1,0 +1,29 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "1.0.0",
+  "name": "BollingerLowerReclaim",
+  "tier": "nano",
+  "determinism": {"clock": "injected", "entropy": "injected", "fastmath": false},
+  "params": [{"name": "window", "type": "int", "value": 20}, {"name": "mult", "type": "float", "value": 2.0}],
+  "inputs": [{"name": "close", "type": "series<float>"}],
+  "warmup": 20,
+  "entries": ["n13"],
+  "provenance": {"compiler": {"name": "nnc", "version": "1.0.0"}, "sourceHash": "sha256:8dddef8567c5093ea9fafbdb46f57bcb2932ed80367d67985659f971855629c1"},
+  "moduleHash": "sha256:5cf074f5681a4b4a04b4a2737907fa00d12e8d57e4a03bb05b1e81c8efba5bcf",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "id": "n1", "op": "input.ref", "inputs": [], "attrs": {"name": "close"}, "type": "series<float>" },
+    { "id": "n2", "op": "param.ref", "inputs": [], "attrs": {"name": "mult"}, "type": "float" },
+    { "id": "n3", "op": "indicator", "inputs": ["n1", "n2"], "attrs": {"name": "BB_LOWER", "periods": [20], "lookback": 19, "lifted": false}, "type": "series<float>" },
+    { "id": "n4", "op": "let", "inputs": ["n3"], "attrs": {"name": "lower"}, "type": "series<float>" },
+    { "id": "n5", "op": "schedule", "inputs": [], "attrs": {"interval": "1d"} },
+    { "id": "n6", "op": "compare.gt", "inputs": ["n1", "n4"], "type": "series<bool>" },
+    { "id": "n7", "op": "series.index", "inputs": ["n1"], "attrs": {"offset": 1}, "type": "series<float>" },
+    { "id": "n8", "op": "series.index", "inputs": ["n4"], "attrs": {"offset": 1}, "type": "series<float>" },
+    { "id": "n9", "op": "compare.le", "inputs": ["n7", "n8"], "type": "series<bool>" },
+    { "id": "n10", "op": "logic.and", "inputs": ["n6", "n9"], "type": "series<bool>" },
+    { "id": "n11", "op": "intent.emit", "inputs": [], "attrs": {"action": "BUY", "asset": "SPY", "confidence": 0.6} },
+    { "id": "n12", "op": "block", "inputs": ["n11"] },
+    { "id": "n13", "op": "rule", "inputs": ["n5", "n10", "n12"] }
+  ]
+}

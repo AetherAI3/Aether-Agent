@@ -1,0 +1,46 @@
+// Bollinger lower-band reclaim. The band is computed from the declared close
+// input, and the signal is a two-bar shape: closed below the lower band, then
+// closed back above it. Both halves are read at their own bar, which is what
+// `close[1] <= lower[1]` is for - comparing last bar's close with this bar's
+// band would silently mix two different band widths.
+// REGIME: a range, or a well-behaved uptrend that overshoots. Do NOT fire in a
+// volatility expansion: the bands widen to track the move, so price can close
+// outside and reclaim repeatedly on the way down while every reclaim fails.
+// INPUTS: close (series<float>). No other host signal.
+// CONDITIONS: prior close at or below the prior lower band, current close
+// above the current lower band. Nothing about trend - this rule deliberately
+// carries no regime filter, which is why it belongs beside one that does.
+// INVALIDATION: a second close back under the band. The reclaim thesis is that
+// the excursion is finished; a repeat says it was not.
+// SHAPE: 1d; a spike through the band that closes back inside the next bar.
+// NOT bollinger_band_touch: that is the level test on baseline IR - it fires
+// while price is outside the band, so it enters into the excursion. This waits
+// for the excursion to end, which trades earliness for confirmation and fires
+// far less often. NOT zscore_fade_trend_filtered: same statistical idea
+// (distance from a rolling mean in units of rolling dispersion) with a trend
+// gate attached; that one abstains in a downtrend, this one does not.
+// CALIBRATED ON: liquid US equity index proxies, daily. 20 bars and 2.0
+// standard deviations are Bollinger's published convention. The multiplier is
+// scale-free so it travels; what does not travel is the assumption that
+// returns are symmetric enough for a two-sigma excursion to be rare, which is
+// false on instruments with a fat left tail.
+strategy BollingerLowerReclaim {
+
+    param window: int = 20
+    param mult: float = 2.0
+
+    input close: series<float>
+
+    let lower = BB_LOWER(close, window, mult)
+
+    every 1d {
+
+        if close > lower and close[1] <= lower[1] {
+
+            buy(SPY, 0.6)
+
+        }
+
+    }
+
+}

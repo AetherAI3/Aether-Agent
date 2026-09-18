@@ -4,10 +4,12 @@
 
 # Aether Agent
 
-**A coding agent that lives in your terminal.**
+**Coding and account agents in your terminal.**
 
 It reads your repository, makes the change, runs the checks you name,
 and shows you the exit code. Hosted models or your own local Ollama.
+The 0.4.0 source candidate also brings your account agents and Online chats
+into the terminal, with guided ATS setup.
 
 [![CI](https://github.com/AetherAI3/aether-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/AetherAI3/aether-agent/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/aether-agents?label=npm)](https://www.npmjs.com/package/aether-agents)
@@ -46,6 +48,55 @@ decides whether the run is verified. No exit code, no claim.
 Prefer Python? `pipx install aether-agent` installs the same CLI and forwards
 every command to it, so `aether-agent code "..."` and `aether code "..."` do the
 same work. See [`packages/pypi-cli`](packages/pypi-cli/README.md).
+
+## Account agents and ATS — 0.4.0 source candidate
+
+ATS is the trading adapter for account agents.
+
+After signing in, use `aether agent list` to see the same managed agents as
+Aether Online. `aether agent chat` opens the one-column picker; select an agent
+to read and send messages in its existing Online conversation.
+
+```bash
+aether agent list
+aether agent create ATS Atlas
+aether agent configure <agent-id> purpose "Review my trading strategies"
+aether agent chat <agent-id>
+```
+
+ATS setup asks for a local memory folder, a memory size, a strategy folder and
+data provider/symbol settings. Local resources belong to the verified account
+and agent; rotating a token preserves that identity. Switching accounts while
+chat is open closes its local resources and requires reopening the conversation.
+The packaged adapters verify storage and report native Nano compiler results.
+Inside ATS chat, type /ats status, /ats strategies or /ats data to inspect the
+workspace. Shift-Tab cycles the
+local ATS permission preference. Model availability, projects, APR memory and
+UVT admission remain enforced by Cloud.
+
+ATS chat opens the configured browser view after memory verification. For any
+managed agent, `/browser setup [URL]` configures the connection and `/browser open`
+opens it. Use `/browser status`, `/browser refresh`, `/browser stop` or
+`/browser retry` to manage the view; `/ats browser` is an alias. Status updates
+preserve your draft and cursor. LIVE requires a fresh validated screenshot;
+an open window alone is not proof of observation. Retry starts a new bounded
+session after releasing the old one. Cleanup receipts survive restarts. If a
+creation response was lost, an idle runtime cannot prove that request finished;
+the terminal retains the receipt and blocks replacement until cleanup is known.
+
+The local API defaults to `http://127.0.0.1:8092`. Run
+`npx aether-browser@0.2.2 doctor` to check the separately installed runtime.
+Remote APIs use HTTPS and environment credentials. The native noVNC viewer
+stays on the browser host and must never be tunneled or published.
+The bundled read-only visual skill exposes verified images for an admitted
+host; Cloud DM does not yet receive those images or control this browser.
+
+These commands require the matching Cloud terminal adapter. ATS setup also
+requires its Python engine and a separately running Agent Browser runtime;
+missing services are reported explicitly. This candidate prepares and observes
+an ATS workspace. It does not yet provide model-controlled broker actions or
+automatic live orders. See the [candidate packet](docs/releases/OPERATOR-PACKET-v0.4.0.md)
+for the qualification still required before publication.
 
 ## Pick where the model runs
 
@@ -138,7 +189,8 @@ Design Lab. Sign in once, then pick where you want to work that day.
 
 Aether Code and Aether Agent are deliberately separate products. The CLI is
 standalone and open source: on the local route it needs no Aether account at
-all, and it makes no claim to hand a session back and forth with the web app.
+all. Coding workspace sessions stay on their host; the managed-agent workflow
+above shares account agents and their Online DM conversations.
 
 ### Coming next: live session viewing
 
@@ -187,7 +239,7 @@ The repository and the published package are versioned independently.
 |---|---:|---|
 | npm `latest` | [![npm latest](https://img.shields.io/npm/v/aether-agents?label=&color=14b8a6)](https://www.npmjs.com/package/aether-agents) | The published package; the badge resolves the live dist-tag. |
 | PyPI `aether-agent` | [![PyPI latest](https://img.shields.io/pypi/v/aether-agent?label=&color=3775a9)](https://pypi.org/project/aether-agent/) | A launcher that installs and runs the npm CLI. It follows npm `latest` unless you pin one. |
-| `main` source build | **0.3.2** | The declared and published base plus the terminal, settings, and voice convergence tracked explicitly as [Unreleased](RELEASE_NOTES.md). |
+| `main` source build | **0.4.0** | Source candidate for shared agents and ATS setup; publication and live-service qualification are recorded separately in the [operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md). |
 
 - **[Release notes](RELEASE_NOTES.md)** — one entry per release, in plain language.
 - **[Release log](docs/releases/README.md)** — dated candidate, publication, and
@@ -221,8 +273,9 @@ npm run release:truth
 npm pack --dry-run
 ```
 
-The package has no runtime dependencies — TypeScript and Node types are
-development-only. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull
+The runtime bundles the reviewed `aether-ats-skills` source package with exact
+`aether-browser` and `aether-context` dependencies. TypeScript and Node types
+remain development-only. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull
 request, and see the [architecture and protocol docs](docs/) or
 [production operations](docs/PRODUCTION_OPERATIONS.md) if you are going deeper.
 
@@ -232,5 +285,6 @@ Bugs and feature requests go to
 [GitHub issues](https://github.com/AetherAI3/aether-agent/issues). Security
 reports use the private path in [SECURITY.md](SECURITY.md).
 
-Apache-2.0 — use it, fork it, ship it. The license covers the code, not the
+The Agent and bundled ATS adapter code are Apache-2.0. The paid ATS engine is a
+separate prerequisite. The license covers the code, not the
 Aether name or the hosted service ([LICENSE](LICENSE) · [NOTICE.md](NOTICE.md)).

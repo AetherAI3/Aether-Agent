@@ -46,6 +46,8 @@ import {
   workflowSlash, workflowTemplatesSlash, workflowTemplateSlash,
 } from "./slash_vault_workflow.js";
 import { agentsSlash, delegateSlash, treeSlash, broadcastSlash, gatherSlash } from "./slash_orchestra.js";
+import { cmdManagedAgents } from "./managed_agents.js";
+import { createAtsHooks } from "./ats_agent.js";
 import {
   photogenSlash, reframeSlash, videogenSlash, animateSlash, recutSlash,
   outputSlash, storyboardSlash,
@@ -118,6 +120,12 @@ export async function handleSlash(
     case "help":
     case "":
       printSlashHelp(out, arg);
+      break;
+    case "browser":
+    case "ats":
+      // These operations belong to the managed chat hook/session lifecycle.
+      // The coding REPL only gives a handoff, and never replays the arguments.
+      out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
       break;
     case "models":
       await showPicker(ctx, out, "model", signal);
@@ -209,7 +217,12 @@ export async function handleSlash(
       break;
     }
     case "agents": {
-      await agentsSlash(ctx, out);
+      if (arg === "presets") await agentsSlash(ctx, out);
+      else await cmdManagedAgents(ctx, ["list"], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
+      break;
+    }
+    case "agent-create": {
+      await cmdManagedAgents(ctx, ["create", ...parts.slice(1)], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
       break;
     }
     case "doctor": {

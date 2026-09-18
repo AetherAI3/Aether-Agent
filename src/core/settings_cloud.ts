@@ -19,7 +19,6 @@
 import { createHash } from "node:crypto";
 
 import { HttpError } from "./errors.js";
-import type { ApiClient } from "./transport.js";
 import {
   AetherSettingsError,
   assertScopeAllowed,
@@ -31,6 +30,20 @@ import {
 } from "./settings_canonical.js";
 
 export const CODE_SETTINGS_BASE = "/code/settings" as const;
+
+interface SettingsApiClient {
+  getJson<T>(path: string, signal?: AbortSignal, timeoutMs?: number): Promise<T>;
+  patchJson<T>(
+    path: string,
+    body: unknown,
+    opts?: { headers?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<T>;
+  postJsonWithHeaders<T>(
+    path: string,
+    body: unknown,
+    opts?: { headers?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<T>;
+}
 
 /** The scopes the server accepts a mutation at. `device` is never one of them. */
 export type CloudWritableScope = Extract<CanonicalScope, "account" | "project">;
@@ -198,7 +211,7 @@ export function idempotencyKeyFor(request: {
 }
 
 export interface CloudSettingsClientDeps {
-  readonly api: Pick<ApiClient, "getJson" | "patchJson" | "postJsonWithHeaders">;
+  readonly api: SettingsApiClient;
 }
 
 export class CloudSettingsClient {

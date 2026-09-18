@@ -1,0 +1,28 @@
+// Daily loss limit: when the session's realised loss reaches 2 percent of
+// starting equity, pause all proposals and hand control to the risk desk.
+// REGIME: all of them. This is a control, not a directional hypothesis.
+// CONDITIONS: none. It is armed from the session open.
+// INVALIDATION: none. A limit is not a trade. It resets on the next session
+// boundary, which the host owns - Nano has no clock of its own.
+// SHAPE: 1m, so a fast tape cannot run through the limit between checks.
+// NOT max_drawdown_breaker: that measures peak-to-trough over the life of the
+// book and can sit quiet through a catastrophic single day if the book was up
+// beforehand. This one resets daily and catches exactly that case. Both should
+// be armed; neither subsumes the other.
+// CALIBRATED ON: nothing instrument-specific. 2 percent is a session-level
+// figure and travels unchanged.
+strategy DailyLossLimit {
+
+    agent RiskDesk
+
+    every 1m {
+
+        if DAY_LOSS_PCT >= 2 {
+
+            pause()
+
+        }
+
+    }
+
+}

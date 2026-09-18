@@ -1,0 +1,40 @@
+// Unattached-candidate alert: raise for review when a release candidate has
+// been sitting without its source attachment for longer than the host's
+// grace period. HAS_RELEASE_CANDIDATE is 1 once a draft release note exists;
+// HAS_SOURCE_ATTACHMENT is 1 once that draft carries the merge, commit or
+// artifact it is describing; PENDING_AGE_SECONDS is how long the candidate has
+// been in that state, in whole seconds.
+// The age term is the whole rule. A candidate with no attachment is normal for
+// the first few minutes of writing it; a candidate with no attachment an hour
+// later is a note nobody can check against anything.
+// REGIME: all of them. This is a property of the draft, not of the system it
+// describes.
+// CONDITIONS: the host resets PENDING_AGE_SECONDS when the candidate is
+// revised, so the age measures the current state rather than the candidate's
+// whole life.
+// INVALIDATION: the attachment arriving, or the candidate being withdrawn.
+// Either takes the rule out of its trigger with no memory of having fired.
+// SHAPE: 5m against an hour-long threshold, so the alert lands within a
+// twelfth of the grace period it is measuring.
+// NOT aether_release_notes_uncovered_merge: that one fires when no candidate
+// exists at all. This one fires when a candidate exists and cannot be traced
+// back to what it claims to describe.
+// CALIBRATED ON: a one-hour grace period, which is a policy figure and does
+// not travel - a programme that drafts notes in a batch at the end of the week
+// should raise it, and one that generates them automatically should lower it
+// until the threshold is longer than the generator's own latency.
+strategy AetherReleaseNotesCandidateUnattached {
+
+    agent ReleaseDesk
+
+    every 5m {
+
+        if HAS_RELEASE_CANDIDATE >= 1 and HAS_SOURCE_ATTACHMENT <= 0 and PENDING_AGE_SECONDS >= 3600 {
+
+            observe()
+
+        }
+
+    }
+
+}

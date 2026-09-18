@@ -1,0 +1,17 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "EventImpulsePullbackShort",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5s" },
+    { "type": "Condition", "signal": "EVENT_READY", "operator": ">", "value": 0.5 },
+    { "type": "Condition", "signal": "ENTRY_WINDOW_OPEN", "operator": ">", "value": 0.5 },
+    { "type": "Condition", "signal": "DOWNSIDE_IMPULSE_ATR", "operator": ">", "value": 0.8 },
+    { "type": "Condition", "signal": "RETRACE_HOLD_SCORE", "operator": ">", "value": 0.6 },
+    { "type": "Condition", "signal": "BEAR_CROSS_CONFIRM", "operator": ">", "value": 0.55 },
+    { "type": "Condition", "signal": "LIQUIDITY_OK", "operator": ">", "value": 0.5 },
+    { "type": "Intent", "action": "SELL", "asset": "MES", "confidence": 0.78 },
+    { "type": "Agent", "name": "MacroEvent" }
+  ]
+}

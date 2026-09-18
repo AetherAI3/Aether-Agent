@@ -1,0 +1,60 @@
+// MACD zero-line reclaim. The MACD line is EMA(fast) - EMA(slow), so it
+// crosses zero exactly when the fast average retakes the slow one. This rule
+// fires on that single bar and no other: `line[1] <= 0` is what turns a level
+// test into an edge test, and it is the reason the rule needs history rather
+// than a threshold.
+// REGIME: the turn out of a downtrend or a long range into an advance. Do NOT
+// fire inside an established trend - the line is already well above zero there
+// and the crossing happened bars or months ago.
+// INPUTS: close (series<float>). No other host signal.
+// CONDITIONS: the line above zero this bar, at or below zero last bar, and the
+// histogram positive so the line is above its own signal rather than merely
+// above zero on a spike that is already fading.
+// WHY THE HISTOGRAM TERM IS NOT REDUNDANT: it looks redundant, and an earlier
+// revision of this file deleted it on the argument that a line crossing up
+// through zero has its signal EMA below it by construction. That argument holds
+// only for the FIRST cross out of a sustained negative stretch. After a rally
+// and a retrace the signal EMA still carries the memory of the earlier high
+// line values, so it sits ABOVE the line at the moment of a second crossing.
+// The concrete case is pinned in tests as
+// `test_macd_zero_reclaim_ignores_a_second_cross_under_its_own_signal`: a
+// 45-bar decline, 19 bars up, 11 bars down, 4 bars up, where bar 78 has
+// line = +0.3243, line[1] = -0.0980 and hist = -3.6859. Without this term the
+// rule fires there. That is the fading-spike case, and it is the reason the
+// term exists.
+// INVALIDATION: the line falling back under zero. A reclaim that does not hold
+// is a failed turn; the rule cannot re-fire until the line goes negative again
+// and comes back, which is the behaviour you want.
+// SHAPE: 1d; one bar, at the crossing.
+// NOT macd_histogram_flip: that watches the line against its own signal, which
+// happens several times inside a single trend. This watches the line against
+// zero, which happens once per regime change. Same family, an order of
+// magnitude apart in fire rate. NOT golden_cross: same idea in a different
+// coordinate system - golden_cross reads a host-supplied SMA spread on a much
+// slower pair, this computes an EMA spread on a fast one.
+// CALIBRATED ON: liquid US equity index proxies, daily. 12/26/9 is Appel's
+// published default and is a convention rather than a fitted value; the zero
+// crossing itself is scale-free, so the rule travels across instruments in a
+// way that an absolute MACD threshold would not.
+strategy MacdZeroLineReclaim {
+
+    param fast: int = 12
+    param slow: int = 26
+    param smoothing: int = 9
+
+    input close: series<float>
+
+    let line = MACD_LINE(close, fast, slow)
+    let hist = MACD_HIST(close, fast, slow, smoothing)
+
+    every 1d {
+
+        if line > 0 and line[1] <= 0 and hist > 0 {
+
+            buy(QQQ, 0.6)
+
+        }
+
+    }
+
+}

@@ -1,0 +1,46 @@
+// Public-release proof guard: hold publication while a release note bound for
+// a public surface has no required proof behind it. PUBLIC_CANDIDATE is 1 when
+// the candidate is going somewhere outside the organisation;
+// REQUIRED_PROOF_AVAILABLE is 1 once every claim the host requires evidence
+// for - a green run, a signed artifact, a linked receipt - is actually
+// retrievable.
+// PUBLIC_RELEASE_NOT_PROVEN is a disjunction: either the proof is missing or
+// the copy was never validated. Baseline Nano IR carries an and-chain and has
+// no `or` node, so the two halves are two entries, the way event_volatility
+// splits a bull and a bear term rather than signing one series. This file is
+// the proof half; aether_release_notes_copy_unvalidated is the copy half. Both
+// map to the same reason code, and a host deploying one without the other has
+// deployed half a guard.
+// This rule gates release-note publication and nothing else. It must never be
+// wired to a branch, a deploy, or an engineering merge: unproven copy is a
+// reason not to publish a claim, never a reason to block engineering work.
+// REGIME: all of them, for public surfaces only. An internal candidate has
+// PUBLIC_CANDIDATE 0 and this rule is silent on it by construction.
+// CONDITIONS: the host decides what counts as required proof for a given
+// surface before publishing the boolean, and publishes 0 when it does not know
+// rather than assuming the proof exists.
+// INVALIDATION: the proof becoming retrievable. The rule proposes a hold; it
+// does not latch and does not decide when the hold ends.
+// SHAPE: 5m, matching the rest of the release-note family so one batch is
+// evaluated by every rule on the same tick.
+// NOT aether_release_notes_copy_unvalidated: that is the other half of the
+// same disjunction and asks whether the words were checked. This one asks
+// whether the evidence behind the words can be fetched at all.
+// CALIBRATED ON: nothing numeric; both comparisons are against host booleans.
+// What does not travel is the proof policy - which claims need evidence on
+// which surface is the publishing organisation's decision.
+strategy AetherReleaseNotesProofMissing {
+
+    agent ReleaseDesk
+
+    every 5m {
+
+        if PUBLIC_CANDIDATE >= 1 and REQUIRED_PROOF_AVAILABLE <= 0 {
+
+            pause()
+
+        }
+
+    }
+
+}

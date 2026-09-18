@@ -16,6 +16,9 @@ interface PackageManifest {
   engines?: unknown;
   repository?: unknown;
   dependencies?: unknown;
+  bundledDependencies?: unknown;
+  optionalDependencies?: unknown;
+  peerDependencies?: unknown;
   scripts?: unknown;
 }
 
@@ -53,6 +56,47 @@ const REQUIRED_PUBLIC_ASSETS = ["assets/aether-agent-hero.png"] as const;
 const ALLOWED_PUBLIC_ASSETS = new Set<string>(REQUIRED_PUBLIC_ASSETS);
 
 const MAX_UNPACKED_BYTES = 5_000_000;
+const ATS_DEPENDENCY = { "aether-ats-skills": "0.2.0" };
+const ATS_SOURCE_FILES = ["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"];
+const RUNTIME_PACKAGES = {
+  "aether-ats-skills": { version: "0.2.0", entry: "src/index.js" },
+  "aether-browser": { version: "0.2.2", entry: "src/index.js" },
+  "aether-context": { version: "0.3.1", entry: "bin/aether-context.js" },
+} as const;
+
+function exactRecord(value: unknown, expected: Record<string, string>): boolean {
+  const actual = record(value);
+  return !!actual && Object.keys(actual).length === Object.keys(expected).length
+    && Object.entries(expected).every(([key, expectedValue]) => actual[key] === expectedValue);
+}
+
+function runtimeRoots(name: keyof typeof RUNTIME_PACKAGES): string[] {
+  return name === "aether-ats-skills" ? [`node_modules/${name}/`]
+    : [`node_modules/${name}/`, `node_modules/aether-ats-skills/node_modules/${name}/`];
+}
+
+function allowedRuntimePath(path: string): boolean {
+  const strategyAsset = (relative: string): boolean => relative === "strategies/catalog.json" || relative === "strategies/NANO-LICENSE"
+    || relative === "strategies/NANO-STRATEGY-LIBRARY.md" || relative === "strategies/manifest.json"
+    || /^strategies\/library\/[a-z0-9_]+\/[a-z0-9_]+(?:_ir\.json|\.nano)$/.test(relative);
+  if (path === "packages/ats-skills-source.json") return true;
+  if (path.startsWith("packages/ats-skills/")) {
+    const relative = path.slice("packages/ats-skills/".length);
+    return ATS_SOURCE_FILES.includes(relative) || strategyAsset(relative);
+  }
+  for (const name of Object.keys(RUNTIME_PACKAGES) as (keyof typeof RUNTIME_PACKAGES)[]) {
+    for (const prefix of runtimeRoots(name)) {
+      if (!path.startsWith(prefix)) continue;
+      const relative = path.slice(prefix.length);
+      if (/^(?:package\.json|README\.md|LICENSE(?:\.md)?)$/.test(relative)) return true;
+      if (name === "aether-ats-skills" && relative === "SETTINGS.md") return true;
+      if (name === "aether-context") return relative === "bin/aether-context.js";
+      if (/^src\/[A-Za-z0-9_-]+\.(?:js|d\.ts)$/.test(relative)) return true;
+      if (name === "aether-ats-skills" && (["python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"].includes(relative) || strategyAsset(relative))) return true;
+    }
+  }
+  return false;
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -78,13 +122,17 @@ export function validateManifest(manifest: PackageManifest, expectedTag?: string
     errors.push("package repository.url must match the trusted publisher repository");
   }
 
-  const dependencies = record(manifest.dependencies);
-  if (dependencies && Object.keys(dependencies).length > 0) {
-    errors.push("runtime dependencies are forbidden by the zero-dependency production contract");
+  if (!exactRecord(manifest.dependencies, ATS_DEPENDENCY)) errors.push("runtime dependencies must be exactly the reviewed bundled aether-ats-skills source package");
+  if (!Array.isArray(manifest.bundledDependencies) || manifest.bundledDependencies.length !== 1 || manifest.bundledDependencies[0] !== "aether-ats-skills") {
+    errors.push("bundledDependencies must contain exactly aether-ats-skills");
+  }
+  for (const kind of ["optionalDependencies", "peerDependencies"] as const) {
+    if (manifest[kind] !== undefined && !exactRecord(manifest[kind], {})) errors.push(`${kind} must not widen the reviewed runtime dependency graph`);
   }
 
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   if (!files.includes("dist/src")) errors.push("package files must include dist/src");
+  for (const path of ["packages/ats-skills", "packages/ats-skills-source.json"]) if (!files.includes(path)) errors.push(`package files must include reviewed ATS source ${path}`);
   for (const path of REQUIRED_GENERATED_DOCS) if (!files.includes(path)) errors.push(`package files must include generated public document ${path}`);
   for (const path of REQUIRED_PUBLIC_ASSETS) if (!files.includes(path)) errors.push(`package files must include public asset ${path}`);
   if (files.includes("dist") || files.some((value) => typeof value === "string" && value.includes("test"))) {
@@ -92,6 +140,9 @@ export function validateManifest(manifest: PackageManifest, expectedTag?: string
   }
 
   const scripts = record(manifest.scripts);
+  for (const hook of ["preinstall", "install", "postinstall", "prepare"]) {
+    if (scripts?.[hook] !== undefined) errors.push(`runtime lifecycle hook ${hook} is forbidden`);
+  }
   if (typeof scripts?.["prepack"] !== "string" || !scripts["prepack"].includes("build")) {
     errors.push("prepack must build the release artifact");
   }
@@ -123,11 +174,22 @@ export function validatePack(report: PackReport, manifest: PackageManifest): str
   }
 
   for (const path of paths) {
-    const allowed = REQUIRED_ROOT_FILES.has(path) || ALLOWED_GENERATED_DOCS.has(path) || ALLOWED_PUBLIC_ASSETS.has(path) || path.startsWith("dist/src/");
+    const allowed = REQUIRED_ROOT_FILES.has(path) || ALLOWED_GENERATED_DOCS.has(path) || ALLOWED_PUBLIC_ASSETS.has(path) || path.startsWith("dist/src/") || allowedRuntimePath(path);
     if (!allowed) errors.push(`unexpected package content: ${path}`);
     if (/(^|\/)(test|tests|_loopstate)(\/|$)/i.test(path) || /(^|\/)\.env(?:\.|$)/i.test(path)) {
       errors.push(`sensitive or non-runtime package content: ${path}`);
     }
+  }
+  for (const name of Object.keys(RUNTIME_PACKAGES) as (keyof typeof RUNTIME_PACKAGES)[]) {
+    const roots = runtimeRoots(name).filter((prefix) => paths.has(`${prefix}package.json`));
+    if (roots.length !== 1) errors.push(`package must bundle exactly one ${name} manifest`);
+    for (const prefix of roots) if (!paths.has(`${prefix}${RUNTIME_PACKAGES[name].entry}`)) errors.push(`package is missing bundled runtime entry ${prefix}${RUNTIME_PACKAGES[name].entry}`);
+  }
+  for (const path of ["src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "strategies/manifest.json", "strategies/catalog.json", "bin/aether-ats-skills.js"]) {
+    if (!paths.has(`node_modules/aether-ats-skills/${path}`)) errors.push(`package is missing ATS runtime file ${path}`);
+  }
+  for (const path of ["packages/ats-skills-source.json", ...ATS_SOURCE_FILES.map((file) => `packages/ats-skills/${file}`)]) {
+    if (!paths.has(path)) errors.push(`package is missing reviewed ATS source ${path}`);
   }
   if (report.unpackedSize > MAX_UNPACKED_BYTES) {
     errors.push(`unpacked package exceeds ${MAX_UNPACKED_BYTES} bytes`);
@@ -227,6 +289,32 @@ function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8")) as unknown;
 }
 
+/** Verify the installed graph that npm will bundle, including the reviewed local source. */
+export function validateRuntimeGraph(root: string): string[] {
+  const errors: string[] = [];
+  try { execFileSync(process.execPath, [join(root, "scripts/sync-ats-skills.mjs"), "--check"], { cwd: root, stdio: "pipe", timeout: 30_000 }); }
+  catch { errors.push("ATS source inventory and digests must pass ats:check"); }
+  for (const name of Object.keys(RUNTIME_PACKAGES) as (keyof typeof RUNTIME_PACKAGES)[]) {
+    const locations = runtimeRoots(name).map((prefix) => join(root, prefix, "package.json")).filter(existsSync);
+    if (locations.length !== 1) { errors.push(`installed runtime graph must contain exactly one ${name}`); continue; }
+    const manifest = record(readJson(locations[0]!));
+    if (manifest?.["name"] !== name || manifest?.["version"] !== RUNTIME_PACKAGES[name].version) errors.push(`installed ${name} must match its reviewed exact name and version`);
+    const expected: Record<string, string> = name === "aether-ats-skills" ? { "aether-browser": "0.2.2", "aether-context": "0.3.1" } : {};
+    if (!exactRecord(manifest?.["dependencies"] ?? {}, expected)) errors.push(`installed ${name} dependencies differ from the reviewed runtime graph`);
+    for (const kind of ["optionalDependencies", "peerDependencies"]) {
+      if (!exactRecord(manifest?.[kind] ?? {}, {})) errors.push(`installed ${name} ${kind} widen the runtime graph`);
+    }
+    const scripts = record(manifest?.["scripts"]);
+    for (const hook of ["preinstall", "install", "postinstall", "prepare"]) {
+      if (scripts?.[hook] !== undefined) errors.push(`installed ${name} has forbidden lifecycle hook ${hook}`);
+    }
+    if (name === "aether-ats-skills" && readFileSync(locations[0]!, "utf8") !== readFileSync(join(root, "packages/ats-skills/package.json"), "utf8")) {
+      errors.push("installed ATS manifest differs from the reviewed vendored source");
+    }
+  }
+  return errors;
+}
+
 /**
  * What `npm pack` would actually ship from `root`, as a dry run.
  *
@@ -275,7 +363,7 @@ function smokeInstallPackage(root: string, expectedVersion: string): string[] {
     const filename = parsed[0]?.filename;
     if (!filename) return ["install smoke could not identify the packed tarball"];
     const tarball = join(packDir, filename);
-    runNpm(root, ["install", "--global", "--prefix", prefix, tarball, "--ignore-scripts"]);
+    runNpm(root, ["install", "--global", "--prefix", prefix, tarball, "--ignore-scripts", "--offline", "--no-audit", "--no-fund"]);
     const bin = process.platform === "win32" ? join(prefix, "aether.cmd") : join(prefix, "bin", "aether");
     if (!existsSync(bin)) return [`install smoke did not create ${bin}`];
     const options = {
@@ -290,6 +378,20 @@ function smokeInstallPackage(root: string, expectedVersion: string): string[] {
     const version = execFileSync(launch, [...launchArgs, "--version"], options).trim();
     if (version !== expectedVersion) errors.push(`installed CLI reported ${version}, expected ${expectedVersion}`);
     execFileSync(launch, [...launchArgs, "--help"], options);
+    const installedRoot = process.platform === "win32" ? join(prefix, "node_modules", "aether-agents") : join(prefix, "lib", "node_modules", "aether-agents");
+    // Resolve through the isolated installed archive, never the source checkout.
+    // Factory construction imports the real pinned SDK without opening a service.
+    execFileSync(process.execPath, ["--input-type=module", "--eval", [
+      "import assert from 'node:assert/strict';",
+      "import { pathToFileURL } from 'node:url';",
+      "const pack = await import(pathToFileURL(process.argv[1]).href);",
+      "assert.equal(typeof pack.createBrowserFetch, 'function');",
+      "const observer = await pack.createBrowserObserver({env:{AGENT_BROWSER_URL:'http://127.0.0.1:8092'}});",
+      "assert.equal(observer.status().state, 'disconnected');",
+      "assert.equal(pack.createBrowserVisionSkill(observer).name, 'aether_browser_observe');",
+      "await observer.close();",
+      "assert.equal(observer.status().sessionId, null);",
+    ].join("\n"), join(installedRoot, "node_modules", "aether-ats-skills", "src", "index.js")], options);
     const verifyCommand = `${JSON.stringify(process.execPath)} -e "process.exit(0)"`;
     const output = execFileSync(launch, [
       ...launchArgs, "exec", "--cwd", temp, "--exec-driver", "selftest",
@@ -329,6 +431,7 @@ export function verifyProduction(root: string, expectedTag?: string): {
   const errors = [
     ...validateManifest(manifest, expectedTag),
     ...validatePack(pack, manifest),
+    ...validateRuntimeGraph(root),
   ];
   const truthEvidence = deterministicRepositoryEvidence(root);
   truthEvidence.registry = {

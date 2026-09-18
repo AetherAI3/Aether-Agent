@@ -10,7 +10,7 @@ build-backend = "hatchling.build"
 # fails the build if they drift.
 [project]
 name = "aether-agent"
-version = "0.3.2"
+version = "0.4.0"
 description = "Install and run Aether Agent, the open-source terminal coding agent, from pip or pipx."
 readme = "README.md"
 requires-python = ">=3.10"

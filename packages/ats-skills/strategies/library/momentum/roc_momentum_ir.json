@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "RocMomentum",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1h" },
+    { "type": "Condition", "signal": "ROC", "operator": ">", "value": 5 },
+    { "type": "Intent", "action": "BUY", "asset": "BTCUSD", "confidence": 0.7 }
+  ]
+}

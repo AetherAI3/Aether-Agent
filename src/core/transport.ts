@@ -373,6 +373,12 @@ export class ApiClient {
     return this.request<T>("POST", path, { body, signal, timeoutMs });
   }
 
+  /** Mutations that need replay protection share the normal TLS, auth and timeout path. */
+  async postIdempotentJson<T>(path: string, body: unknown, idempotencyKey: string, signal?: AbortSignal): Promise<T> {
+    if (!/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) throw new Error("Invalid idempotency key");
+    return this.request<T>("POST", path, { body, signal, idempotencyKey });
+  }
+
   async getJson<T>(path: string, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
     return this.request<T>("GET", path, { signal, timeoutMs });
   }
@@ -388,12 +394,15 @@ export class ApiClient {
   async patchJson<T>(
     path: string,
     body: unknown,
-    opts: {
+    signalOrOpts: AbortSignal | {
       headers?: Record<string, string>;
       signal?: AbortSignal;
       timeoutMs?: number;
     } = {},
   ): Promise<T> {
+    const opts = signalOrOpts instanceof AbortSignal
+      ? { signal: signalOrOpts }
+      : signalOrOpts;
     return this.request<T>("PATCH", path, { body, ...opts });
   }
 
@@ -628,6 +637,7 @@ export class ApiClient {
       signal?: AbortSignal;
       timeoutMs?: number;
       headers?: Record<string, string>;
+      idempotencyKey?: string;
     } = {},
   ): Promise<T> {
     // `?? ` (not `||`) so an explicit 0 (disabled) from a caller survives —
@@ -660,6 +670,7 @@ export class ApiClient {
               // Idempotency-Key, never replace Authorization.
               ...(opts.headers ?? {}),
               ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+              ...(opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : {}),
               Accept: "application/json",
               ...(await this.authHeaders(used)),
             },

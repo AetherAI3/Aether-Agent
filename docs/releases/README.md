@@ -13,6 +13,11 @@ as prerelease evidence while the registry and tag remain authoritative.
 
 ## Index
 
+- [2026-09-17](2026-09-17.md) — **v0.4.0 source candidate**
+  for shared managed agents and ATS setup. No publication or live-service
+  qualification is established by this entry. Packet:
+  [OPERATOR-PACKET-v0.4.0.md](OPERATOR-PACKET-v0.4.0.md).
+
 - [2026-09-03](2026-09-03.md) — released **v0.3.2**: the v0.3.1
   maintenance line merged back into `main`, restoring the browser-launcher
   verification and bringing the declared version back in line for publication.

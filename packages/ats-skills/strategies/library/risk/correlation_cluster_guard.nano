@@ -1,0 +1,33 @@
+// Correlation cluster guard: pause when one correlated cluster carries 40
+// percent or more of gross exposure, and flag it for review.
+// REGIME: matters most in a stress regime, when correlations converge and a
+// book that looked diversified stops being diversified.
+// CONDITIONS: the host must publish a cluster assignment. Nano does not compute
+// correlation - CLUSTER_EXPOSURE_PCT is the host's answer to "how much of the
+// book is really one bet".
+// INVALIDATION: the cluster breaking up, which is a host measurement and not
+// something this rule can observe.
+// SHAPE: 15m; cluster membership is a rolling estimate and re-checking it
+// faster than it updates only adds noise.
+// NOT position_concentration_cap: that one counts a single instrument. This one
+// counts many instruments that happen to be the same trade. A book can pass the
+// concentration cap on every line and fail this badly.
+// CALIBRATED ON: multi-asset books. A single-sector mandate is one cluster by
+// construction and should not arm this without raising the threshold.
+strategy CorrelationClusterGuard {
+
+    agent RiskDesk
+
+    every 15m {
+
+        if CLUSTER_EXPOSURE_PCT >= 40 {
+
+            pause()
+
+            observe()
+
+        }
+
+    }
+
+}

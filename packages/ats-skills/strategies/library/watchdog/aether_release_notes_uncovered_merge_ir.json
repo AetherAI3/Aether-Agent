@@ -1,0 +1,16 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "AetherReleaseNotesUncoveredMerge",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "MERGED", "operator": ">=", "value": 1 },
+    { "type": "Condition", "signal": "CANONICAL_REPOSITORY", "operator": ">=", "value": 1 },
+    { "type": "Condition", "signal": "CANONICAL_BASE", "operator": ">=", "value": 1 },
+    { "type": "Condition", "signal": "IS_RELEASE_NOTES_PR", "operator": "<=", "value": 0 },
+    { "type": "Condition", "signal": "HAS_RELEASE_CANDIDATE", "operator": "<=", "value": 0 },
+    { "type": "Intent", "action": "OBSERVE" },
+    { "type": "Agent", "name": "ReleaseDesk" }
+  ]
+}

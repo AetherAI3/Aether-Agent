@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "MaxDrawdownBreaker",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1m" },
+    { "type": "Condition", "signal": "DRAWDOWN", "operator": ">=", "value": 5 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "RiskDesk" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "VolumeSpikeConfirmation",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "15m" },
+    { "type": "Condition", "signal": "VOL_RATIO", "operator": ">", "value": 3 },
+    { "type": "Condition", "signal": "RSI", "operator": "<", "value": 30 },
+    { "type": "Intent", "action": "BUY", "asset": "BTCUSD", "confidence": 0.85 }
+  ]
+}

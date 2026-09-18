@@ -6,7 +6,11 @@ import { join, resolve } from "node:path";
 const root = resolve(import.meta.dirname, "../..");
 
 interface PackageManifest {
+  workspaces?: string[];
   dependencies?: Record<string, string>;
+  bundledDependencies?: string[];
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   engines?: Record<string, string>;
   files?: string[];
@@ -30,9 +34,13 @@ test("TypeScript 7 toolchain and Node 24 contract stay pinned", () => {
   assert.equal(pkg.scripts?.["typecheck"], "tsc -p tsconfig.json --noEmit");
 });
 
-test("published package stays runtime-dependency-free and excludes compiled tests", () => {
+test("published package restricts runtime dependencies to the bundled ATS source and excludes compiled tests", () => {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageManifest;
-  assert.deepEqual(pkg.dependencies ?? {}, {});
+  assert.deepEqual(pkg.workspaces, ["packages/ats-skills"]);
+  assert.deepEqual(pkg.dependencies, { "aether-ats-skills": "0.2.0" });
+  assert.deepEqual(pkg.bundledDependencies, ["aether-ats-skills"]);
+  assert.deepEqual(pkg.optionalDependencies ?? {}, {});
+  assert.deepEqual(pkg.peerDependencies ?? {}, {});
   assert.ok(pkg.files?.includes("dist/src"));
   assert.ok(!pkg.files?.includes("dist"));
 });

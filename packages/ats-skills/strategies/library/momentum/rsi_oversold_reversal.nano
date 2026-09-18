@@ -1,0 +1,29 @@
+// Classic RSI oversold reversal (Pine: ta.rsi(close, 14) < 30).
+// Buy when the 14-period RSI dips below 30.
+// REGIME: a pullback inside an uptrend, or a range. Do NOT fire in a sustained
+// downtrend - RSI can hold under 30 for dozens of bars while price keeps
+// falling, and this is the single most common way the strategy loses.
+// CONDITIONS: the higher timeframe trending up or neutral, and a prior support
+// level within reach.
+// INVALIDATION: RSI making a lower low together with price. Oversold that gets
+// more oversold is trend, not exhaustion.
+// SHAPE: 15m; a flush into support that turns within a few bars.
+// NOT stochastic_oversold: that measures position inside the recent range and
+// fires earlier and far more often. NOT volume_spike_confirmation: that is
+// this exact RSI condition plus a volume gate, so it is a strict subset - when
+// both fire it is one setup, not two.
+// CALIBRATED ON: crypto, 15m. RSI is bounded 0-100 so the threshold travels,
+// but how long an instrument stays sub-30 does not.
+strategy RsiOversoldReversal {
+
+    every 15m {
+
+        if RSI(14) < 30 {
+
+            buy(BTCUSD, 0.85)
+
+        }
+
+    }
+
+}
