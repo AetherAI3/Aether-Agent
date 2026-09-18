@@ -122,6 +122,22 @@ test("DM send uses canonical conversation and nonce; no coding or chat runtime e
   assert.ok(paths.every((path) => path.includes("/agent/managed/")));
 });
 
+test("one-shot managed chat closes its attached session before aborting the lifecycle signal", async () => {
+  let abortedDuringClose: boolean | undefined;
+  const output = capture();
+  await stubFetch((url) => {
+    if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
+    if (url.pathname.endsWith("/messages")) return json({ id: "message-1", body: "canary", sender_type: "user", admission: { state: "admitted" } });
+    return json(envelope({ agent }));
+  }, async () => {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "canary", { out: output.out, err: output.out, hooks: {
+      beforeChat: async (_ctx, _agent, surface) => async () => { abortedDuringClose = surface?.signal.aborted; },
+    } }), 0);
+  });
+  assert.equal(abortedDuringClose, false);
+  assert.doesNotMatch(output.text(), /Could not close the attached agent session/);
+});
+
 test("failed DM delivery is reported as uncertain and never automatically resent", async () => {
   let sends = 0;
   const output = capture();

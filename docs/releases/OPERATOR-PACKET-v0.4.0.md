@@ -11,7 +11,7 @@ before evaluating release readiness.
 | Proposed tag | `v0.4.0` |
 | Release scope | Shared Cloud managed-agent inventory, creation, customization and Online DM chat; guided ATS device setup, native strategy preparation and bounded browser observation. |
 | Version decision | A minor release for the new account-agent workflow and bundled ATS runtime dependency. |
-| Source identity | Canonical ATS adapter commit `2c38586b7fb011163281fb964b2b9585398717e8`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
+| Source identity | Canonical ATS adapter commit `ecdbc5c296f28f2331aea4e031c459f1171b99ea`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
 | Runtime dependency policy | Exactly `aether-ats-skills` 0.2.0 from the checked-in `packages/ats-skills` workspace, published as a versioned dependency and bundled into the CLI. Its exact registry dependencies are `aether-browser` 0.2.2 and `aether-context` 0.3.1. No additional runtime, optional or peer dependencies; no installation hooks. |
 | Source custody | ATS owns the canonical source. The Agent copy must match its recorded upstream source and digest; it is not a separate implementation. |
 | Required Cloud companion | Cloud #1691 at `13a6ef5857d14d036d7275d123c521a889d804f2`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`, restacked after Cloud #1687 without replacing its admission/runtime ownership. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
