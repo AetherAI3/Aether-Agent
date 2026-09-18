@@ -19,7 +19,7 @@ const manifest = {
   types: "dist/src/index.d.ts",
   bin: { aether: "dist/src/main.js" },
   files: [
-    "dist/src", "README.md", "assets/aether-agent-hero.png", "COMMANDS.md", "LICENSE", "NOTICE.md",
+    "dist/src", "ATS_ACCEPTABLE_USE_POLICY.md", "README.md", "assets/aether-agent-hero.png", "COMMANDS.md", "LICENSE", "NOTICE.md",
     "docs/generated/commands.md", "docs/generated/model-catalogue.md",
     "docs/model-catalogue/catalogue.json", "docs/model-catalogue/index.html",
     "packages/ats-skills", "packages/ats-skills-source.json",
@@ -40,6 +40,7 @@ const pack: PackReport = {
   entryCount: 8,
   files: [
     "COMMANDS.md",
+    "ATS_ACCEPTABLE_USE_POLICY.md",
     "LICENSE",
     "NOTICE.md",
     "README.md",
