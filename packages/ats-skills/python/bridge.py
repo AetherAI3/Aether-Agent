@@ -39,6 +39,24 @@ def sync_directory(path):
             os.close(descriptor)
 
 
+def sync_native_file(path: Path):
+    """Flush a native file using a writable descriptor on every platform.
+
+    Windows rejects fsync on a read-only descriptor (Errno 9). Native setup
+    files are owned by this adapter, so opening them read/write is safe and
+    keeps the durability check meaningful on both POSIX and Windows.
+    """
+    reject_links(path)
+    flags = os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("Native memory file must be a regular file")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def atomic_json(path: Path, value):
     temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
@@ -320,8 +338,7 @@ def initialize_memory(request):
                 native_config["dir"] = str(path)
                 (stage / "config.json").write_text(json.dumps(native_config, sort_keys=True, indent=2), encoding="utf-8")
                 for name in NATIVE_FILES:
-                    with (stage / name).open("rb") as handle:
-                        os.fsync(handle.fileno())
+                    sync_native_file(stage / name)
                 transaction = {**transaction, "phase": "publishing", "files": {name: digest(stage / name) for name in sorted(NATIVE_FILES)}}
                 atomic_json(transaction_path, transaction)
             if transaction and transaction["phase"] == "publishing":
@@ -391,8 +408,7 @@ def initialize_memory(request):
             # The binding is the readiness commit: all native files were reopened.
             if not existing:
                 for name in NATIVE_FILES:
-                    with (path / name).open("rb") as handle:
-                        os.fsync(handle.fileno())
+                    sync_native_file(path / name)
             atomic_json(binding_path, receipt)
             if transaction:
                 if stage.exists():
