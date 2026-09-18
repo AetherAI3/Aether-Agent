@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -593,13 +593,14 @@ test("setup checkpoint resumes a verified custom memory location after strategy 
     const deps = { root: dir, env: {}, output: () => {}, load: async () => pack,
       setup: async () => { questions++; return { memoryDirectory: memory, memoryGb: 5, strategiesDirectory: join(dir, "strategies") }; } };
     await withCreate(async () => { assert.equal(await createAtsHooks(deps).createATS!(context(), "Market Scout"), 1); });
+    const canonicalMemory = await realpath(memory);
     const pending = JSON.parse(await readFile(settingsPath(dir) + ".pending", "utf8"));
-    assert.equal(pending.memory_directory, memory);
+    assert.equal(pending.memory_directory, canonicalMemory);
     assert.equal(pending.memory_verification.persistence_verified, true);
     const cleanup = await createAtsHooks(deps).beforeChat!(context(), agent());
     await cleanup!();
     assert.equal(questions, 1); assert.equal(scans, 3);
-    assert.equal(JSON.parse(await readFile(settingsPath(dir), "utf8")).memory_directory, memory);
+    assert.equal(JSON.parse(await readFile(settingsPath(dir), "utf8")).memory_directory, canonicalMemory);
     await assert.rejects(readFile(settingsPath(dir) + ".pending"), { code: "ENOENT" });
   });
 });
