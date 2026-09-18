@@ -19,6 +19,7 @@ test("coding REPL slash setup never queues wizard answers and restores the promp
     const paths = [];
     globalThis.fetch = async url => {
       const path = new URL(String(url)).pathname; paths.push(path);
+      if (path.endsWith('/agent/managed/identity')) return new Response(JSON.stringify({schema_version:'aether.terminal-account/1',account_subject:'11111111-1111-4111-8111-111111111111'}));
       if (!path.endsWith('/models')) throw new Error('Unexpected coding or create request');
       return new Response(JSON.stringify({models:[], orchestrators:[], default:'', tier:'free'}));
     };
@@ -33,6 +34,7 @@ test("coding REPL slash setup never queues wizard answers and restores the promp
   const sent = new Set<string>();
   const replies: Array<[string, string]> = [
     ["Type a prompt,", "/agent-create ATS Atlas\r"],
+    ["Choice [2]:", "1\r"],
     ["Memory drive/folder", join(root, "memory") + "\r"],
     ["Memory size in GiB", "5\r"],
     ["Strategy folder", join(root, "strategies") + "\r"],
@@ -54,7 +56,7 @@ test("coding REPL slash setup never queues wizard answers and restores the promp
     assert.ok(match, output + errors);
     const result = JSON.parse(match[1]!);
     assert.equal(result.code, 0);
-    assert.ok(result.paths.every((path: string) => path.endsWith("/models")), JSON.stringify(result.paths));
+    assert.ok(result.paths.every((path: string) => path.endsWith("/models") || path.endsWith("/agent/managed/identity")), JSON.stringify(result.paths));
     assert.doesNotMatch(output, /Queued|Running:/);
     assert.equal(sent.size, replies.length);
   } finally { clearTimeout(deadline); child.kill(); await rm(root, { recursive: true, force: true }); }
