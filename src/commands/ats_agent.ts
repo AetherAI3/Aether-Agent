@@ -14,6 +14,7 @@ import { managedAccountOperation, managedAgentStorageDirectory, managedBrowserOw
 import { theme } from "../ui/theme.js";
 import { sanitizeTerm } from "../ui/text.js";
 import { AgentBrowserSession, type AgentBrowserObserver, type AgentBrowserPackage } from "../core/agent_browser_session.js";
+import { requireAtsPolicyAcceptance } from "./ats_policy.js";
 
 export const ATS_PROFILE_MARKER = "aether.ats.profile/1";
 
@@ -81,6 +82,8 @@ export interface AtsHookDeps {
   output?: (text: string) => void;
   env?: NodeJS.ProcessEnv;
   openViewer?: (url: string) => Promise<{ launched: boolean }>;
+  /** Dependency seam for policy-flow tests. Production callers must not override this. */
+  acceptPolicy?: (account: ManagedAccountScope, signal?: AbortSignal) => Promise<boolean>;
 }
 
 async function loadPackage(): Promise<AtsPackage> {
@@ -433,6 +436,14 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
       return true;
     },
     createATS: async (ctx, name, signal) => {
+      const initialAccount = await accountFor(ctx, signal);
+      const accepted = await (deps.acceptPolicy
+        ? deps.acceptPolicy(initialAccount, signal)
+        : requireAtsPolicyAcceptance({ root, account: initialAccount, signal, out: process.stdout }));
+      if (!accepted) {
+        output("ATS policy rejected. No agent, storage, strategy, datafeed, browser, plugin, or MCP setup was created.\n");
+        return 2;
+      }
       const options = await (deps.setup ?? askSetup)(signal);
       signal?.throwIfAborted();
       const pack = await load();
@@ -443,7 +454,10 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
       await draft.complete();
       try {
         const account = await accountFor(ctx, signal);
-        if (account.accountSubject !== draft.accountScope.accountSubject || account.cloudOrigin !== draft.accountScope.cloudOrigin) throw new Error("The account changed after agent creation. Resume from the original account.");
+        if (account.accountSubject !== initialAccount.accountSubject || account.cloudOrigin !== initialAccount.cloudOrigin
+            || account.accountSubject !== draft.accountScope.accountSubject || account.cloudOrigin !== draft.accountScope.cloudOrigin) {
+          throw new Error("The account changed after policy acceptance or agent creation. Resume from the original account.");
+        }
         await refuseLegacyBinding(account, agent.agent_id, root);
         await initialize(account, agent, options, pack, output, signal);
       }
