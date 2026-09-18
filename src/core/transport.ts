@@ -379,12 +379,44 @@ export class ApiClient {
     return this.request<T>("POST", path, { body, signal, idempotencyKey });
   }
 
-  async patchJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-    return this.request<T>("PATCH", path, { body, signal });
-  }
-
   async getJson<T>(path: string, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
     return this.request<T>("GET", path, { signal, timeoutMs });
+  }
+
+  /**
+   * PATCH with caller-supplied headers.
+   *
+   * `headers` exists for request-identifying metadata a route requires — today
+   * only `Idempotency-Key` on the Code settings mutation routes, which reject a
+   * request without one. It can never override the Authorization, Content-Type
+   * or Accept headers this client sets; see request().
+   */
+  async patchJson<T>(
+    path: string,
+    body: unknown,
+    signalOrOpts: AbortSignal | {
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+    } = {},
+  ): Promise<T> {
+    const opts = signalOrOpts instanceof AbortSignal
+      ? { signal: signalOrOpts }
+      : signalOrOpts;
+    return this.request<T>("PATCH", path, { body, ...opts });
+  }
+
+  /** POST with caller-supplied headers; see patchJson for the header rules. */
+  async postJsonWithHeaders<T>(
+    path: string,
+    body: unknown,
+    opts: {
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+    } = {},
+  ): Promise<T> {
+    return this.request<T>("POST", path, { body, ...opts });
   }
 
   async deleteJson<T>(path: string, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
@@ -600,7 +632,13 @@ export class ApiClient {
   private async request<T>(
     method: string,
     path: string,
-    opts: { body?: unknown; signal?: AbortSignal; timeoutMs?: number; idempotencyKey?: string } = {},
+    opts: {
+      body?: unknown;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+      headers?: Record<string, string>;
+      idempotencyKey?: string;
+    } = {},
   ): Promise<T> {
     // `?? ` (not `||`) so an explicit 0 (disabled) from a caller survives —
     // only an OMITTED timeoutMs falls back to the env-driven default.
@@ -627,6 +665,10 @@ export class ApiClient {
           fetch(this.url(path), {
             method,
             headers: {
+              // Caller headers go FIRST so the client's own transport and
+              // credential headers below always win: a caller can add
+              // Idempotency-Key, never replace Authorization.
+              ...(opts.headers ?? {}),
               ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
               ...(opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : {}),
               Accept: "application/json",

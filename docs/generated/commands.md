@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:bac0c87b17edec9474a3f4dc01b4083ae60cc00a91f14c76f7787eeabcba2140 -->
+<!-- manifest-digest: sha256:3c905f43bdae6f04aa78c07bcc15ea28815c85b8931784ce3c032a50579f4cdb -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.

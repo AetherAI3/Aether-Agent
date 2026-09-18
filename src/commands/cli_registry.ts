@@ -142,6 +142,16 @@ export const SHELL_RUNTIME_HANDLERS: Array<Pick<DispatchedCommand, "name" | "loa
     },
   },
   {
+    // Lane RC-02. A real dispatch-table entry so `aether rc ...` runs the
+    // command group instead of billing a chat turn. It owns --name and reads
+    // only the global flags off ctx.flags, exactly as `device` does.
+    name: "rc",
+    load: async () => {
+      const { cmdRc } = await import("./rc.js");
+      return (ctx, argv, flags) => cmdRc(ctx, argv, flags);
+    },
+  },
+  {
     name: "doctor",
     // doctor parses its own argv (parseDoctorArgs). It never saw these flags:
     // main.ts's parse is strict:false, so an undeclared `--live` was captured
