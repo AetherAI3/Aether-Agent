@@ -30,6 +30,9 @@
     "packages/ats-skills",
     "packages/ats-skills-source.json"
   ],
+  "workspaces": [
+    "packages/ats-skills"
+  ],
   "engines": {
     "node": ">=24"
   },
@@ -80,7 +83,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "aether-ats-skills": "file:packages/ats-skills"
+    "aether-ats-skills": "0.2.0"
   },
   "bundledDependencies": [
     "aether-ats-skills"

@@ -32,7 +32,8 @@ function lockfile(packages) {
 function bundledAtsLockfile() {
   return lockfile({
     "": {
-      dependencies: { "aether-ats-skills": "file:packages/ats-skills" },
+      dependencies: { "aether-ats-skills": "0.2.0" },
+      workspaces: ["packages/ats-skills"],
       bundleDependencies: ["aether-ats-skills"],
     },
     "node_modules/aether-ats-skills": { resolved: "packages/ats-skills", link: true },
@@ -157,8 +158,10 @@ test("rejects changed ATS link paths, bundle declarations, names, versions or de
     (p) => { p["node_modules/aether-ats-skills"].version = "0.2.0"; },
     (p) => { delete p[""]; },
     (p) => { delete p[""].dependencies; },
-    (p) => { p[""].dependencies["aether-ats-skills"] = "file:../ats-skills"; },
+    (p) => { p[""].dependencies["aether-ats-skills"] = "file:packages/ats-skills"; },
     (p) => { p[""].dependencies["aether-ats-skills"] = "^0.1.0"; },
+    (p) => { delete p[""].workspaces; },
+    (p) => { p[""].workspaces = ["packages/other"]; },
     (p) => { delete p[""].bundleDependencies; },
     (p) => { p[""].bundleDependencies = true; },
     (p) => { p[""].bundleDependencies = ["another-package"]; },

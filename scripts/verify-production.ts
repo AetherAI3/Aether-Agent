@@ -56,7 +56,7 @@ const REQUIRED_PUBLIC_ASSETS = ["assets/aether-agent-hero.png"] as const;
 const ALLOWED_PUBLIC_ASSETS = new Set<string>(REQUIRED_PUBLIC_ASSETS);
 
 const MAX_UNPACKED_BYTES = 5_000_000;
-const ATS_DEPENDENCY = { "aether-ats-skills": "file:packages/ats-skills" };
+const ATS_DEPENDENCY = { "aether-ats-skills": "0.2.0" };
 const ATS_SOURCE_FILES = ["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"];
 const RUNTIME_PACKAGES = {
   "aether-ats-skills": { version: "0.2.0", entry: "src/index.js" },

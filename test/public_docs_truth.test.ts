@@ -49,7 +49,7 @@ test("ATS is documented as the current account-agent trading adapter with explic
   assert.match(ats, /aether agent create ATS/u);
   assert.match(ats, /native Nano compiler/u);
   assert.match(ats, /does not yet provide model-controlled broker actions or automatic live orders/u);
-  assert.equal(manifest.dependencies?.["aether-ats-skills"], "file:packages/ats-skills");
+  assert.equal(manifest.dependencies?.["aether-ats-skills"], "0.2.0");
 });
 
 test("README has durable assets and canonical public repository URLs", () => {

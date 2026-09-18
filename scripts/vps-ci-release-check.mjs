@@ -19,8 +19,9 @@ assert.deepEqual(packageManifest.bin, {
   aether: "dist/src/main.js",
   "aether-agent": "dist/src/main.js",
 });
-const runtimeDependency = { "aether-ats-skills": "file:packages/ats-skills" };
+const runtimeDependency = { "aether-ats-skills": "0.2.0" };
 assert.deepEqual(packageManifest.dependencies, runtimeDependency);
+assert.deepEqual(packageManifest.workspaces, ["packages/ats-skills"]);
 assert.deepEqual(packageManifest.bundledDependencies, ["aether-ats-skills"]);
 assert.deepEqual(packageManifest.optionalDependencies ?? {}, {});
 assert.deepEqual(packageManifest.peerDependencies ?? {}, {});
@@ -31,6 +32,7 @@ assert.equal(packageLock.version, packageManifest.version);
 assert.equal(lockRoot?.name, packageManifest.name);
 assert.equal(lockRoot?.version, packageManifest.version);
 assert.deepEqual(lockRoot?.dependencies, runtimeDependency);
+assert.deepEqual(lockRoot?.workspaces, ["packages/ats-skills"]);
 const atsManifest = await readJson("packages/ats-skills/package.json");
 assert.equal(atsManifest.name, "aether-ats-skills");
 assert.equal(atsManifest.version, "0.2.0");

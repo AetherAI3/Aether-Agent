@@ -25,7 +25,7 @@ const manifest = {
     "packages/ats-skills", "packages/ats-skills-source.json",
   ],
   engines: { node: ">=24" },
-  dependencies: { "aether-ats-skills": "file:packages/ats-skills" },
+  dependencies: { "aether-ats-skills": "0.2.0" },
   bundledDependencies: ["aether-ats-skills"],
   repository: { type: "git", url: "https://github.com/AetherAI3/aether-agent" },
   scripts: { prepack: "npm run build" },

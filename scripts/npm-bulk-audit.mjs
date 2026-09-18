@@ -68,7 +68,10 @@ function validateBundledAtsLink(packages, metadata) {
     metadata.resolved !== ATS_TARGET ||
     !isRecord(root) ||
     !isRecord(root.dependencies) ||
-    root.dependencies[ATS_NAME] !== `file:${ATS_TARGET}` ||
+    root.dependencies[ATS_NAME] !== ATS_VERSION ||
+    !Array.isArray(root.workspaces) ||
+    root.workspaces.length !== 1 ||
+    root.workspaces[0] !== ATS_TARGET ||
     !Array.isArray(root.bundleDependencies) ||
     root.bundleDependencies.length !== 1 ||
     root.bundleDependencies[0] !== ATS_NAME ||

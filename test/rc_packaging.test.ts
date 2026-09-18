@@ -20,6 +20,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
   version: string;
   files: string[];
+  workspaces?: string[];
   dependencies?: Record<string, string>;
   engines?: { node?: string };
 };
@@ -63,8 +64,9 @@ test("the package declares only the bundled ATS runtime dependency", () => {
   // Deliberate, and load-bearing for the supply-chain story: the sole runtime
   // dependency is source-controlled and bundled with the published package.
   // RC and browser modules themselves remain builtin-or-relative only below.
+  assert.deepEqual(pkg.workspaces ?? [], ["packages/ats-skills"]);
   assert.deepEqual(pkg.dependencies ?? {}, {
-    "aether-ats-skills": "file:packages/ats-skills",
+    "aether-ats-skills": "0.2.0",
   });
 });
 
