@@ -50,6 +50,10 @@ export interface AppendReceipt {
 
 export interface AppendResponse {
   receipts?: unknown;
+  /** Echoed by the Cloud append route. Never read here -- the session this
+   *  batch belongs to is the host's own state, not something a response is
+   *  allowed to redefine -- but declared so the wire shape is honest. */
+  session_id?: unknown;
 }
 
 /** Why the cursor did not move. Every value is a preserve-the-batch outcome. */
