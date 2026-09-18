@@ -449,7 +449,7 @@ export function deterministicRepositoryEvidence(root: string = process.cwd()): R
   return evidence;
 }
 
-const PACKED_PUBLIC_DOCS = ["README.md", "COMMANDS.md", "NOTICE.md", "docs/generated/commands.md", "docs/generated/model-catalogue.md"] as const;
+const PACKED_PUBLIC_DOCS = ["README.md", "COMMANDS.md", "NOTICE.md", "ATS_ACCEPTABLE_USE_POLICY.md", "docs/generated/commands.md", "docs/generated/model-catalogue.md"] as const;
 
 /**
  * Registry state is owner-controlled and flips the moment a release is published, so packed
