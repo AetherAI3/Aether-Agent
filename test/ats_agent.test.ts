@@ -134,6 +134,18 @@ test("setup failure preserves the created Cloud draft and never saves a ready lo
   });
 });
 
+test("ATS setup surfaces a safe actionable memory-engine failure", async () => {
+  await fixture(async (dir) => {
+    let output = "";
+    const hooks = createAtsHooks({ root: dir, output: (text) => { output += text; }, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+      load: async () => fakePackage({ initializeMemory: async () => ({ state: "unavailable", code: "CONTEXT_ENGINE_UNAVAILABLE", message: "Install the pinned aether-context engine, or select its Python interpreter." }) }) });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 1); });
+    assert.match(output, /CONTEXT_ENGINE_UNAVAILABLE/);
+    assert.match(output, /Install the pinned aether-context engine/);
+    assert.doesNotMatch(output, /token|api.?key|aek_/i);
+  });
+});
+
 test("successful setup stores an account-scoped binding only after memory and strategy checks", async () => {
   await fixture(async (dir) => {
     const calls: string[] = [];
