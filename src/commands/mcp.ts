@@ -9,7 +9,7 @@ import type { Readable, Writable } from "node:stream";
 import type { AppContext } from "../core/context.js";
 import type { Key } from "./chat.js";
 import { decodeKey } from "./chat.js";
-import { McpClient } from "../core/mcp.js";
+import { McpAuthorizationError, McpClient } from "../core/mcp.js";
 import type { McpProvider, McpConnection, StartOAuthResponse } from "../core/mcp.js";
 import { LocalMcpStore, sanityCheckUrl } from "../core/mcp_store.js";
 import {
@@ -28,7 +28,7 @@ import {
 import { errorMessage } from "../core/errors.js";
 import { SelectMenu, renderMenu } from "../ui/menu.js";
 import type { MenuItem } from "../ui/menu.js";
-import { openBrowser } from "../core/browser.js";
+import { browserHint, openBrowserTyped, type BrowserOpenResult } from "../core/browser.js";
 import { theme } from "../ui/theme.js";
 import { sanitizeTerm } from "../ui/text.js";
 
@@ -37,7 +37,10 @@ export interface MenuIO {
   nextKey(): Promise<Key>;
   /** Read one line (add/edit prompts, PAT paste; real impl masks when asked). */
   readLine(prompt: string, mask?: boolean): Promise<string>;
-  openUrl(url: string): void;
+  /** Open a URL and say what happened. Typed, because "no browser here" and
+   *  "the OS refused the launch" need different words and a different next
+   *  step from the operator -- and neither should be a three-minute wait. */
+  openUrl(url: string): Promise<BrowserOpenResult>;
   sleep(ms: number): Promise<void>;
   /** Active operations subscribe without consuming ordinary queued keys. */
   subscribeCancel?(cancel: () => void): () => void;
@@ -75,7 +78,18 @@ function rethrowCancellation(error: unknown): void {
 }
 
 function safeMcpFailure(error: unknown): string {
-  if (error instanceof McpOperationTimeoutError || error instanceof McpOperationCancelledError) {
+  // Allowlist, not blocklist: only messages this CLI composed itself are
+  // printable. Anything else could carry text a broker or provider chose, and
+  // a terminal is a bad place to render a stranger's string. McpAuthorization
+  // Error qualifies -- it is built here from a code and a provider id, and its
+  // wording ("already connected and that connection was left untouched") is
+  // the whole point of the error, so redacting it to "request failed" would
+  // leave the operator unable to tell whether their credential still works.
+  if (
+    error instanceof McpOperationTimeoutError ||
+    error instanceof McpOperationCancelledError ||
+    error instanceof McpAuthorizationError
+  ) {
     return error.message;
   }
   const status = (error as { status?: unknown } | null)?.status;
@@ -228,11 +242,43 @@ async function authenticate(
   if (start.flow === "auth_code_pkce" && start.authorize_url) {
     const urlError = sanityCheckUrl(start.authorize_url);
     if (urlError) { note(io, `auth URL rejected: ${urlError}`); return; }
+    // The row as it stands BEFORE the browser opens. Without it, a
+    // re-authorization — expired token, widened scope, wrong account — would
+    // resolve against the connection that was already there, and the very
+    // first poll would print "connected" before the consent screen had even
+    // painted. See pollUntilConnected in core/mcp.ts.
+    let baseline: McpConnection | null = null;
+    try {
+      baseline = await boundedMenuOperation(
+        supervisor,
+        io,
+        `connection baseline for ${safeProviderId}`,
+        operationTimeoutMs,
+        (signal) => client.findConnection(providerId, { signal, timeoutMs: operationTimeoutMs }),
+      );
+    } catch (e) {
+      rethrowCancellation(e);
+      // A baseline we could not read is not a reason to refuse the flow, but
+      // it IS a reason not to claim a re-authorization succeeded, so the wait
+      // below runs unbaselined rather than silently trusting a stale row.
+      note(io, `could not read the current ${safeProviderId} connection: ${safeMcpFailure(e)}`);
+    }
+
     io.out.write(
       `Opening browser to authorize ${safeProviderId}…\n` +
         `${theme.dim(sanitizeTerm(redactMcpUrl(start.authorize_url)) + " (authorization parameters hidden)")}\n`,
     );
-    io.openUrl(start.authorize_url);
+    const opened = await io.openUrl(start.authorize_url);
+    if (!opened.launched) {
+      // Waiting three minutes for a browser that was never going to appear is
+      // the worst available outcome: it reads as a slow provider.
+      note(
+        io,
+        `✖ browser not opened (${opened.code}): ${browserHint(opened.code)} — ` +
+          "authorization was not started",
+      );
+      return;
+    }
     io.out.write("Waiting for authorization…\n");
     try {
       await boundedMenuOperation(
@@ -240,16 +286,25 @@ async function authenticate(
         io,
         `authorization wait for ${safeProviderId}`,
         oauthTimeoutMs,
+        // Deliberately inside the supervisor's bound, not equal to it: the
+        // poll owns the message the operator needs ("already connected and
+        // left untouched"), and the supervisor is only the backstop for a
+        // request that wedges below the HTTP timeout.
         (signal) => client.pollUntilConnected(providerId, io.sleep, {
           signal,
-          timeoutSec: Math.ceil(oauthTimeoutMs / 1_000),
+          timeoutMs: Math.max(1, Math.floor(oauthTimeoutMs * 0.9)),
           requestTimeoutMs: operationTimeoutMs,
+          since: baseline,
         }),
       );
       note(io, `✔ ${safeProviderId} connected`);
     } catch (e) {
       rethrowCancellation(e);
-      note(io, `✖ ${safeMcpFailure(e)} — retry authorization or run aether mcp doctor`);
+      // The pending Cloud state row is single-use and expires on its own, so
+      // an abandoned flow leaves nothing to clean up here — but the operator
+      // still has to be told the code, and whether an older connection lived.
+      const code = e instanceof McpAuthorizationError ? ` [${e.code}]` : "";
+      note(io, `✖ ${safeMcpFailure(e)}${code} — retry authorization or run aether mcp doctor`);
     }
     return;
   }
@@ -513,7 +568,7 @@ export function createMcpMenuIO(
         }
       }
     },
-    openUrl: (u: string) => openBrowser(u),
+    openUrl: (u: string) => openBrowserTyped(u),
     sleep: (ms: number) => new Promise((r) => setTimeout(r, ms)),
     subscribeCancel(cancel: () => void): () => void {
       if (closed) {

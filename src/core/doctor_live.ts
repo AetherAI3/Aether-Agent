@@ -15,9 +15,7 @@
 //      the doctor purpose), that is reported as unproven, not assumed good.
 
 import { randomUUID } from "node:crypto";
-import { createServer, type Server } from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { AppContext } from "./context.js";
@@ -42,6 +40,7 @@ import {
   McpOperationTimeoutError,
 } from "./mcp_lifecycle.js";
 import { openTarget, type OpenOptions } from "./opener.js";
+import { browserHint, detectBrowserRuntime, verifyBrowserLaunch } from "./browser_runtime.js";
 import { defaultRunner, ghAuthStatus, type Runner } from "./worktree.js";
 import {
   axis,
@@ -550,85 +549,69 @@ export async function openerProbe(options: LiveOptions = {}): Promise<HealthChec
     });
   }
 
-  const nonce = randomUUID();
   const timeoutMs = options.openerTimeoutMs ?? DEFAULT_OPENER_TIMEOUT_MS;
   const started = Date.now();
-  let server: Server | null = null;
+  const launcher = options.openerOptions ?? {};
 
   try {
-    let resolveCalled: (value: boolean) => void = () => {};
-    const called = new Promise<boolean>((resolve) => {
-      resolveCalled = resolve;
+    // `configured` is what the OS says it has; `verified` is what actually
+    // rendered. They are separate axes because they fail separately: a machine
+    // can have a registered browser that a sandbox then refuses to launch, and
+    // a machine with no registered browser can still be handed a working
+    // launcher by an injected test seam.
+    const detected = detectBrowserRuntime({
+      ...(launcher.platform ? { platform: launcher.platform } : {}),
+      ...(launcher.env ? { env: launcher.env } : {}),
     });
 
-    server = createServer((req, res) => {
-      if (req.url?.includes(`/cb?nonce=${nonce}`)) {
-        res.writeHead(204).end();
-        resolveCalled(true);
-        return;
-      }
-      // The page the browser lands on immediately calls back, which is what
-      // proves a real browser rendered it rather than merely spawned.
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(
-        `<!doctype html><meta charset="utf-8"><title>Aether doctor</title>` +
-          `<p>Aether doctor verified your browser. You can close this tab.</p>` +
-          `<script>fetch(${JSON.stringify(`/cb?nonce=${nonce}`)});</script>`,
-      );
+    // The loopback proof itself lives in browser_runtime.ts — one server, one
+    // nonce comparison, one teardown, shared with every other caller that needs
+    // to know whether a browser really opened. `detect` is forced READY here on
+    // purpose: doctor's job is to probe rather than to trust detection, and the
+    // openerOptions seam substitutes the launcher in tests.
+    const proof = await verifyBrowserLaunch({
+      timeoutMs,
+      detect: { code: "BROWSER_READY" },
+      open: (url) => {
+        const outcome = openTarget(url, launcher);
+        return {
+          status: outcome.status,
+          executable: outcome.executable,
+          detail: outcome.detail,
+          cause: outcome.cause,
+        };
+      },
     });
 
-    const listening = server;
-    await new Promise<void>((resolve, reject) => {
-      listening.once("error", reject);
-      listening.listen(0, "127.0.0.1", () => resolve());
-    });
-    const port = (listening.address() as AddressInfo).port;
-    const url = `http://127.0.0.1:${port}/?nonce=${nonce}`;
-
-    const outcome = openTarget(url, options.openerOptions ?? {});
-    if (outcome.status !== "spawned") {
-      const unavailable = outcome.status === "unavailable";
+    if (proof.code !== "BROWSER_READY" && proof.code !== "BROWSER_UNVERIFIED") {
+      const unavailable = proof.code === "BROWSER_HEADLESS";
       return check(OPENER_PROBE, {
-        configured: axis(unavailable ? "unknown" : "no", { evidence: outcome.detail }),
-        reachable: axis("no", { evidence: outcome.detail }),
-        verified: axis("no"),
+        configured: axis(unavailable ? "unknown" : "no", { evidence: proof.evidence }),
+        reachable: axis("no", { evidence: proof.evidence }),
+        verified: axis("no", { evidence: `${proof.code}: ${browserHint(proof.code)}` }),
         severity: unavailable ? "warning" : "error",
       });
     }
 
-    const answered = await Promise.race([
-      called,
-      new Promise<boolean>((resolve) => {
-        setTimeout(() => resolve(false), timeoutMs).unref();
-      }),
-    ]);
-
     return check(OPENER_PROBE, {
-      configured: axis("yes", { evidence: `${outcome.executable} (argument array, no shell)` }),
-      reachable: axis(answered ? "yes" : "no"),
-      verified: axis(answered ? "yes" : "no", {
+      configured: axis(detected.available ? "yes" : "no", {
+        evidence: detected.available
+          ? `${detected.browser ?? detected.launcher} via ${detected.launcher} (argument array, no shell)`
+          : `${detected.code}: ${detected.evidence}`,
+      }),
+      reachable: axis(proof.verified ? "yes" : "no"),
+      verified: axis(proof.verified ? "yes" : "no", {
         checkedAt: new Date().toISOString(),
         latencyMs: since(started),
-        evidence: answered
-          ? "the opened page called back on loopback with the run nonce"
-          : `no loopback callback within ${timeoutMs}ms; the process spawned but nothing rendered`,
+        evidence: proof.evidence,
       }),
-      severity: answered ? "info" : "warning",
+      severity: proof.verified ? "info" : "warning",
     });
   } catch (err) {
     return check(OPENER_PROBE, {
       verified: axis("no", { evidence: message(err) }),
       severity: "error",
     });
-  } finally {
-    try {
-      // close() alone only stops accepting NEW connections — a browser holding
-      // the page open on keep-alive would keep the handle (and the CLI) alive.
-      server?.closeAllConnections();
-      server?.close();
-    } catch {
-      // The socket is released when the process exits regardless.
-    }
   }
 }
 

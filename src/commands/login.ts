@@ -11,8 +11,7 @@ import type { AppContext } from "../core/context.js";
 import { loginWithPassword } from "../core/auth.js";
 import { LOGOUT_PATH } from "../core/transport.js";
 import { requestDeviceCode, pollForToken } from "../core/device.js";
-import { openBrowserAwaitLaunch } from "../core/browser.js";
-import type { OpenOutcome } from "../core/opener.js";
+import { browserHint, openBrowserTyped, type BrowserOpenResult } from "../core/browser.js";
 import { theme } from "../ui/theme.js";
 import { errorHint, errorMessage } from "../core/errors.js";
 import { formatErrorLine } from "../ui/error_line.js";
@@ -27,10 +26,10 @@ export interface LoginOpts {
 }
 
 export interface LoginDependencies {
-  openBrowser: (url: string) => OpenOutcome | Promise<OpenOutcome>;
+  openBrowser: (url: string) => BrowserOpenResult | Promise<BrowserOpenResult>;
 }
 
-const LOGIN_DEPENDENCIES: LoginDependencies = { openBrowser: openBrowserAwaitLaunch };
+const LOGIN_DEPENDENCIES: LoginDependencies = { openBrowser: (url) => openBrowserTyped(url) };
 
 /** After a successful login, flag a shell-level AETHER_TOKEN: it is re-read by
  * every NEW process and would shadow the token just stored — the classic
@@ -113,11 +112,16 @@ export async function cmdLogin(
   if (opts.noBrowser) {
     process.stdout.write("Browser not opened (--no-browser); use the URL and code above.\n");
   } else {
+    // The code is what makes this recoverable. "unavailable" told the operator
+    // nothing they could act on, and on Windows the old opener could not even
+    // report that much: rundll32 exists and exits zero with no browser
+    // installed, so a machine that could never complete the approval looked
+    // identical to one where the tab simply had not been noticed yet.
     const opened = await dependencies.openBrowser(code.verification_uri_complete);
-    if (opened.status !== "spawned") {
+    if (!opened.launched) {
       process.stderr.write(
-        `⚠ Browser was not opened (${opened.status}). Use the URL and code above, ` +
-          "or rerun: aether auth login --no-browser\n",
+        `⚠ Browser was not opened (${opened.code}): ${browserHint(opened.code)}.\n` +
+          "  Use the URL and code above, or rerun: aether auth login --no-browser\n",
       );
     }
   }
