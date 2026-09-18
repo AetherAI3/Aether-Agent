@@ -38,6 +38,7 @@ export interface PackReport {
 }
 
 const REQUIRED_ROOT_FILES = new Set([
+  "ATS_ACCEPTABLE_USE_POLICY.md",
   "COMMANDS.md",
   "LICENSE",
   "NOTICE.md",
@@ -319,7 +320,7 @@ export function validateRuntimeGraph(root: string): string[] {
  * What `npm pack` would actually ship from `root`, as a dry run.
  *
  * Exported because the source checkout's `dist/` is NOT the package — the files
- * allowlist is `dist/src` plus four docs — so any gate reasoning about what a
+ * allowlist is `dist/src` plus the reviewed public documents — so any gate reasoning about what a
  * user receives has to ask npm rather than read the build directory.
  */
 export function createPackReport(root: string): PackReport {

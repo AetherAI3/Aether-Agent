@@ -530,7 +530,7 @@ test(
   { timeout: 120_000 },
   () => {
     // The source checkout's dist/ is NOT the package: the files allowlist is
-    // dist/src plus four docs, so dist/scripts and dist/test exist on disk and
+    // dist/src plus reviewed public docs, so dist/scripts and dist/test exist on disk and
     // ship to nobody. Ask npm what would actually be packed.
     const packed = currentPackReport();
     const paths = new Set(packed.files.map((file) => file.path.replaceAll("\\", "/")));

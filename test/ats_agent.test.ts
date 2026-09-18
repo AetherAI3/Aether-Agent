@@ -94,6 +94,25 @@ test("ATS profile stays an observable, zero-budget draft and never grants tradin
   assert.throws(() => atsManagedConfig(" "), /name/);
 });
 
+test("rejecting the ATS policy stops before draft, storage, strategy and connector setup", async () => {
+  await fixture(async (dir) => {
+    let setupCalls = 0;
+    let loads = 0;
+    let output = "";
+    const hooks = createAtsHooks({
+      root: dir,
+      output: text => { output += text; },
+      acceptPolicy: async () => false,
+      setup: async () => { setupCalls++; return { memoryGb: 5, strategiesDirectory: join(dir, "strategies") }; },
+      load: async () => { loads++; return fakePackage(); },
+    });
+    assert.equal(await hooks.createATS!(context(), "Market Scout"), 2);
+    assert.equal(setupCalls, 0);
+    assert.equal(loads, 0);
+    assert.match(output, /No agent, storage, strategy, datafeed, browser, plugin, or MCP setup was created/);
+  });
+});
+
 test("ordinary managed agents never load local ATS dependencies", async () => {
   await fixture(async (dir) => {
     let loads = 0;
@@ -122,7 +141,7 @@ test("setup failure preserves the created Cloud draft and never saves a ready lo
   await fixture(async (dir) => {
     let output = "";
     let scans = 0;
-    const hooks = createAtsHooks({ root: dir, output: (text) => { output += text; }, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+    const hooks = createAtsHooks({ root: dir, output: (text) => { output += text; }, acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
       load: async () => fakePackage({ initializeMemory: async () => ({ state: "unavailable" }), scanStrategies: async () => { scans++; return {}; } }) });
     await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 1); });
     assert.match(output, /agent is saved/);
@@ -137,7 +156,7 @@ test("setup failure preserves the created Cloud draft and never saves a ready lo
 test("ATS setup surfaces a safe actionable memory-engine failure", async () => {
   await fixture(async (dir) => {
     let output = "";
-    const hooks = createAtsHooks({ root: dir, output: (text) => { output += text; }, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+    const hooks = createAtsHooks({ root: dir, output: (text) => { output += text; }, acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
       load: async () => fakePackage({ initializeMemory: async () => ({ state: "unavailable", code: "CONTEXT_ENGINE_UNAVAILABLE", message: "Install the pinned aether-context engine, or select its Python interpreter." }) }) });
     await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 1); });
     assert.match(output, /CONTEXT_ENGINE_UNAVAILABLE/);
@@ -149,7 +168,7 @@ test("ATS setup surfaces a safe actionable memory-engine failure", async () => {
 test("successful setup stores an account-scoped binding only after memory and strategy checks", async () => {
   await fixture(async (dir) => {
     const calls: string[] = [];
-    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
       load: async () => fakePackage({ initializeMemory: async (input) => { calls.push("memory"); assert.equal(input.agentId, ID); assert.equal(input.sizeGb, 5); return memoryReceipt(input); },
         scanStrategies: async () => { calls.push("scan"); await assert.rejects(readFile(settingsPath(dir)), { code: "ENOENT" }); return { state: "scanned", strategies: [] }; } }) });
     await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 0); });
@@ -167,7 +186,7 @@ test("empty first setup installs the reviewed Nano starter pack and journals the
   await fixture(async dir => {
     let scans = 0; let installs = 0; const events: string[] = []; let output = "";
     const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
-      setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+      acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
       load: async () => fakePackage({
         scanStrategies: async () => ({ state: "scanned", compiler: "unavailable", strategies: scans++ ? [{ file: "risk--stale_data_halt.nano", state: "unavailable" }] : [] }),
         installBundledStrategies: async ({ directory }) => { installs++; return { revision: "76c91e4b926c0aa8416cbb6b8724031d8141a8d9", installed: [{ id: "risk/stale_data_halt", file: join(directory, "risk--stale_data_halt.nano") }], execution_enabled: false, permission_granted: false }; },
@@ -206,7 +225,7 @@ test("a symlink strategy folder leaves the Cloud draft intact and skips strategy
     const target = join(dir, "target"); await mkdir(target);
     const strategies = join(dir, "strategies"); await symlink(target, strategies, "dir");
     let scanned = false;
-    const hooks = createAtsHooks({ root: join(dir, "settings"), output: () => {}, setup: async () => ({ memoryGb: 5, strategiesDirectory: strategies }),
+    const hooks = createAtsHooks({ root: join(dir, "settings"), output: () => {}, acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: strategies }),
       load: async () => fakePackage({ scanStrategies: async () => { scanned = true; return {}; } }) });
     await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 1); });
     assert.equal(scanned, false);
@@ -220,7 +239,7 @@ test("symlink memory folders are refused before native initialization on setup a
     const memory = join(dir, "memory"); await symlink(target, memory, "dir");
     const root = join(dir, "settings");
     let initialized = 0;
-    const hooks = createAtsHooks({ root, output: () => {}, setup: async () => ({ memoryDirectory: memory, memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+    const hooks = createAtsHooks({ root, output: () => {}, acceptPolicy: async () => true, setup: async () => ({ memoryDirectory: memory, memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
       load: async () => fakePackage({ initializeMemory: async () => { initialized++; return { state: "ready" }; } }) });
     await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 1); });
     await binding(root, { memory_directory: memory });
@@ -603,7 +622,7 @@ test("setup checkpoint resumes a verified custom memory location after strategy 
     const memory = join(dir, "custom-memory");
     const pack = fakePackage({ scanStrategies: async () => { if (++scans === 1) throw new Error("scan failed"); return { state: "scanned", strategies: [] }; } });
     const deps = { root: dir, env: {}, output: () => {}, load: async () => pack,
-      setup: async () => { questions++; return { memoryDirectory: memory, memoryGb: 5, strategiesDirectory: join(dir, "strategies") }; } };
+      acceptPolicy: async () => true, setup: async () => { questions++; return { memoryDirectory: memory, memoryGb: 5, strategiesDirectory: join(dir, "strategies") }; } };
     await withCreate(async () => { assert.equal(await createAtsHooks(deps).createATS!(context(), "Market Scout"), 1); });
     const canonicalMemory = await realpath(memory);
     const pending = JSON.parse(await readFile(settingsPath(dir) + ".pending", "utf8"));
@@ -634,7 +653,7 @@ test("setup persists provider configuration through the ATS validator without cl
     const real = await import(packageName);
     let output = "";
     const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
-      setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies"),
+      acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies"),
         dataStream: { provider: "polygon", endpoint: null, api_key_env: "POLYGON_API_KEY", symbols: ["AAPL", "MSFT"] } }),
       load: async () => fakePackage({ loadSettings: real.loadSettings, saveSettings: real.saveSettings, dataStreamStatus: real.dataStreamStatus }),
     });
@@ -651,7 +670,7 @@ test("setup persists provider configuration through the ATS validator without cl
 test("memory and strategy setup receive cancellation and cannot publish a ready binding after abort", async () => {
   await fixture(async (dir) => {
     const controller = new AbortController(); let scans = 0;
-    const hooks = createAtsHooks({ root: dir, output: () => {}, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+    const hooks = createAtsHooks({ root: dir, output: () => {}, acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
       load: async () => fakePackage({ initializeMemory: async input => {
         assert.equal(input.signal, controller.signal); controller.abort();
         return memoryReceipt(input);
@@ -694,7 +713,7 @@ test("fresh account identity separates memory bindings after sign-in changes and
   await fixture(async (dir) => {
     await binding(dir); let loads = 0; let subject = SUBJECT; let identityCalls = 0;
     globalThis.fetch = (async () => { identityCalls++; return new Response(JSON.stringify({ schema_version: "aether.terminal-account/1", account_subject: subject })); }) as typeof fetch;
-    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, setup: async () => { throw new Error("new account requires its own setup"); }, load: async () => { loads++; return fakePackage(); } });
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, acceptPolicy: async () => true, setup: async () => { throw new Error("new account requires its own setup"); }, load: async () => { loads++; return fakePackage(); } });
     const ctx = context();
     await hooks.onChatCommand!(ctx, agent(), "/ats status"); assert.equal(loads, 1);
     subject = "22222222-2222-4222-8222-222222222222";
@@ -707,7 +726,7 @@ test("fresh account identity separates memory bindings after sign-in changes and
 test("ATS memory and strategy setup receive the operation cancellation signal and verified account scope", async () => {
   await fixture(async (dir) => {
     const controller = new AbortController(); const calls: string[] = [];
-    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }), load: async () => fakePackage({
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }), load: async () => fakePackage({
       initializeMemory: async input => { assert.equal(input.signal, controller.signal); assert.deepEqual(input.ownerScope, ACCOUNT); calls.push("memory"); return memoryReceipt(input); },
       scanStrategies: async input => { assert.equal(input.signal, controller.signal); calls.push("strategies"); return { state: "scanned", strategies: [] }; },
     }) });

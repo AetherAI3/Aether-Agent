@@ -68,6 +68,12 @@ ATS setup asks for a local memory folder, a memory size, a strategy folder and
 data provider/symbol settings. Local resources belong to the verified account
 and agent; rotating a token preserves that identity. Switching accounts while
 chat is open closes its local resources and requires reopening the conversation.
+Before the first setup for a policy version, the terminal presents the
+[ATS Autonomous Trading Acceptable Use, Risk and Data Policy](ATS_ACCEPTABLE_USE_POLICY.md):
+choose `1` to accept or `2` to reject. Rejection exits before creating an agent
+or configuring storage, strategies, datafeeds, browsers, plugins or MCP. The
+local, pseudonymous consent receipt records the policy digest but grants no
+broker or trading authority.
 The packaged adapters verify storage and report native Nano compiler results.
 Inside ATS chat, type /ats status, /ats strategies or /ats data to inspect the
 workspace. Shift-Tab cycles the

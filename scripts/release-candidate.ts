@@ -391,7 +391,7 @@ export function runReleaseCandidate(repoRoot: string, options: CandidateOptions 
     });
 
     // 8. The handoff demo, driven against the INSTALLED package. The demo
-    //    harness is not shipped (the allowlist is dist/src plus four docs), so
+    //    harness is not shipped (the allowlist is dist/src plus reviewed public docs), so
     //    the harness is copied beside the installed package and resolves the CLI
     //    and its imports from the package's own dist/src — the tarball's code,
     //    not the checkout's.
