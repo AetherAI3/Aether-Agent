@@ -1,6 +1,6 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -20,8 +20,9 @@ async function temporary(t: TestContext): Promise<string> {
 
 test("the shipped ATS dependency holds one real writer lease on Windows and POSIX", async t => {
   const root = await temporary(t);
-  const directory = resolve(root, "memory");
-  await mkdir(directory);
+  const requested = resolve(root, "memory");
+  await mkdir(requested);
+  const directory = await realpath(requested);
   const ownerScope = { cloudOrigin: "https://api.aethersystems.net", accountSubject: "11111111-1111-4111-8111-111111111111" };
   await writeFile(join(directory, ".aether-ats-memory.json"), JSON.stringify({
     schema_version: "aether.ats.memory/1", state: "ready", persistence_verified: true,

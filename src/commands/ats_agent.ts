@@ -3,7 +3,7 @@ import type { Writable } from "node:stream";
 import { managedChatInput } from "../ui/managed_chat_input.js";
 import { leaseTerminalInput } from "../ui/input_lease.js";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, open, rename, lstat, unlink } from "node:fs/promises";
+import { mkdir, readFile, open, realpath, rename, lstat, unlink } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import type { AppContext } from "../core/context.js";
 import { configDir } from "../core/config.js";
@@ -275,6 +275,12 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     const binding: Binding = pending ?? { schema_version: "aether.ats.local/2", agent_id: agent.agent_id, cloud_origin: account.cloudOrigin, account_subject: account.accountSubject,
       memory_directory: options.memoryDirectory ?? join(dirname(path), "memory"), memory_gb: options.memoryGb,
       strategies_directory: resolve(options.strategiesDirectory) };
+    await refuseLinks(binding.memory_directory);
+    await mkdir(binding.memory_directory, { recursive: true, mode: 0o700 });
+    binding.memory_directory = await realpath(binding.memory_directory);
+    await refuseLinks(binding.strategies_directory);
+    await mkdir(binding.strategies_directory, { recursive: true, mode: 0o700 });
+    binding.strategies_directory = await realpath(binding.strategies_directory);
     const settingsPath = join(dirname(path), "settings.json");
     await refuseLinks(settingsPath);
     const settings = await pack.loadSettings(settingsPath);
@@ -285,15 +291,12 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     await pack.saveSettings(settingsPath, settings);
     binding.data_stream = settings.data_stream;
     await saveBinding(`${path}.pending`, binding);
-    await refuseLinks(binding.memory_directory);
     const result = await pack.initializeMemory({ ownerScope: account, agentId: agent.agent_id, directory: binding.memory_directory, sizeGb: binding.memory_gb, signal,
       ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
     signal?.throwIfAborted();
     verifyMemory(result, binding);
     binding.memory_verification = result;
     await saveBinding(`${path}.pending`, binding);
-    await refuseLinks(binding.strategies_directory);
-    await mkdir(binding.strategies_directory, { recursive: true, mode: 0o700 });
     let scan = await pack.scanStrategies({ directory: binding.strategies_directory, signal,
       ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
     signal?.throwIfAborted();

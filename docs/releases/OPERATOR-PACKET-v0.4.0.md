@@ -14,7 +14,7 @@ before evaluating release readiness.
 | Source identity | Canonical ATS adapter commit `2c38586b7fb011163281fb964b2b9585398717e8`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit. |
 | Runtime dependency policy | Exactly `aether-ats-skills` 0.2.0 from `file:packages/ats-skills`, bundled into the CLI. Its exact registry dependencies are `aether-browser` 0.2.2 and `aether-context` 0.3.1. No additional runtime, optional or peer dependencies; no installation hooks. |
 | Source custody | ATS owns the canonical source. The Agent copy must match its recorded upstream source and digest; it is not a separate implementation. |
-| Required Cloud companion | Cloud #1691 at `df731408a3b66b9e2009b0564cbcb1a509cfc77f`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`, restacked after Cloud #1687 without replacing its admission/runtime ownership. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
+| Required Cloud companion | Cloud #1691 at `13a6ef5857d14d036d7275d123c521a889d804f2`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`, restacked after Cloud #1687 without replacing its admission/runtime ownership. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
 | Local prerequisites | The ATS Python engine and a reachable Agent Browser runtime are separate prerequisites. The npm context dependency is a launcher, not proof that Python memory is installed or verified. |
 | Platform evidence | Linux packed offline installation, CLI selftest and process-held writer lease passed in this workspace. The exact Agent head must pass its Linux/Windows matrix, which now runs the shipped writer-lease test with Python. Native headed Browser/noVNC remains Linux/POSIX-only; a Windows client is not a native Windows browser-host qualification. |
 | Archive evidence | Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending. |
@@ -94,10 +94,11 @@ command, not through a second agent registry.
 - Four isolated builders completed before sequential collection; independent
   review reproduced and drove fixes for corrupt-vector readiness, delayed
   browser creation, cleanup persistence, and account-switch races.
-- Integrated ATS package at the prior source head: **103 passed, zero skipped**,
-  using actual Context 0.3.1 and native ATS/Nano. Hosted `ats-skills /
-  node-native` passed at `d6909b55c99f70ffe389d01b83b5b537fea68d9a`
-  (run 35277715410). Exact-head hosted evidence for `2c38586b` is pending.
+- Integrated ATS package: **113 passed, zero skipped** at `2c38586b`, using
+  actual Context 0.3.1 and native ATS/Nano in hosted `ats-skills / node-native`
+  (run 35288720664). The local Agent suite passed 2,398 of 2,402 tests with
+  four platform skips, and its production pack/install verifier passed; hosted
+  exact-head Windows/Linux evidence belongs to the final Agent PR head.
 - Cloud: **204 independently rerun tests passed**, including canonical full
   OpenAPI regeneration. Account integration: **68 focused tests passed**;
   browser controller: **16 tests passed**. Final Agent full-suite and package
