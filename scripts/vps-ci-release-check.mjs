@@ -66,6 +66,7 @@ for (const forbiddenHook of forbiddenHooks) {
 const publishedFiles = new Set(packageManifest.files ?? []);
 for (const path of [
   "dist/src",
+  "ATS_ACCEPTABLE_USE_POLICY.md",
   "README.md",
   "COMMANDS.md",
   "docs/generated/commands.md",
