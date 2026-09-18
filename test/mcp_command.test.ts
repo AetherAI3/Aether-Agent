@@ -368,18 +368,26 @@ test("a re-authorization that never completes is not reported as connected", asy
 test("the connection baseline is read before the browser is opened", async () => {
   // Order is the whole point: a baseline captured after the browser could
   // already include the authorization it is supposed to be measuring against.
+  // The menu's own /connections listing also precedes the browser, so an
+  // index comparison cannot tell the two reads apart. This does: the row
+  // advances the moment the browser opens (the earliest a consent can land),
+  // and only a baseline taken BEFORE that sees the stale row and accepts it.
   const order: string[] = [];
-  const api = oauthApi(order, () => [STALE_ROW]);
+  const advanced = { ...STALE_ROW, updated_at: "2026-01-01T00:05:00.000000+00:00" };
+  const api = oauthApi(order, () => (order.includes("open-browser") ? [advanced] : [STALE_ROW]));
   const dir = mkdtempSync(join(tmpdir(), "aether-mcpoauth-"));
   const store = new LocalMcpStore(join(dir, "mcp.json"));
-  const { io } = makeAuthIO([{ kind: "submit" }, { kind: "submit" }, "q", "q"], openedOk(), order);
+  const { io, out } = makeAuthIO([{ kind: "submit" }, { kind: "submit" }, "q", "q"], openedOk(), order);
 
-  await runMcpMenu(new McpClient(api), store, io, { oauthTimeoutMs: 150 });
+  await runMcpMenu(new McpClient(api), store, io, { oauthTimeoutMs: 2_000 });
+  const text = out.join("");
 
-  const firstList = order.indexOf("list-connections");
   const opened = order.indexOf("open-browser");
-  assert.ok(firstList >= 0 && opened >= 0, `expected both events, got ${JSON.stringify(order)}`);
-  assert.ok(firstList < opened, `baseline must precede the browser: ${JSON.stringify(order)}`);
+  assert.ok(opened > 0 && order.slice(0, opened).includes("list-connections"), JSON.stringify(order));
+  // A baseline read after the browser opened would hold `advanced` itself, and
+  // the wait would time out against its own evidence.
+  assert.match(text, /✔ fal\.ai connected\n/);
+  assert.doesNotMatch(text, /MCP_AUTH_TIMEOUT/);
 });
 
 test("a machine with no browser is told so, and no authorization wait is started", async () => {
@@ -410,4 +418,31 @@ test("a machine with no browser is told so, and no authorization wait is started
   // waiting on a browser that was never going to appear.
   assert.equal(order.filter((e) => e === "sleep").length, 0);
   assert.ok(order.indexOf("open-browser") > order.indexOf("list-connections"));
+});
+
+test("a broker-authored failure message is redacted to its status, never printed", async () => {
+  // safeMcpFailure is an allowlist: only text this CLI composed is printable.
+  // Anything the broker or a provider chose to say — here a lure URL inside
+  // the error text — must collapse to the HTTP status.
+  const order: string[] = [];
+  const base = oauthApi(order, () => []);
+  const api = {
+    ...base,
+    async postJson(path: string, body: unknown) {
+      if (path === "/mcp-broker/oauth/start") {
+        throw Object.assign(new Error("PROVIDER SAYS: visit https://lure.example/reset now"), { status: 502 });
+      }
+      return (base as unknown as { postJson(p: string, b: unknown): Promise<unknown> }).postJson(path, body);
+    },
+  } as unknown as ApiClient;
+  const dir = mkdtempSync(join(tmpdir(), "aether-mcpoauth-"));
+  const store = new LocalMcpStore(join(dir, "mcp.json"));
+  const { io, out } = makeAuthIO([{ kind: "submit" }, { kind: "submit" }, "q", "q"], openedOk(), order);
+
+  await runMcpMenu(new McpClient(api), store, io, { oauthTimeoutMs: 150 });
+  const text = out.join("");
+
+  assert.match(text, /auth start failed: request failed \(HTTP 502\)/);
+  assert.doesNotMatch(text, /lure\.example|PROVIDER SAYS/);
+  assert.equal(order.filter((e) => e === "open-browser").length, 0, "no browser on a failed start");
 });
