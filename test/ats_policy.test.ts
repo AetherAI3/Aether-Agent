@@ -26,8 +26,13 @@ function terminal(answer: string): { input: PassThrough & { isTTY: true }; out: 
 }
 
 test("published ATS policy digest matches the consent gate", async () => {
-  const bytes = await readFile("ATS_ACCEPTABLE_USE_POLICY.md");
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), ATS_POLICY_SHA256);
+  const checkoutText = await readFile("ATS_ACCEPTABLE_USE_POLICY.md", "utf8");
+  // Git may materialize Markdown with CRLF on Windows. Consent binds the
+  // canonical LF policy text, not the checkout's platform-specific encoding.
+  const canonical = checkoutText.replace(/\r\n/g, "\n");
+  assert.equal(createHash("sha256").update(canonical).digest("hex"), ATS_POLICY_SHA256);
+  const windowsCheckout = canonical.replace(/\n/g, "\r\n");
+  assert.equal(createHash("sha256").update(windowsCheckout.replace(/\r\n/g, "\n")).digest("hex"), ATS_POLICY_SHA256);
 });
 
 test("choice 2 rejects without writing a consent receipt", async () => {
