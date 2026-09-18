@@ -29,6 +29,8 @@ import { configDir } from "../core/config.js";
 import type { CommandFlags } from "../core/command_dispatch.js";
 import type { AppContext } from "../core/context.js";
 import { digestOf } from "../core/device_runtime/canonical_json.js";
+import { detectBrowserRuntime } from "../core/browser_runtime.js";
+import { McpClient } from "../core/mcp.js";
 import { loadEnrollmentMetadata } from "../core/device_runtime/identity.js";
 import {
   RcError,
@@ -115,6 +117,12 @@ export function repoSummary(cwd: string): RepoSummary {
  */
 export interface RcStatusView {
   running: boolean;
+  /** Typed browser-runtime code from core/browser_runtime, or null when unasked. */
+  browser: string | null;
+  /** Aether connector state, or null when it could not be determined. */
+  connector: string | null;
+  /** ISO timestamp of the last accepted receipt, or null when none. */
+  last_receipt: string | null;
   device_id: string | null;
   device_name: string | null;
   session_id: string | null;
@@ -134,14 +142,34 @@ function line(label: string, value: string | number | null): string {
   return `  ${label.padEnd(16)} ${value ?? "—"}`;
 }
 
+/**
+ * The coverage line, from the producer registry rather than module presence.
+ *
+ * "13 / 13 available" is a claim about producers that exist, and it is computed
+ * every time rather than written down, so it cannot drift into a lie when
+ * somebody adds a fourteenth event type or removes a producer.
+ */
+function coverageLine(): string {
+  const coverage = producerCoverage();
+  const total = coverage.produced.length + coverage.unproduced.length;
+  return `${coverage.produced.length} / ${total} available`;
+}
+
 /** `aether rc status` — what is being published, and to whom. */
 export function renderStatus(view: RcStatusView): string {
   const rows = [
     "Aether RC — viewer-only observation host",
-    `  ${RC_NO_CONTROL_LINE}`,
+    "",
+    line("Viewer events", coverageLine()),
+    line("Control", "NONE"),
+    line("Inbound socket", "NONE"),
+    line("Host state", view.running ? view.state : "off"),
+    line("Outbox", `${view.pending} pending / ${view.quarantined} quarantined`),
+    line("Last receipt", view.last_receipt ?? (view.acked > 0 ? `seq ${view.acked}` : "none yet")),
+    line("Browser", view.browser),
+    line("Connector", view.connector),
     "",
     line("mode", `observe (capabilities: ${VIEWER_CAPABILITIES.join(", ")})`),
-    line("state", view.running ? view.state : "off"),
     line("device", view.device_name ? `${view.device_name} (${view.device_id})` : view.device_id),
     line("session", view.session_id),
     line("project", view.project_ref),
@@ -150,9 +178,8 @@ export function renderStatus(view: RcStatusView): string {
     line("dirty files", view.repo ? view.repo.dirty_file_count : null),
     line("expires", view.expires_at),
     line("observers", view.observers === null ? "unknown (broker unreachable)" : view.observers),
-    line("events", `${view.pending} pending · ${view.acked} acknowledged`),
     line("dropped", view.dropped),
-    line("quarantined", view.quarantined),
+    `  ${RC_NO_CONTROL_LINE}`,
   ];
   if (view.revoke_pending) {
     rows.push(
@@ -179,11 +206,19 @@ export function renderExposure(view: RcStatusView): string {
     "Aether RC — what an observer can see",
     `  ${RC_NO_CONTROL_LINE}`,
     "",
-    "  Shared now, as bounded structured events:",
-    ...coverage.produced.map((type) => `    · ${type}`),
+    line("Viewer events", coverageLine()),
+    line("Control", "NONE"),
+    line("Inbound socket", "NONE"),
     "",
-    "  Declared by the viewer contract, but nothing sends them yet:",
-    ...coverage.unproduced.map((type) => `    · ${type}`),
+    "  Shared, as bounded structured events:",
+    ...coverage.produced.map((type) => `    · ${type}`),
+    ...(coverage.unproduced.length > 0
+      ? [
+          "",
+          "  Declared by the viewer contract, but nothing sends them yet:",
+          ...coverage.unproduced.map((type) => `    · ${type}`),
+        ]
+      : []),
     "",
     "  Never shared:",
     "    · your prompts, model reasoning, or private memory",
@@ -201,6 +236,12 @@ export function renderExposure(view: RcStatusView): string {
 
 export interface RcCommandDeps {
   cwd: string;
+  /** Resolved once per invocation, before rendering. Best-effort. */
+  connectorState?: string | null;
+  /** Typed browser runtime, from the #148 detection seam. */
+  browser: () => { code: string } | null;
+  /** Aether connector state, or null when it could not be determined. */
+  connector: () => string | null;
   enrollment: () => { device_id: string; display_name: string } | null;
   repo: (cwd: string) => RepoSummary;
   out: (text: string) => void;
@@ -209,8 +250,12 @@ export interface RcCommandDeps {
 
 function viewOf(record: OutboxRecord, deps: RcCommandDeps, observers: number | null): RcStatusView {
   const enrolled = deps.enrollment();
+  const browser = deps.browser();
   return {
     running: Boolean(record.session_id),
+    browser: browser?.code ?? null,
+    connector: deps.connector(),
+    last_receipt: null,
     device_id: enrolled?.device_id ?? null,
     device_name: enrolled?.display_name ?? null,
     session_id: record.session_id || null,
@@ -311,11 +356,29 @@ export async function cmdRc(
 ): Promise<number> {
   const deps: RcCommandDeps = {
     cwd: overrides.cwd ?? process.cwd(),
+    // Detection is local and cheap (one registry read on win32, one stat
+    // elsewhere) and never launches anything, so status can report it honestly
+    // without side effects.
+    browser: overrides.browser ?? (() => detectBrowserRuntime()),
+    connector: overrides.connector ?? ((): string | null => connectorState),
     enrollment: overrides.enrollment ?? loadEnrollmentMetadata,
     repo: overrides.repo ?? repoSummary,
     out: overrides.out ?? ((text): void => void process.stdout.write(text)),
     err: overrides.err ?? ((text): void => void process.stderr.write(text)),
   };
+
+  // Connector state is read once, best-effort, before anything renders. A
+  // broker that cannot be reached leaves it null, which renders as unknown --
+  // never as "disconnected", because we did not establish that.
+  let connectorState: string | null = null;
+  if (!overrides.connector) {
+    try {
+      const conns = await new McpClient(ctx.api).listConnections({ timeoutMs: 4_000 });
+      connectorState = conns.length > 0 ? `connected (${conns.length})` : "none connected";
+    } catch {
+      connectorState = null;
+    }
+  }
 
   const projectRef = projectRefFor(deps.cwd);
   const outboxPath = rcOutboxPath(projectRef);

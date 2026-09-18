@@ -27,6 +27,9 @@ const TOKEN_SHAPED = "aek_" + "Z".repeat(32);
 function view(over: Partial<RcStatusView> = {}): RcStatusView {
   return {
     running: true,
+    browser: "BROWSER_READY",
+    connector: "connected",
+    last_receipt: "2026-09-07T00:00:00.000Z",
     device_id: "dev-1",
     device_name: "laptop",
     session_id: "rs_" + "e".repeat(32),
@@ -127,12 +130,47 @@ test("exposure separates what is actually sent from what is merely declared", ()
   // person watch them work, so the gap is shown rather than smoothed over.
   const text = renderExposure(view());
   const coverage = producerCoverage();
-  assert.match(text, /Shared now/);
-  assert.match(text, /nothing sends them yet/);
-  assert.ok(coverage.unproduced.length > 0, "this test is vacuous with nothing deferred");
+  // Every declared type appears, and anything without a producer appears under
+  // its OWN heading rather than being listed as shared. With full coverage the
+  // second heading is absent, which is the honest rendering of "nothing is
+  // deferred" -- not a heading with nothing under it.
   for (const type of [...coverage.produced, ...coverage.unproduced]) {
     assert.ok(text.includes(`· ${type}`), `exposure omitted ${type}`);
   }
+  assert.equal(
+    text.includes("nothing sends them yet"),
+    coverage.unproduced.length > 0,
+    "the deferred heading must appear exactly when something is deferred",
+  );
+});
+
+test("exposure and status report coverage as a computed fraction", () => {
+  // "13 / 13 available" is a claim about producers that exist. Computing it
+  // every time is what stops it becoming a lie when a type is added.
+  const coverage = producerCoverage();
+  const total = coverage.produced.length + coverage.unproduced.length;
+  const expected = `${coverage.produced.length} / ${total} available`;
+  assert.ok(renderStatus(view()).includes(expected));
+  assert.ok(renderExposure(view()).includes(expected));
+});
+
+test("both surfaces state Control NONE and Inbound socket NONE", () => {
+  for (const text of [renderStatus(view()), renderExposure(view())]) {
+    assert.match(text, /Control\s+NONE/);
+    assert.match(text, /Inbound socket\s+NONE/);
+  }
+});
+
+test("status reports the browser and connector it was given", () => {
+  const text = renderStatus(view({ browser: "BROWSER_NOT_FOUND", connector: "disconnected" }));
+  assert.match(text, /Browser\s+BROWSER_NOT_FOUND/);
+  assert.match(text, /Connector\s+disconnected/);
+});
+
+test("an unknown browser or connector renders as unknown, never as ready", () => {
+  const text = renderStatus(view({ browser: null, connector: null }));
+  assert.doesNotMatch(text, /Browser\s+ready/);
+  assert.doesNotMatch(text, /Connector\s+connected/);
 });
 
 test("exposure names the categories that are never shared", () => {
@@ -151,9 +189,8 @@ test("exposure names the categories that are never shared", () => {
 
 test("status shows the counters an operator needs to spot a gap", () => {
   const text = renderStatus(view({ pending: 7, acked: 40, dropped: 3, quarantined: 2 }));
-  assert.match(text, /7 pending · 40 acknowledged/);
+  assert.match(text, /Outbox\s+7 pending \/ 2 quarantined/);
   assert.match(text, /dropped\s+3/);
-  assert.match(text, /quarantined\s+2/);
 });
 
 test("an unreachable broker reports unknown observers, never zero", () => {
