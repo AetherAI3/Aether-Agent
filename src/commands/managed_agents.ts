@@ -420,11 +420,11 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
     process.removeListener("SIGINT", onProcessInterrupt);
     surfaceClosed = true;
     if (timer) clearInterval(timer);
-    controller.abort();
     if (closeSession) {
       try { await closeSession(); }
       catch { (deps.err ?? process.stderr).write("Could not close the attached agent session. Check its status before reopening.\n"); }
     }
+    controller.abort();
   }
 }
 
