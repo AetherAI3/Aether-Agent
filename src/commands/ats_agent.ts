@@ -93,7 +93,14 @@ async function loadPackage(): Promise<AtsPackage> {
 }
 
 function verifyMemory(receipt: Record<string, unknown>, binding: Binding): void {
-  if (receipt["state"] !== "ready" || receipt["persistence_verified"] !== true
+  if (receipt["state"] !== "ready") {
+    const code = typeof receipt["code"] === "string" ? receipt["code"].replace(/\s+/g, " ").slice(0, 120) : "";
+    const message = typeof receipt["message"] === "string" ? receipt["message"].replace(/\s+/g, " ").slice(0, 300) : "";
+    const detail = [code, message].filter(Boolean).join(": ");
+    if (detail) throw new Error(`ATS memory setup unavailable${detail ? ` (${detail})` : ""}.`);
+    throw new Error("ATS memory did not return a verified ready receipt matching this agent, directory and size.");
+  }
+  if (receipt["persistence_verified"] !== true
       || receipt["agent_id"] !== binding.agent_id || receipt["directory"] !== binding.memory_directory
       || receipt["size_gb"] !== binding.memory_gb
       || receipt["schema_version"] !== "aether.ats.memory/1" || receipt["backend"] !== "aether-context"
