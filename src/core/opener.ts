@@ -29,6 +29,12 @@ export interface OpenOutcome {
   executable?: string;
   args?: readonly string[];
   detail: string;
+  /**
+   * The thrown value behind a `spawn-error`, kept so a caller can classify the
+   * failure by errno (ENOENT vs EACCES) instead of matching on `detail` prose.
+   * See core/browser_runtime.ts `classifyLaunchError`.
+   */
+  cause?: unknown;
 }
 
 export interface OpenCommand {
@@ -195,6 +201,7 @@ export function openTarget(target: string, options: OpenOptions = {}): OpenOutco
       executable: plan.executable,
       args: plan.args,
       detail: err instanceof Error ? err.message : "opener could not be launched",
+      cause: err,
     };
   }
 }
@@ -222,6 +229,7 @@ export async function openTargetChecked(target: string, options: OpenOptions = {
           executable: plan.executable,
           args: plan.args,
           detail: err instanceof Error ? err.message : "opener could not be launched",
+          cause: err,
         });
       });
       child.once("spawn", () => {
@@ -235,6 +243,7 @@ export async function openTargetChecked(target: string, options: OpenOptions = {
       executable: plan.executable,
       args: plan.args,
       detail: err instanceof Error ? err.message : "opener could not be launched",
+      cause: err,
     };
   }
 }

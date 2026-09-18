@@ -697,6 +697,85 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "shell:rc",
+    "surface": "shell",
+    "name": "rc",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "<subcommand>",
+    "summary": "publish a viewer-only observation stream for this session",
+    "detailedHelp": "aether rc <subcommand>\npublish a viewer-only observation stream for this session\n\nstart [--name <name>]  begin publishing\nstatus                 what is being published\nexposure               what an observer can see\nviewers                who is observing\noff                    end publishing and revoke the session\n\nObservation only. Run `aether rc exposure` for the full disclosure.",
+    "section": "Account",
+    "hidden": true,
+    "permissionClass": "account",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "shell.rc",
+    "acceptedGlobalFlags": [
+      "agent",
+      "all",
+      "apply",
+      "audit",
+      "available",
+      "ci",
+      "cwd",
+      "effort",
+      "help",
+      "interactive",
+      "json",
+      "junit",
+      "license-key",
+      "local",
+      "model",
+      "no-browser",
+      "no-log",
+      "no-skills",
+      "out",
+      "password",
+      "pool",
+      "quiet",
+      "repo",
+      "resume",
+      "scope",
+      "skill",
+      "swarm",
+      "test-cmd",
+      "token",
+      "username",
+      "version",
+      "with-token",
+      "worktree",
+      "yes"
+    ],
+    "ownedFlags": {
+      "name": {
+        "type": "string"
+      }
+    },
+    "handler": {
+      "id": "handler:shell:rc",
+      "kind": "lazy",
+      "module": "src/commands/cli_registry.ts",
+      "symbol": "DISPATCH_COMMANDS"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "rc",
+      "usage": "aether rc <subcommand>",
+      "visible": false,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "RC-02: outbound-only viewer host. Publishes bounded, redacted observation events; opens no listening socket and accepts no inbound command."
+    }
+  },
+  {
     "key": "shell:login",
     "surface": "shell",
     "name": "login",
