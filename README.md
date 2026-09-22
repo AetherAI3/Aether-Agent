@@ -49,7 +49,7 @@ Prefer Python? `pipx install aether-agent` installs the same CLI and forwards
 every command to it, so `aether-agent code "..."` and `aether code "..."` do the
 same work. See [`packages/pypi-cli`](packages/pypi-cli/README.md).
 
-## Aether Agent 0.4.0 — account agents and ATS
+## Account agents and ATS — 0.4.0 source candidate
 
 ATS is the trading adapter for account agents.
 
@@ -125,10 +125,11 @@ host; Cloud DM does not yet receive those images or control this browser.
 These commands require the matching Cloud terminal adapter. ATS setup also
 requires its Python engine and a separately running Agent Browser runtime;
 missing services are reported explicitly. This candidate prepares and observes
-an ATS workspace. It does not start an execution engine, connect a broker,
-submit or reconcile orders, or provide model-controlled trading actions. See
-the [candidate packet](docs/releases/OPERATOR-PACKET-v0.4.0.md) for the
-qualification still required before publication.
+an ATS workspace. It does not yet provide model-controlled broker actions or
+automatic live orders: it does not start an execution engine, connect a broker,
+or submit or reconcile orders. See the
+[candidate packet](docs/releases/OPERATOR-PACKET-v0.4.0.md) for the qualification
+still required before publication.
 
 ## Pick where the model runs
 
