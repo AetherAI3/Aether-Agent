@@ -826,3 +826,66 @@ test("late cleanup from a closed chat cannot detach a reopened chat's browser", 
     assert.equal(opens, 1); await nextCleanup!(); assert.equal(closes, 1);
   });
 });
+
+// Spec 2 section 2.1 and section 5 step 5. `strategyCount` used to return every
+// scanned file, so a folder of uncompilable sources reported its file tally and
+// setup read as ready. These two tests pin the honest replacement.
+test("setup with nothing compiled says so and leaves strategy readiness incomplete", async () => {
+  await fixture(async dir => {
+    let installs = 0; let output = "";
+    let details: Record<string, string | number | boolean | null> | undefined;
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+      load: async () => fakePackage({
+        // A NON-EMPTY folder where nothing compiled.
+        scanStrategies: async () => ({ state: "scanned", compiler: "unavailable", strategies: [
+          { file: "a.pine", state: "needs_conversion" },
+          { file: "b.pine", state: "needs_conversion" },
+          { file: "c.nano", state: "rejected" },
+          { file: "d.nano", state: "unavailable" },
+        ] }),
+        installBundledStrategies: async ({ directory }) => { installs++; return { revision: "76c91e4b926c0aa8416cbb6b8724031d8141a8d9", installed: [{ id: "risk/stale_data_halt", file: join(directory, "risk--stale_data_halt.nano") }], execution_enabled: false, permission_granted: false }; },
+        appendJournalEvent: async (_path, event) => { if (event.type === "setup.ready") details = event.details; return {}; },
+      }) });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Atlas"), 0); });
+
+    assert.match(output, /0 compiled/);
+    assert.match(output, /Strategy readiness incomplete/);
+    // The starter pack seeds an EMPTY folder only. Keying it off the compiled
+    // count would duplicate sources into a folder that merely failed to compile.
+    assert.equal(installs, 0);
+
+    assert.equal(details?.["strategies_compiled"], 0);
+    assert.equal(details?.["strategies_rejected"], 1);
+    assert.equal(details?.["strategies_need_conversion"], 2);
+    assert.equal(details?.["strategies_found"], 4);
+    assert.equal(details?.["strategies_ready"], false);
+    // The ambiguous single count is gone, so nothing downstream can read a file
+    // tally as readiness.
+    assert.equal(details?.["strategy_count"], undefined);
+  });
+});
+
+test("setup with compiled strategies reports readiness without the incomplete warning", async () => {
+  await fixture(async dir => {
+    let output = "";
+    let details: Record<string, string | number | boolean | null> | undefined;
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+      load: async () => fakePackage({
+        scanStrategies: async () => ({ state: "scanned", compiler: "native_ats", strategies: [
+          { file: "a.nano", state: "compiled" },
+          { file: "b.nano", state: "compiled" },
+          { file: "c.pine", state: "needs_conversion" },
+        ] }),
+        appendJournalEvent: async (_path, event) => { if (event.type === "setup.ready") details = event.details; return {}; },
+      }) });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Atlas"), 0); });
+
+    assert.match(output, /2 compiled/);
+    assert.doesNotMatch(output, /Strategy readiness incomplete/);
+    assert.equal(details?.["strategies_compiled"], 2);
+    assert.equal(details?.["strategies_found"], 3);
+    assert.equal(details?.["strategies_ready"], true);
+  });
+});

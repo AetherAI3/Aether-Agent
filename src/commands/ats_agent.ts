@@ -15,6 +15,7 @@ import { theme } from "../ui/theme.js";
 import { sanitizeTerm } from "../ui/text.js";
 import { AgentBrowserSession, type AgentBrowserObserver, type AgentBrowserPackage } from "../core/agent_browser_session.js";
 import { requireAtsPolicyAcceptance } from "./ats_policy.js";
+import { strategiesReady, type StrategyReadiness } from "../core/ats_contracts/strategy.js";
 
 export const ATS_PROFILE_MARKER = "aether.ats.profile/1";
 
@@ -136,9 +137,31 @@ function renderStrategyScan(scan: Record<string, unknown>): string {
   return sanitizeTerm(lines.join("\n")) + "\n";
 }
 
-function strategyCount(scan: Record<string, unknown>): number {
+/**
+ * Break a scan into the counts callers actually mean.
+ *
+ * This replaces a single `strategyCount` that returned `strategies.length` —
+ * every scanned file, including rejected, needs_conversion and unavailable
+ * ones. Its value then fed a persisted `strategy_count` and a journal entry,
+ * so setup could report "6 strategies" with nothing compiled, which is exactly
+ * the dishonest readiness Spec 2 section 2.1 calls out and section 5 step 5
+ * forbids: setup may finish with zero compiled strategies, but it must SAY
+ * `0 compiled` and leave strategy readiness incomplete.
+ *
+ * Returning the whole set rather than one number means each call site has to
+ * name which count it wants, so the ambiguity cannot silently come back.
+ */
+function strategyReadiness(scan: Record<string, unknown>): StrategyReadiness {
   if (scan["state"] !== "scanned" || !Array.isArray(scan["strategies"])) throw new Error("The strategy scanner did not return a valid result.");
-  return scan["strategies"].length;
+  const rows = scan["strategies"] as Array<Record<string, unknown>>;
+  const withState = (state: string): number => rows.filter(row => row["state"] === state).length;
+  return {
+    compiled: withState("compiled"),
+    rejected: withState("rejected"),
+    needs_conversion: withState("needs_conversion"),
+    unavailable: withState("unavailable"),
+    total: rows.length,
+  };
 }
 
 function journalPath(path: string): string { return join(dirname(path), "journal.jsonl"); }
@@ -217,18 +240,24 @@ export async function askSetup(signal?: AbortSignal, input: NodeJS.ReadableStrea
     const size = (await reader.question("Memory size in GiB [5]: ", { signal: active })).trim() || "5";
     if (!/^\d+$/.test(size) || Number(size) < 5 || Number(size) > 1024) throw new Error("Choose a whole memory size from 5 to 1,024 GiB.");
     const strategies = (await reader.question("Strategy folder [./strategies]: ", { signal: active })).trim() || "./strategies";
-    const provider = (await reader.question("Data provider: none, yfinance, polygon, custom [none]: ", { signal: active })).trim().toLowerCase() || "none";
-    if (!["none", "yfinance", "polygon", "custom"].includes(provider)) throw new Error("Choose none, yfinance, polygon or custom for data.");
-    let endpoint: string | null = null;
+    // Spec 2 section 5 step 4: offer only adapters the headless runtime
+    // actually implements. `custom` used to be offered here and prompted for
+    // an endpoint, which presented an unimplemented adapter as a working one.
+    // It is NOT removed from packages/ats-skills' own validator in this PR —
+    // that is a breaking schema change (an operator with provider:'custom'
+    // already persisted would have validateSettings throw on load) and belongs
+    // with the settings/1 to /2 migration in section 15, under PR 2.4.
+    const provider = (await reader.question("Data provider: none, yfinance, polygon [none]: ", { signal: active })).trim().toLowerCase() || "none";
+    if (!["none", "yfinance", "polygon"].includes(provider)) throw new Error("Choose none, yfinance or polygon for data.");
+    const endpoint: string | null = null;
     let keyEnv: string | null = null;
     let symbols: string[] = [];
     if (provider !== "none") {
       const raw = await reader.question("Symbols, comma-separated [configure later]: ", { signal: active });
       symbols = raw.split(",").map(value => value.trim().toUpperCase()).filter(Boolean);
-      if (provider === "custom") endpoint = (await reader.question("Data endpoint URL: ", { signal: active })).trim();
-      if (provider === "polygon" || provider === "custom") {
-        keyEnv = (await reader.question(`Credential environment variable name [${provider === "polygon" ? "POLYGON_API_KEY" : "none"}]: `, { signal: active })).trim() || (provider === "polygon" ? "POLYGON_API_KEY" : null);
-        if (keyEnv !== null && !/^[A-Z_][A-Z0-9_]{0,127}$/.test(keyEnv)) throw new Error("Enter only an environment variable name, never the credential value.");
+      if (provider === "polygon") {
+        keyEnv = (await reader.question("Credential environment variable name [POLYGON_API_KEY]: ", { signal: active })).trim() || "POLYGON_API_KEY";
+        if (!/^[A-Z_][A-Z0-9_]{0,127}$/.test(keyEnv)) throw new Error("Enter only an environment variable name, never the credential value.");
       }
     }
     active.throwIfAborted();
@@ -310,7 +339,11 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     let scan = await pack.scanStrategies({ directory: binding.strategies_directory, signal,
       ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
     signal?.throwIfAborted();
-    if (strategyCount(scan) === 0) {
+    // Seed the starter set only when the folder is genuinely EMPTY. Keying
+    // this off the compiled count instead would reinstall the starters over a
+    // folder whose files merely failed to compile, duplicating sources every
+    // time setup resumes.
+    if (strategyReadiness(scan).total === 0) {
       const installed = await pack.installBundledStrategies({ directory: binding.strategies_directory, selection: "starter" });
       write(`Installed ${installed.installed.length} bundled Nano starter sources · no execution authority granted\n`);
       await appendJournal(pack, path, agent.agent_id, "strategy.library_installed", "Installed bundled Nano starter sources.", {
@@ -320,12 +353,27 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
       signal?.throwIfAborted();
     }
+    const readiness = strategyReadiness(scan);
     write(renderStrategyScan(scan));
     await saveBinding(path, binding);
     await unlink(`${path}.pending`);
     await appendJournal(pack, path, agent.agent_id, "setup.ready", "ATS device setup verified.", {
-      memory_gb: binding.memory_gb, strategy_count: strategyCount(scan), data_provider: settings.data_stream.provider,
+      memory_gb: binding.memory_gb,
+      // Each count is recorded under its own name. A single `strategy_count`
+      // read as readiness by anything downstream, which is the bug this
+      // replaces (Spec 2 section 2.1).
+      strategies_compiled: readiness.compiled,
+      strategies_rejected: readiness.rejected,
+      strategies_need_conversion: readiness.needs_conversion,
+      strategies_found: readiness.total,
+      strategies_ready: strategiesReady(readiness),
+      data_provider: settings.data_stream.provider,
     });
+    // Section 5 step 5: finishing with nothing compiled is permitted, but it
+    // must be said out loud and readiness must stay incomplete.
+    if (!strategiesReady(readiness)) {
+      write("Strategy readiness incomplete · 0 compiled · nothing can be staged or activated yet\n");
+    }
     write(`Data: ${sanitizeTerm(settings.data_stream.provider)} · ${String(pack.dataStreamStatus(settings)["state"] ?? "unverified")} · connection requires a live probe\n`);
     write(theme.cyan("ATS setup saved") + ` · ${binding.memory_gb} GiB context limit · ${sanitizeTerm(binding.strategies_directory)}\n`);
     return binding;
@@ -387,8 +435,16 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         await refuseLinks(binding.strategies_directory);
         const scan = await pack.scanStrategies({ directory: binding.strategies_directory, signal: surface?.signal,
           ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
+        const scanned = strategyReadiness(scan);
         output(renderStrategyScan(scan));
-        await appendJournal(pack, path, agent.agent_id, "strategy.scan", "Strategy directory scanned.", { count: strategyCount(scan), compiler: String(scan["compiler"] ?? "unavailable") });
+        if (!strategiesReady(scanned)) output("Strategy readiness incomplete · 0 compiled\n");
+        await appendJournal(pack, path, agent.agent_id, "strategy.scan", "Strategy directory scanned.", {
+          strategies_compiled: scanned.compiled,
+          strategies_rejected: scanned.rejected,
+          strategies_need_conversion: scanned.needs_conversion,
+          strategies_found: scanned.total,
+          compiler: String(scan["compiler"] ?? "unavailable"),
+        });
       } else if (command === "library") {
         if (args[0] === "add") {
           const requested = args.slice(1);
