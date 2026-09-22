@@ -720,6 +720,7 @@ test("an account switch stops the runtime and revokes its credential", async t =
   const started = await startRuntime(path, record, deps);
   const credential = started.record.credential_file;
   assert.ok(credential);
+  const previousSecret = await readFile(credential, "utf8");
 
   const result = await tearDownForAccountSwitch(path, deps);
   assert.equal(result.stopped, true);
@@ -730,6 +731,19 @@ test("an account switch stops the runtime and revokes its credential", async t =
   await assert.rejects(stat(credential), "the credential file must be revoked");
   // The receipt survives: the bytes on disk are still what they were.
   assert.ok(after?.installation);
+
+  const restarted = await startRuntime(path, after!, { ...deps,
+    spawn: (_command, _args, options) => {
+      assert.ok(options.env["ATS_RUNTIME_CREDENTIAL_FILE"], "restart requires a new credential file");
+      alive = true;
+      return fakeChild(5252);
+    },
+  });
+  assert.equal(restarted.changed, true);
+  assert.ok(restarted.record.credential_file);
+  assert.equal(restarted.record.credential_file, credential);
+  assert.ok((await stat(credential)).isFile(), "the revoked credential path is reprovisioned with new bytes");
+  assert.notEqual(await readFile(credential, "utf8"), previousSecret);
 });
 
 test("account-switch teardown retains the credential record when stop fails", async t => {

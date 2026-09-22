@@ -241,6 +241,16 @@ export async function startRuntime(
     };
   }
 
+  // Account-switch teardown revokes the old service credential. A later
+  // explicitly requested start must mint a new one before launching rather
+  // than starting a process with no authentication channel.
+  const launchRecord = record.credential_file === null
+    ? await persist(recordPath, {
+      ...record,
+      credential_file: await provisionRuntimeCredential(record.install_dir),
+      updated_at: stamp(deps),
+    })
+    : record;
   const dir = slotDir(record.install_dir, resolution.slot);
   let child: SupervisedChild;
   try {
@@ -252,8 +262,8 @@ export async function startRuntime(
       // process with no need for them (section 14).
       env: {
         ATS_RUNTIME_HOME: dir,
-        ATS_RUNTIME_INSTANCE: record.runtime_instance_id,
-        ...(record.credential_file ? { ATS_RUNTIME_CREDENTIAL_FILE: record.credential_file } : {}),
+        ATS_RUNTIME_INSTANCE: launchRecord.runtime_instance_id,
+        ATS_RUNTIME_CREDENTIAL_FILE: launchRecord.credential_file!,
         PATH: process.env["PATH"] ?? "",
       },
       detached: true,
@@ -261,8 +271,8 @@ export async function startRuntime(
     });
   } catch (error) {
     const next = await persist(recordPath, {
-      ...record,
-      supervisor: { ...record.supervisor, pid: null, started_at: null, start_token: null, last_error: redact(error) },
+      ...launchRecord,
+      supervisor: { ...launchRecord.supervisor, pid: null, started_at: null, start_token: null, last_error: redact(error) },
       updated_at: stamp(deps),
     });
     return { record: next, changed: true, reason: "The ATS runtime failed to start." };
@@ -270,7 +280,7 @@ export async function startRuntime(
 
   const pid = child.pid;
   if (typeof pid !== "number" || pid <= 0) {
-    return { record, changed: false, reason: "The ATS runtime did not report a process id." };
+    return { record: launchRecord, changed: false, reason: "The ATS runtime did not report a process id." };
   }
   child.unref?.();
 
@@ -279,7 +289,7 @@ export async function startRuntime(
   const token = await (deps.startToken ?? processStartToken)(pid);
 
   const next = await persist(recordPath, {
-    ...record,
+    ...launchRecord,
     installation: resolution.receipt.installation,
     supervisor: {
       pid,
