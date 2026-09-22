@@ -217,8 +217,12 @@ export async function startRuntime(
   if (!record.installation) {
     return { record, changed: false, reason: "No verified ATS runtime is installed." };
   }
-  if ((await processOwnership(record, deps)) === "owned") {
+  const ownership = await processOwnership(record, deps);
+  if (ownership === "owned") {
     return { record, changed: false, reason: "The ATS runtime is already running." };
+  }
+  if (ownership === "foreign") {
+    return { record, changed: false, reason: "The recorded process is alive but ownership cannot be proven. Resolve it before starting another runtime." };
   }
   const spawn = deps.spawn;
   if (!spawn) {
@@ -454,6 +458,9 @@ export async function rollbackRuntime(
   if (!targetReceipt) {
     return { record, changed: false, reason: "No previous ATS runtime is available to roll back to." };
   }
+  if (!(await verifyActiveTree(record.install_dir, { slot: target, receipt: targetReceipt, recovered: false }))) {
+    return { record, changed: false, reason: "The previous ATS runtime fails tree verification. Rollback was refused." };
+  }
 
   // Stop first: switching the pointer under a live process would leave it
   // running bytes the record no longer describes.
@@ -501,11 +508,17 @@ export async function tearDownForAccountSwitch(
 ): Promise<{ stopped: boolean }> {
   const record = await readRuntimeRecord(recordPath);
   if (!record) return { stopped: false };
+  if (record.supervisor.pid !== null && (await processOwnership(record, deps)) === "foreign") {
+    throw new Error("ATS runtime process ownership cannot be proven. Account-switch teardown requires manual reconciliation.");
+  }
   const stopped = await stopRuntime(recordPath, record, deps);
+  if (stopped.record.supervisor.pid !== null) {
+    throw new Error("ATS runtime is still running. Account-switch teardown could not revoke its credentials.");
+  }
   if (record.credential_file) {
     // Revoke rather than reuse: a credential provisioned for one account must
     // never be presented on behalf of another.
-    await rm(record.credential_file, { force: true }).catch(() => {});
+    await rm(record.credential_file, { force: true });
     await persist(recordPath, { ...stopped.record, credential_file: null, updated_at: stamp(deps) });
   }
   return { stopped: stopped.changed };

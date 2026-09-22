@@ -65,9 +65,11 @@ export interface ArchiveFetcher {
 
 /**
  * Unpack verified bytes into a staging slot. Injected; no default format.
- * Whatever an implementation does, `verifyExtractedTree` inspects the result
- * afterwards, so an extractor that ignores the rules is caught by reality
- * rather than trusted.
+ * An implementation MUST confine every write to destination and enforce entry
+ * and byte limits before or during extraction. The post-extraction tree walk
+ * checks what remains inside the slot; it cannot undo an extractor's write
+ * outside the slot or resource exhaustion that occurred during extraction.
+ * No production extractor is provided by this PR.
  */
 export interface ArchiveExtractor {
   extract(input: { bytes: Uint8Array; destination: string }): Promise<void>;
@@ -132,11 +134,11 @@ export async function installRuntime(input: InstallInput, deps: InstallDeps = {}
       platform,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-  } catch (error) {
+  } catch {
     // An unresolvable entitlement is the normal state of a build with no
     // configured source, and is reported as itself rather than dressed up as
-    // a verification failure.
-    return failed("entitlement_unavailable", error instanceof Error ? error.message : RUNTIME_INSTALLER_UNAVAILABLE);
+    // a verification failure. Transport exceptions may embed tokens or URLs.
+    return failed("entitlement_unavailable", "ATS runtime entitlement is unavailable. Check the signed-in account and installer configuration.");
   }
 
   const parsed = readManifestResponse(response);

@@ -9,7 +9,7 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign as signEd25519, type KeyObject } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -281,6 +281,16 @@ test("install refuses honestly when no entitled source is configured", async t =
   assert.equal(await readRuntimeRecord(join(root, "runtime.json")), null);
 });
 
+test("entitlement transport errors cannot expose credentials in install feedback", async t => {
+  const root = await temporary(t);
+  const outcome = await installRuntime({
+    recordPath: join(root, "runtime.json"), installRoot: join(root, "runtime"),
+    agentVersion: AGENT_VERSION, requestedMode: "observe", platform: "linux-x64",
+  }, { source: { resolve: async () => { throw new Error("token=private-secret at /home/operator/keys"); } } });
+  assert.equal(outcome.failure, "entitlement_unavailable");
+  assert.doesNotMatch(outcome.reason ?? "", /private-secret|\/home\/operator/);
+});
+
 test("a verified install commits a slot, a pointer and a 0600 credential", async t => {
   const root = await temporary(t);
   const outcome = await install(root);
@@ -480,6 +490,36 @@ test("the runtime refuses to launch bytes that do not match its receipt", async 
   assert.match(result.reason ?? "", /does not match its installation receipt/);
 });
 
+test("a post-install symlink cannot hide from the launch tree digest", async t => {
+  if (process.platform === "win32") { t.skip("Windows symlink creation needs elevation"); return; }
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  const dir = slotDir(join(root, "runtime"), "a");
+  const before = await computeTreeDigest(dir);
+  await symlink("/etc/passwd", join(dir, "bin", "escape"));
+  assert.equal(await computeTreeDigest(dir), before, "the file digest does not include links");
+  let launched = false;
+  const result = await startRuntime(path, record, { now: clock, pidAlive: () => false,
+    spawn: () => { launched = true; return fakeChild(4242); } });
+  assert.equal(result.changed, false);
+  assert.equal(launched, false);
+  assert.match(result.reason ?? "", /does not match its installation receipt/);
+});
+
+test("a post-install symlink replacing the slot root cannot launch", async t => {
+  if (process.platform === "win32") { t.skip("Windows symlink creation needs elevation"); return; }
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  const dir = slotDir(join(root, "runtime"), "a");
+  const parked = `${dir}-parked`;
+  await rename(dir, parked);
+  await symlink(parked, dir);
+  let launched = false;
+  await assert.rejects(startRuntime(path, record, { now: clock, pidAlive: () => false,
+    spawn: () => { launched = true; return fakeChild(4242); } }), /cannot follow a symbolic link/);
+  assert.equal(launched, false);
+});
+
 test("starting records a pid and a start token, and stopping clears them", async t => {
   const root = await temporary(t);
   const { path, record } = await installedRecord(root);
@@ -519,6 +559,12 @@ test("a recycled pid is disowned and released, never terminated", async t => {
     terminate: () => { terminated += 1; }, waitMs: 200,
   };
   assert.equal(await processOwnership(started.record, foreignDeps), "foreign");
+
+  let launched = false;
+  const refused = await startRuntime(path, started.record, { ...foreignDeps,
+    spawn: () => { launched = true; return fakeChild(5252); } });
+  assert.equal(refused.changed, false);
+  assert.equal(launched, false, "an unprovable live process must not trigger a second runtime");
 
   const stopped = await stopRuntime(path, started.record, foreignDeps);
   assert.equal(terminated, 0, "an unowned process must not be signalled");
@@ -634,6 +680,23 @@ test("rollback switches slots, keeps both receipts, and stays startable", async 
   assert.equal((await readSlotReceipt(installRoot, "b"))?.installation.runtime_version, "0.4.1");
 });
 
+test("rollback refuses a modified previous slot before stopping the live runtime", async t => {
+  const root = await temporary(t);
+  await install(root, Buffer.from("runtime archive"), "0.4.0");
+  await install(root, Buffer.from("runtime archive two"), "0.4.1");
+  const path = join(root, "runtime.json");
+  const installRoot = join(root, "runtime");
+  const record = await readRuntimeRecord(path);
+  assert.ok(record);
+  await writeFile(join(slotDir(installRoot, "a"), "bin", "ats-runtime"), "tampered");
+  let terminated = false;
+  const result = await rollbackRuntime(path, record, { now: clock, terminate: () => { terminated = true; } });
+  assert.equal(result.changed, false);
+  assert.equal(terminated, false);
+  assert.match(result.reason ?? "", /fails tree verification/);
+  assert.equal((await readActivePointer(installRoot))?.slot, "b");
+});
+
 test("rollback with only one slot installed refuses", async t => {
   const root = await temporary(t);
   const { path, record } = await installedRecord(root);
@@ -667,6 +730,21 @@ test("an account switch stops the runtime and revokes its credential", async t =
   await assert.rejects(stat(credential), "the credential file must be revoked");
   // The receipt survives: the bytes on disk are still what they were.
   assert.ok(after?.installation);
+});
+
+test("account-switch teardown retains the credential record when stop fails", async t => {
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  const started = await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => false, startToken: async () => "tok-1",
+  });
+  const credential = started.record.credential_file;
+  assert.ok(credential);
+  const deps: SupervisorDeps = { now: clock, pidAlive: () => true, startToken: async () => "tok-1",
+    terminate: () => { const error = new Error("denied") as NodeJS.ErrnoException; error.code = "EPERM"; throw error; } };
+  await assert.rejects(tearDownForAccountSwitch(path, deps), /still running/);
+  assert.equal((await readRuntimeRecord(path))?.credential_file, credential);
+  assert.ok((await stat(credential)).isFile());
 });
 
 // ---------------------------------------------------------------- store

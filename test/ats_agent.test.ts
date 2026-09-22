@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { managedAgentStorageDirectory } from "../src/core/managed_agent_local.js";
+import { dataProfilePath } from "../src/core/ats_runtime/paths.js";
+import { readDataRecord, writeDataRecord } from "../src/core/ats_runtime/store.js";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { createAtsHooks, atsManagedConfig, ATS_PROFILE_MARKER, askSetup, type AtsHookDeps } from "../src/commands/ats_agent.js";
@@ -49,7 +51,7 @@ function fakePackage(overrides: Partial<Package> = {}): Package {
     formatJournal: () => "ATS journal · no local events\n",
     createBrowserObserver: async () => ({ open: async () => ({ state: "connected", viewUrl: null }), snapshot: async () => ({}), close: async () => {}, status: () => ({ state: "connected" }) }),
     observeBrowser: async function* () { yield {}; },
-    loadSettings: async () => ({ permission_mode: "plan", data_stream: { provider: "none", endpoint: null, api_key_env: null, symbols: [], timeframe: "1m", poll_interval_ms: 5000 } }),
+    loadSettings: async () => ({ permission_mode: "plan", data_stream: { provider: "none", endpoint: null, api_key_env: null, symbols: [], timeframe: "M1", poll_interval_ms: 5000 } }),
     saveSettings: async () => {},
     cyclePermissionMode: (mode) => mode === "plan" ? "skip" : mode === "skip" ? "danger" : "plan",
     dataStreamStatus: () => ({ state: "unavailable", live_orders_enabled: false }),
@@ -263,7 +265,7 @@ test("native ready receipts must match agent, directory, capacity and verified p
 test("ATS mode and data commands persist local settings and invalid requests cannot change them", async () => {
   await fixture(async (dir) => {
     await binding(dir);
-    let settings = { permission_mode: "plan", data_stream: { provider: "none", endpoint: null as string | null, api_key_env: null as string | null, symbols: [] as string[], timeframe: "1m", poll_interval_ms: 5000 } };
+    let settings = { permission_mode: "plan", data_stream: { provider: "none", endpoint: null as string | null, api_key_env: null as string | null, symbols: [] as string[], timeframe: "M1", poll_interval_ms: 5000 } };
     let saves = 0;
     let output = "";
     const pack = fakePackage({ loadSettings: async () => structuredClone(settings), saveSettings: async (_path, value) => { saves++; settings = structuredClone(value); } });
@@ -664,6 +666,44 @@ test("setup persists provider configuration through the ATS validator without cl
     assert.equal(settings.data_stream.api_key_env, "POLYGON_API_KEY");
     assert.match(output, /Data: polygon · unverified/);
     assert.equal(real.dataStreamStatus(settings).connected, false);
+  });
+});
+
+test("data edits rotate the profile and discard old probe evidence, while identical settings retain it", async () => {
+  await fixture(async (dir) => {
+    const packageName = "aether-ats-skills";
+    const real = await import(packageName);
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, acceptPolicy: async () => true,
+      setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies"),
+        dataStream: { provider: "polygon", endpoint: null, api_key_env: "POLYGON_API_KEY", symbols: ["AAPL"] } }),
+      load: async () => fakePackage({ loadSettings: real.loadSettings, saveSettings: real.saveSettings, dataStreamStatus: real.dataStreamStatus }),
+    });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 0); });
+    const path = dataProfilePath(dir, ACCOUNT, ID);
+    const initial = await readDataRecord(path);
+    assert.ok(initial);
+    const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    await writeDataRecord(path, { ...initial, last_probe: {
+      schema_version: "aether.ats.data-probe/1", probe_id: "pb_one", profile_id: initial.profile.profile_id,
+      provider: "polygon", state: "verified", sample_count: 1, symbols_verified: ["AAPL"],
+      observed_at: now, received_at: now, freshness_ms: 0, reason: null,
+    } });
+    const surface = { signal: new AbortController().signal, write: () => {} };
+    await hooks.onChatCommand!(context(), agent(), "/ats data symbols AAPL", surface);
+    const same = await readDataRecord(path);
+    assert.equal(same?.profile.profile_id, initial.profile.profile_id);
+    assert.equal(same?.last_probe?.state, "verified");
+    await hooks.onChatCommand!(context(), agent(), "/ats data symbols AAPL,MSFT", surface);
+    const changed = await readDataRecord(path);
+    assert.notEqual(changed?.profile.profile_id, initial.profile.profile_id);
+    assert.deepEqual(changed?.profile.symbols, ["AAPL", "MSFT"]);
+    assert.equal(changed?.last_probe, null);
+    await hooks.onChatCommand!(context(), agent(), "/ats data set polygon https://api.polygon.io/ OTHER_API_KEY", surface);
+    const otherKey = await readDataRecord(path);
+    assert.notEqual(otherKey?.profile.profile_id, changed?.profile.profile_id);
+    assert.equal(otherKey?.profile.credential_ref, "env:OTHER_API_KEY");
+    await hooks.onChatCommand!(context(), agent(), "/ats data set custom https://example.test/feed OTHER_API_KEY", surface);
+    assert.equal(await readDataRecord(path), null, "an unrepresentable provider cannot inherit an old verified profile");
   });
 });
 

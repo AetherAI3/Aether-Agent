@@ -324,28 +324,33 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     }
     return session;
   };
-  /**
-   * Derive the Spec 2 state files from a completed setup, and record wizard
-   * progress so an interrupted run resumes instead of re-asking (section 5).
-   *
-   * The data profile's id is the digest of its own configuration. That is what
-   * makes section 8.2's "a previous successful probe is not perpetual
-   * evidence" mechanical: change the provider, the symbols or the timeframe
-   * and the id changes, so a stored probe receipt no longer matches the
-   * profile and the store refuses to keep it. Reusing a stable id would let a
-   * feed verified for SPY silently vouch for a newly added symbol.
+  /** Keep a profile id only while every setting it describes stays the same.
+   * An id is an opaque random identifier, not a hash of a credential reference.
+   * Changing a provider, symbol, timeframe, polling interval or reference
+   * rotates the id and drops the old probe, including on /ats data edits.
    */
-  const syncSpec2State = async (account: ManagedAccountScope, agentId: string, settings: AtsSettings, now: string, note: (text: string) => void): Promise<void> => {
+  const syncDataProfile = async (account: ManagedAccountScope, agentId: string, settings: AtsSettings, now: string, note: (text: string) => void, strict = false): Promise<void> => {
     const stream = settings.data_stream;
+    const profilePath = dataProfilePath(root, account, agentId);
     // `custom` has no DataProfileV1 representation — section 5 step 4 admits
-    // only none/yfinance/polygon. A legacy setting is left alone rather than
-    // coerced into a provider it is not.
+    // only none/yfinance/polygon. Preserve the legacy settings, but discard
+    // any prior profile evidence so it cannot describe a different feed.
     //
     // Nothing in here may fail setup. These files are a derived convenience:
     // the authority is `ats.json` plus the runtime's own receipts, so a legacy
-    // settings value this schema cannot represent means "no profile derived",
-    // reported out loud, not "setup failed".
-    if (["none", "yfinance", "polygon"].includes(stream.provider)) {
+    // settings value this schema cannot represent means "no profile derived".
+    if (!["none", "yfinance", "polygon"].includes(stream.provider)) {
+      // No Spec 2 representation for a legacy custom adapter. An old profile
+      // and its verified probe must not keep describing the newly selected feed.
+      try {
+        if (await readDataRecord(profilePath)) await unlink(profilePath);
+      } catch (error) {
+        note("Data profile not cleared · inspect existing state before using data readiness\n");
+        if (strict) throw error;
+      }
+      return;
+    }
+    {
       const configured = {
         provider: stream.provider,
         symbols: [...stream.symbols].sort(),
@@ -353,10 +358,17 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         poll_interval_ms: stream.poll_interval_ms,
         credential_ref: stream.api_key_env ? `env:${stream.api_key_env}` : null,
       };
-      const profileId = `dp_${createHash("sha256").update(JSON.stringify(configured)).digest("hex").slice(0, 32)}`;
-      const profilePath = dataProfilePath(root, account, agentId);
-      const existing = await readDataRecord(profilePath).catch(() => null);
       try {
+        // A corrupt existing record must remain available for inspection; never
+        // replace it as if it were an absent record.
+        const existing = await readDataRecord(profilePath);
+        const prior = existing?.profile;
+        const unchanged = prior?.provider === configured.provider
+          && JSON.stringify(prior.symbols) === JSON.stringify(configured.symbols)
+          && prior.timeframe === configured.timeframe
+          && prior.poll_interval_ms === configured.poll_interval_ms
+          && prior.credential_ref === configured.credential_ref;
+        const profileId = unchanged ? prior.profile_id : `dp_${randomUUID().replaceAll("-", "")}`;
         await writeDataRecord(profilePath, {
           schema_version: "aether.ats.data-state/1",
           profile: {
@@ -370,16 +382,19 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
             configured_at: now,
           },
           // Only a probe taken against THIS configuration survives.
-          last_probe: existing?.last_probe?.profile_id === profileId ? existing.last_probe : null,
+          last_probe: unchanged ? existing?.last_probe ?? null : null,
           updated_at: now,
         });
-      } catch {
-        // A legacy value the Spec 2 schema cannot represent — an old timeframe
-        // spelling, say. The doctor will report data as not configured, which
-        // is the truth, rather than setup failing over a derived file.
-        note("Data profile not derived · the saved data settings are not representable in the Spec 2 schema\n");
+      } catch (error) {
+        note("Data profile not updated · inspect existing state and saved data settings\n");
+        if (strict) throw error;
       }
     }
+  };
+
+  /** Derive the Spec 2 files from completed setup and record wizard progress. */
+  const syncSpec2State = async (account: ManagedAccountScope, agentId: string, settings: AtsSettings, now: string, note: (text: string) => void): Promise<void> => {
+    await syncDataProfile(account, agentId, settings, now, note);
 
     const dashboardPath = dashboardStatePath(root, account, agentId);
     if (!(await readDashboardRecord(dashboardPath).catch(() => null))) {
@@ -561,10 +576,12 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
           if (["none", "yfinance"].includes(provider) && (endpoint || keyEnv)) throw new Error("This provider needs no endpoint or credential argument.");
           settings.data_stream = { ...settings.data_stream, provider, endpoint: endpoint ?? null, api_key_env: keyEnv ?? null,
             ...(provider === "none" ? { symbols: [] } : {}) };
+          await syncDataProfile(state.account, agent.agent_id, settings, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), output, true);
           await pack.saveSettings(settingsPath, settings);
           await appendJournal(pack, path, agent.agent_id, "data.configured", "Data provider configuration changed.", { provider, symbol_count: settings.data_stream.symbols.length, connected: false });
         } else if (args[0] === "symbols") {
           settings.data_stream.symbols = args.slice(1).join(",").split(",").map(x => x.trim().toUpperCase()).filter(Boolean);
+          await syncDataProfile(state.account, agent.agent_id, settings, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), output, true);
           await pack.saveSettings(settingsPath, settings);
           await appendJournal(pack, path, agent.agent_id, "data.symbols_changed", "Data symbols changed.", { provider: settings.data_stream.provider, symbol_count: settings.data_stream.symbols.length, connected: false });
         } else if (args.length && args[0] !== "list") throw new Error("Use /ats data, /ats data set, or /ats data symbols AAPL,MSFT.");

@@ -7,21 +7,22 @@
 // disk, or plants a symlink that a later 0600 write follows out of the private
 // runtime directory.
 //
-// TWO LAYERS, and the second is the one that actually holds:
+// TWO LAYERS. The extractor must enforce confinement while it writes:
 //
 //   1. `checkEntries` screens a declared listing BEFORE extraction, for
 //      extractors that can enumerate an archive cheaply. Advisory: a hostile
 //      archive can misdeclare its own listing.
-//   2. `verifyExtractedTree` walks what is ACTUALLY on disk afterwards with
-//      lstat and refuses anything that should not be there. This holds
-//      regardless of which extractor ran or whether it honoured layer 1,
-//      because it inspects reality rather than a manifest of intentions.
+//   2. `verifyExtractedTree` walks what remains inside staging afterwards with
+//      lstat and refuses unsafe entries. It cannot discover a write outside
+//      staging or reverse disk exhaustion that already occurred. A real
+//      extractor must reject escaping paths and bound extraction up front.
 //
 // A caller that skips layer 2 has no contract at all, so `install.ts` runs it
 // unconditionally and discards the staging tree on any violation.
 
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { refuseSymlinkedPath } from "./paths.js";
 
 export type ArchiveViolation =
   | "too_many_entries"
@@ -129,6 +130,14 @@ export async function verifyExtractedTree(
   root: string,
   limits: ArchiveLimits = DEFAULT_ARCHIVE_LIMITS,
 ): Promise<ArchiveVerdict> {
+  try {
+    await refuseSymlinkedPath(root);
+    if (!(await lstat(root)).isDirectory()) {
+      return refuse("device", "The extracted tree root is not a directory.");
+    }
+  } catch {
+    return refuse("path_escape", "The extracted tree root or an ancestor is unsafe.");
+  }
   const base = await realpath(resolve(root));
   let entries = 0;
   let total = 0;

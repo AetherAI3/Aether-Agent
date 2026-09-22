@@ -33,6 +33,7 @@ import {
   type RuntimeInstallationReceiptV1,
 } from "../ats_contracts/runtime.js";
 import { refuseSymlinkedPath, writePrivateFile } from "./paths.js";
+import { verifyExtractedTree } from "./archive_guard.js";
 
 export const ACTIVE_POINTER_SCHEMA = "aether.ats.runtime-active/1" as const;
 export const SLOT_RECEIPT_SCHEMA = "aether.ats.runtime-slot/1" as const;
@@ -285,10 +286,14 @@ export async function verifyActiveTree(installRoot: string, resolution: SlotReso
   const dir = slotDir(installRoot, resolution.slot);
   try {
     if (!(await stat(dir)).isDirectory()) return false;
+    // The digest skips entries it cannot hash as regular files. Recheck the
+    // full safety contract so a post-install symlink, device or hardlink can
+    // never be invisible to the digest and survive into a launch/rollback.
+    if (!(await verifyExtractedTree(dir)).ok) return false;
+    return (await computeTreeDigest(dir)) === resolution.receipt.tree_sha256;
   } catch {
     return false;
   }
-  return (await computeTreeDigest(dir)) === resolution.receipt.tree_sha256;
 }
 
 /** Discard a slot entirely. Only ever called on the INACTIVE slot. */
