@@ -37,6 +37,15 @@ export function dashboardStatePath(root: string, account: ManagedAccountScope, a
 }
 
 /**
+ * Wizard progress (section 5). A fourth file beside section 15's three: setup
+ * progress is not runtime, data or dashboard state, and folding it into one of
+ * those would hand an older Agent fields it cannot interpret.
+ */
+export function setupStatePath(root: string, account: ManagedAccountScope, agentId: string): string {
+  return join(atsStateDir(root, account, agentId), "setup.json");
+}
+
+/**
  * The private runtime directory. Spec 2 step 2.3 requires the runtime to be
  * installed into an Agent-owned private directory, so it sits under the same
  * account- and agent-scoped root as the rest of the local state: an account
