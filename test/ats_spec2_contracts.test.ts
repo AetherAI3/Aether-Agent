@@ -132,13 +132,32 @@ function ensureAsciiDigest(value: unknown): string {
  * realistically hold it, and this test fails if anyone tidies it back out.
  */
 /**
- * The floor is a CONSTANT, deliberately not `covered.length`.
+ * The floor is a CONSTANT, deliberately not `covered.length`, and it is set to
+ * the coverage that ACTUALLY exists rather than to some comfortable low number.
  *
- * Deriving it from the list being checked makes it self-lowering: trim a name
- * out of `covered` and the bar drops with it. Measured, that is not
- * theoretical — trimming `covered` to one name and tidying the non-ASCII out
- * of the other three takes real coverage from 4 vectors to 1 and the derived
- * floor still passes. An independent number fails, which is the point.
+ * Both halves matter and each was a real bug somewhere:
+ *   - Deriving it from the list being checked makes it self-lowering. Trim a
+ *     name out of `covered` and the bar drops with it: measured, trimming to
+ *     one name and tidying the non-ASCII out of the other three takes real
+ *     coverage from 4 vectors to 1 while a derived floor still passes.
+ *   - A constant set far BELOW actual coverage is just a derived floor that
+ *     someone derived once, badly, and froze. It never has to move, so erosion
+ *     down to it is invisible.
+ *
+ * VERIFIED, not reasoned about. The guard below was run against each scenario
+ * it claims to catch, checking that it fails AND that it fails for the stated
+ * reason:
+ *
+ *   honest tidy-up + regenerate          -> digest comparison, by name
+ *   regenerated under a regressed encoder -> digest comparison, by name
+ *   erosion of all but one covered vector -> digest comparison, by name
+ *   `covered` trimmed below the floor     -> the trim assertion
+ *   control: stale digests                -> drift check, i.e. the WRONG
+ *                                            reason, which proves nothing
+ *
+ * The per-vector loop is load-bearing and must not be collapsed to a single
+ * representative: the erosion scenario above passes a single-representative
+ * guard while three of the four documents have gone blind.
  */
 const MIN_ENCODER_COVERAGE = 4;
 
