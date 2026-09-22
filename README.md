@@ -30,6 +30,11 @@ into the terminal, with guided ATS setup.
 <!-- SOURCE-0.3-WORKFLOWS:START -->
 
 > **Requires 0.3.2 or newer.** Check what you have with `aether --version`.
+>
+> The live npm badge below resolves the currently published `latest`. Until a
+> verified `v0.4.0` tag and registry publication exist, the account-agent and
+> ATS sections below describe the 0.4.0 source candidate on `main`; source text
+> alone is not publication evidence.
 
 ## Quickstart
 
@@ -52,6 +57,31 @@ same work. See [`packages/pypi-cli`](packages/pypi-cli/README.md).
 ## Account agents and ATS — 0.4.0 source candidate
 
 ATS is the trading adapter for account agents.
+
+### What works now — and what does not
+
+Aether Agent 0.4.0 has a real, account-bound ATS setup and observation path. It
+can create the managed-agent draft, verify local memory, install and compile the
+reviewed Nano starter strategies, save data-provider configuration, and open a
+bounded browser observer. Those capabilities are useful today, but they are not
+broker execution.
+
+| Stage | 0.4.0 status | Release boundary |
+|---|---|---|
+| Account agent, consent and local ownership | **Available in the source candidate** | Identity-bound setup; consent never grants trading authority. |
+| Memory, strategy scan/compile and data configuration | **Available in the source candidate** | Preparation and diagnostics only; no order can result. |
+| Browser observation | **Available in the source candidate** | Read-only, freshness-checked images; no model-controlled browser action. |
+| ATS runtime and market-data session | **Next implementation gate** | Must prove lifecycle, health, freshness, cancellation and cleanup before paper trading. |
+| Paper-order execution and reconciliation | **Not shipped** | Requires typed intents, limits, idempotency, venue receipts and uncertain-outcome recovery. |
+| Supervised live orders | **Not shipped** | Requires separate, scoped user authority, broker connectivity, preflight limits, confirmation and a kill switch. |
+| Autonomous live trading | **Not shipped** | No setup choice, mode preference, strategy, chat message or policy receipt enables it. |
+
+Execution work is deliberately sequential: establish the runtime and data-plane
+contracts first, then paper execution and reconciliation, then supervised live
+execution. Autonomous live authority is a later, separately qualified product
+gate—not a side effect of installing 0.4.0. The exact candidate evidence and
+remaining qualification are tracked in the
+[operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md).
 
 After signing in, use `aether agent list` to see the same managed agents as
 Aether Online. `aether agent chat` opens the one-column picker; select an agent
@@ -101,8 +131,10 @@ These commands require the matching Cloud terminal adapter. ATS setup also
 requires its Python engine and a separately running Agent Browser runtime;
 missing services are reported explicitly. This candidate prepares and observes
 an ATS workspace. It does not yet provide model-controlled broker actions or
-automatic live orders. See the [candidate packet](docs/releases/OPERATOR-PACKET-v0.4.0.md)
-for the qualification still required before publication.
+automatic live orders: it does not start an execution engine, connect a broker,
+or submit or reconcile orders. See the
+[candidate packet](docs/releases/OPERATOR-PACKET-v0.4.0.md) for the qualification
+still required before publication.
 
 ## Pick where the model runs
 
@@ -143,7 +175,7 @@ you are signed in. The snapshot below is a dated reference, published so the
 list is readable without signing in first.
 
 <!-- MODEL-CATALOGUE:START -->
-A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-catalogue/index.html), [JSON](docs/model-catalogue/catalogue.json), and [Markdown](docs/generated/model-catalogue.md). It was generated at `2026-08-23T00:00:00.000Z` from Cloud public projection `model-catalogue-v1` with verified digest `sha256:80ba3ba1144d301e2cca407ceced74cb2b371f1da6e3982b87305ff12a3d4712`. Listed availability is not an account entitlement; use `aether models` while signed in.
+A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-catalogue/index.html), [JSON](docs/model-catalogue/catalogue.json), and [Markdown](docs/generated/model-catalogue.md). It was generated at `2026-09-22T01:47:56.169Z` from Cloud public projection `model-catalogue-v1` with verified digest `sha256:f5f516625932d8932bfca221aa5dbf3eb1d7b415eba8dabe298da24b984c64f7`. Listed availability is not an account entitlement; use `aether models` while signed in.
 <!-- MODEL-CATALOGUE:END -->
 
 Local Ollama is independent of all of it — you get whatever you have installed
@@ -168,6 +200,7 @@ at your configured endpoint.
 |---|---|
 | `aether auth login` | Sign in for hosted models. |
 | `aether agent [task]` | Run the coding agent, or open its REPL. |
+| `aether agent list\|create\|configure\|chat` | List, create and configure account agents, or open their shared Online DM conversation (0.4.0 source candidate). |
 | `aether agent --local [task]` | Same, through your Ollama endpoint. |
 | `aether models` | Show the hosted models your account can see. |
 | `aether local doctor\|models\|use\|pull` | Diagnose and manage local Ollama. |
@@ -198,12 +231,14 @@ standalone and open source: on the local route it needs no Aether account at
 all. Coding workspace sessions stay on their host; the managed-agent workflow
 above shares account agents and their Online DM conversations.
 
-### Coming next: live session viewing
+### Remote viewing status in the 0.4.0 source candidate
 
-Remote viewing — /rc — is the bridge between the terminal and the browser, and
-it is being integrated now. The host lives in
-[PR #108](https://github.com/AetherAI3/aether-agent/pull/108) and is **not part
-of 0.3.x**, so nothing below is something you can run yet. What it will do:
+Remote viewing — `aether rc` — is the observer-only bridge between a terminal
+run and the browser. Its host foundation and local status/exposure controls are
+on `main`; they remain outside the published 0.3.x line. A fully qualified live
+Cloud viewer journey is still unproven, and the old draft
+[PR #108](https://github.com/AetherAI3/aether-agent/pull/108) is not release
+evidence for current `main`. The source-candidate contract is:
 
 - Starting a session prints a link and a QR code.
 - Your phone or browser **watches** the run. It never gets tool authority.

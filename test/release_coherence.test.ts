@@ -217,11 +217,11 @@ function assertCandidatePacket(packet: string): void {
   );
   assert.equal(
     onlyPacketRow(rows, "Archive evidence"),
-    "Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending.",
+    "The production-package verifier passed on audited `main`; the immutable `v0.4.0` tag archive, checksum and publishing provenance remain pending and must be produced from the final verified tag commit.",
   );
   assert.equal(
     onlyPacketRow(rows, "Hosted checks"),
-    "Required exact-commit CI, CodeQL, supply-chain audit, generated-documentation, production-package and release-truth checks pending.",
+    "Audited `main` is green in [CI 35358929047](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929047), [CodeQL 35358929027](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929027) and its later [scheduled run 35601932145](https://github.com/AetherAI3/Aether-Agent/actions/runs/35601932145), plus [release truth 35358929055](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929055) and its later [scheduled run 35629835836](https://github.com/AetherAI3/Aether-Agent/actions/runs/35629835836). CI includes supply-chain, generated-documentation, production-package, clean-install and PyPI-launcher coverage. The final tag commit must rerun these gates.",
   );
   assert.equal(
     onlyPacketRow(rows, "Live service evidence"),
@@ -229,7 +229,7 @@ function assertCandidatePacket(packet: string): void {
   );
   assert.equal(
     onlyPacketRow(rows, "Publication evidence"),
-    "No npm/PyPI publish, tag, trusted-publishing provenance or registry dist-tag update is established by this packet.",
+    "No `v0.4.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance or registry dist-tag update is established by this packet. Published `latest` remains a separate registry fact until protected workflows complete.",
   );
 }
 

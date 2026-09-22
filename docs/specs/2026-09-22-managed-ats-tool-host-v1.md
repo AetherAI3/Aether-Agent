@@ -87,6 +87,12 @@ account number or execute_live flag.
 
 All v1 objects are closed. Unknown fields fail validation. There is no generic
 extensions object on a lease, invocation, cancellation, result or capability.
+Every portable top-level object carries a required schema field whose value is
+the exact normative schema identifier named in its section. Unknown or absent
+schema identifiers fail before any semantic processing. Transport-private
+handshake, heartbeat, renewal and close frames are outside this portable object
+bundle and MUST be versioned and authenticated by the Cloud transport; they may
+not be substituted for a portable object or model-visible tool input.
 
 - Canonical JSON is RFC 8785 JSON Canonicalization Scheme.
 - Strings containing lone surrogates, control characters or invalid Unicode
@@ -96,6 +102,8 @@ extensions object on a lease, invocation, cancellation, result or capability.
   Z.
 - IDs are 8 to 128 printable ASCII characters from A-Z, a-z, 0-9, period,
   underscore, colon and hyphen, beginning with an alphanumeric character.
+- A schema ID is separate from the general ID grammar and matches
+  aether.[a-z0-9.-]+/[1-9][0-9]*, with a maximum of 128 ASCII characters.
 - JSON integers are limited to the interoperable range 0 through 2^53 - 1.
 - Floating-point numbers, NaN, Infinity and exponent notation are forbidden in
   contract objects. Decimal values use canonical decimal strings.
@@ -106,9 +114,48 @@ extensions object on a lease, invocation, cancellation, result or capability.
 - Python and TypeScript implementations MUST pass the same checked-in golden
   byte and digest vectors.
 
+Portable JSON frames are at most 262,144 UTF-8 bytes and at most 16 object or
+array levels deep. Unless a narrower field rule applies, strings are at most
+256 Unicode scalar values and arrays contain at most 32 entries. Duplicate
+members in raw JSON objects, duplicate values in set-like arrays and non-
+canonical number spellings are rejected before JSON decoding. Raw JSON need
+not arrive in canonical member order, but the original bytes MUST be retained
+long enough to enforce the lexical rules before RFC 8785 canonicalization.
+
+The separator written as \n in digest and signature formulas is exactly one LF
+byte (0x0a), never the two characters backslash and n.
+
+Schema documents use JSON Schema Draft 2020-12. A schema digest is computed as
+sha256("aether.schema/1\n" + JCS(schema_document)); the entire closed schema
+document, including $schema, $id and x-aether-schema-id, is in the preimage.
+Schema documents have no self-digest member. Dynamic arguments and payloads
+are first bounded and validated by their envelope, then validated a second time
+against the exact registered schema ID and schema digest. JSON Schema alone is
+not sufficient for canonical bytes, signatures, temporal ordering, byte
+limits, unique semantic IDs or replay fencing; implementations MUST run the
+semantic checks described here after closed-schema validation.
+
+The frozen schemas live under contracts/managed-ats-tool-host/v1. Each schema
+uses the absolute $id
+https://schemas.aethersystems.net/managed-ats-tool-host/v1/<filename> and an
+x-aether-schema-id equal to its normative aether.* wire identifier. The bundle
+contains common definitions plus trust, device-proof, host-open-proof, observer
+receipt, runtime capability, registry, host lease, invocation, cancellation,
+result, workspace-status input and workspace-status output schemas. References
+resolve locally; validation never requires a network fetch.
+
+Set-like arrays use ascending Unicode code-point order and contain no duplicate
+values. Tool entries use ascending (name, version) order. A non-canonical order
+fails validation rather than being silently reordered.
+
+Timestamp relationships use Cloud time for Cloud-issued objects and the
+authenticated ATS channel time for ATS receipts. Implementations allow at most
+30 seconds of positive or negative clock skew at receipt. expires_at MUST be
+strictly later than issued_at, created_at or observed_at as applicable.
+
 account_scope_digest is derived exactly as:
 
-sha256("aether.account-scope/1\\n" + JCS({"cloud_origin_id": origin,
+sha256("aether.account-scope/1\n" + JCS({"cloud_origin_id": origin,
 "account_subject": subject})).
 
 origin is the normalized lowercase HTTPS origin with no path, query, fragment
@@ -126,26 +173,43 @@ newline, then RFC 8785 bytes with cloud_signature omitted.
 Agent discovers Cloud verification keys only from the configured origin at
 /.well-known/aether-managed-tool-host-v1.json over validated HTTPS. That closed
 document uses schema aether.managed-tool-trust/1 and contains generated_at,
-expires_at and one or more {key_id, algorithm, public_key} rows. algorithm MUST
-be Ed25519. Unknown keys, expired key sets, redirect to another origin, TLS
+expires_at and keys, an array of 1 through 16 closed
+{key_id, algorithm, public_key} rows. Its required schema field is exactly
+aether.managed-tool-trust/1. algorithm MUST be Ed25519. key_id follows the ID
+grammar, and public_key is an unpadded base64url encoding of exactly 32 bytes.
+Duplicate key IDs fail semantic validation. The document lifetime is at most
+24 hours. Unknown keys, expired key sets, redirect to another origin, TLS
 failure or fetch failure makes host creation unavailable. Cached keys may be
 used only until expires_at.
 
 Host enrollment uses EnrolledDeviceProofV1, schema
-aether.managed-tool-device-proof/1. Required fields are cloud_origin_id,
+aether.managed-tool-device-proof/1. Required fields are schema, exactly that
+identifier; cloud_origin_id,
 account_scope_digest, device_id, device_public_key, issued_at, expires_at,
 revocation_epoch, signature_key_id and cloud_signature. Cloud signs it with the
 same rules. It also carries proof_digest, computed by the common digest rule
 with proof_digest and cloud_signature omitted. device_id MUST use the scdev_
-namespace. The Agent holds the
+namespace. device_public_key encodes exactly 32 bytes and cloud_signature
+encodes exactly 64 bytes as unpadded base64url. The proof lifetime is at most
+30 days. The Agent holds the
 matching Ed25519 private key in an owner-private OS-backed key store; absence of
 that key makes the host unavailable.
 
-Cloud supplies a 32-byte random base64url challenge with a five-minute maximum
-expiry. Agent proves key possession by signing the ASCII string
+proof_digest omits both proof_digest and cloud_signature. The Cloud signature
+preimage omits only cloud_signature and therefore binds proof_digest.
+
+Cloud supplies a 32-byte random value encoded as exactly 43 unpadded base64url
+characters with a five-minute maximum expiry. Agent proves key possession with
+a closed HostOpenProofV1 object whose schema is
+aether.managed-tool-host-open-proof/1 and whose required fields are schema,
+challenge, device_proof_digest, agent_id, conversation_id, local_session_id,
+session_generation, registry_digest and device_signature. device_signature is
+an exactly 64-byte Ed25519 signature encoded as 86 unpadded base64url
+characters. It signs the ASCII string
 aether.managed-tool-host-open/1, a newline, then RFC 8785 bytes of
 {challenge, device_proof_digest, agent_id, conversation_id, local_session_id,
-session_generation, registry_digest}. The challenge is single-use. Cloud
+session_generation, registry_digest}. The device_signature field is not part of
+that signed object. The challenge is single-use. Cloud
 verifies the device proof, scope, revocation epoch, expiry and possession
 signature before issuing a host lease.
 
@@ -153,16 +217,21 @@ signature before issuing a host lease.
 
 ATS capability uses observer channel aether.ats.observer-channel/1. Agent sends
 a 32-byte random challenge through ATS-MCP's private authenticated local
-channel. ATS returns a closed ObserverChannelReceiptV1 containing channel_id,
-runtime_id, runtime_version, runtime_build_digest, challenge, capability_digest,
-issued_at, expires_at, authentication exactly ats_mcp_private_credential and
-receipt_digest. The private credential remains outside every contract object.
+channel. ATS returns a closed ObserverChannelReceiptV1 containing schema exactly
+aether.ats.observer-channel-receipt/1; receipt_id; channel_id; runtime_id;
+runtime_version; runtime_build_digest; challenge; capability_digest; issued_at;
+expires_at; authentication exactly ats_mcp_private_credential; and
+receipt_digest. challenge uses the exact 43-character encoding defined above
+and the receipt lifetime is at most 60 seconds. The private credential remains
+outside every contract object.
 
 Agent accepts RuntimeCapabilityV1 only when the receipt challenge matches, the
 receipt is fresh, capability_digest matches, the configured ATS credential
 authenticated the response and runtime_build_digest matches the loaded build.
 attestation_kind is exactly ats_observer_channel_v1 and attestation_ref is the
-ObserverChannelReceiptV1 receipt_digest.
+ObserverChannelReceiptV1 receipt_id. The capability digest is computed before
+the receipt digest; the receipt then binds capability_digest. This ordering
+avoids a cyclic digest dependency.
 
 ## 5. RuntimeCapabilityV1
 
@@ -172,6 +241,7 @@ This object describes runtime support. It grants no authority.
 
 Required fields:
 
+- schema, exactly aether.ats.runtime-capability/1;
 - runtime_id, runtime_version and runtime_build_digest;
 - attestation_kind and attestation_ref from an ATS-authenticated channel;
 - supported_read_operations, a closed array of versioned operation IDs;
@@ -180,6 +250,11 @@ Required fields:
 - observed_at and expires_at;
 - grants_execution_authority, false;
 - capability_digest.
+
+runtime_version is 1 to 64 printable ASCII characters. The runtime and build
+IDs follow the common ID and digest grammars. supported_read_operations is the
+single-value array ["aether.ats.workspace-status/1"] in E1. The capability
+lifetime is at most 60 seconds.
 
 supports_* describes implementation support, not permission. In v1,
 supports_live_execution MUST be false at the host boundary. A stale or
@@ -196,6 +271,7 @@ Schema: aether.managed-tool-registry/1.
 
 Required top-level fields:
 
+- schema, exactly aether.managed-tool-registry/1;
 - registry_id, account_scope_digest, agent_id and device_id;
 - local_session_id and session_generation;
 - created_at and expires_at;
@@ -215,6 +291,14 @@ Each tool entry requires:
 - data_classes from the closed set local_status, ats_status and
   untrusted_browser_observation;
 - grants_execution_authority, false.
+
+tools contains 1 through 32 entries with unique name/version pairs. name is 1
+through 64 lowercase ASCII letters, digits or underscores, beginning with a
+letter. version is an integer from 1 through 65,535. dependencies contains 1
+through 6 unique values and data_classes contains 1 through 3 unique values.
+The E1 canary manifest MUST contain exactly one entry: ats_workspace_status
+version 1 with the schema IDs in section 11. The registry lifetime is at most
+five minutes.
 
 max_argument_bytes is an integer from 2 through 65,536,
 max_result_bytes is an integer from 256 through 65,536, and max_duration_ms is
@@ -237,6 +321,7 @@ is not a trading credential.
 
 Required fields:
 
+- schema, exactly aether.managed-tool-host-lease/1;
 - lease_id and host_session_id;
 - cloud_origin_id and account_scope_digest;
 - agent_id and enrolled device_id;
@@ -244,9 +329,13 @@ Required fields:
 - conversation_id for routing;
 - registry_digest;
 - issued_at, expires_at and max_calls;
-- capabilities, exactly local_read_tools;
+- capabilities, exactly the single-value array ["local_read_tools"];
 - grants_execution_authority, false;
 - signature_key_id and cloud_signature.
+
+max_calls is an integer from 1 through 256. cloud_signature encodes exactly 64
+bytes as unpadded base64url. A lease lifetime is at most five minutes and never
+extends past the registry, device proof or verification-key expiry.
 
 Conversation identity is routing metadata, not authority. The account, agent,
 device, local session, generation, registry and expiry jointly define the
@@ -267,6 +356,7 @@ Schema: aether.managed-tool-invocation/1.
 
 Required fields:
 
+- schema, exactly aether.managed-tool-invocation/1;
 - request_id and cloud_tool_call_id;
 - lease_id, host_session_id, session_generation and revocation_epoch;
 - cloud_origin_id, account_scope_digest, agent_id and device_id;
@@ -278,12 +368,26 @@ Required fields:
 - issued_at, deadline_at and nonce;
 - invocation_digest.
 
+nonce is an exactly 32-byte random value encoded as 43 unpadded base64url
+characters. sequence is an integer from 1 through 2^53 - 1. tool_version is an
+integer from 1 through 65,535. arguments is a JSON value no deeper than 8 levels
+whose canonical encoding is no larger than the registered max_argument_bytes.
+deadline_at MUST be later than issued_at, no later than both the lease expiry
+and issued_at plus the registered max_duration_ms, and not expired after allowed
+skew when claimed.
+
 arguments MUST satisfy the exact registered schema and size bound. The model
 cannot select a local path, runtime, browser session, provider or account;
 resource identifiers are injected by the bound host after validation.
 
 deadline_at is absolute and includes queue time. An AbortSignal is never placed
 on the wire.
+
+Invocation and cancellation objects are authenticated by the already-bound,
+mutually authenticated Cloud host transport and its monotonically fenced
+sequence. They do not carry a second object signature. A portable invocation or
+cancellation received outside that transport is invalid even if its digests
+match.
 
 Forbidden fields and values include prompts, reasoning, credentials, cookies,
 raw account subjects or numbers, arbitrary provider tool names, source code,
@@ -295,12 +399,15 @@ Schema: aether.managed-tool-cancellation/1.
 
 Required fields:
 
+- schema, exactly aether.managed-tool-cancellation/1;
 - cancellation_id, cloud_tool_call_id and invocation_digest;
 - lease_id, host_session_id, session_generation and revocation_epoch;
 - reason: user_cancelled, run_cancelled, session_closed, lease_revoked or
   deadline_exceeded;
 - issued_at;
 - cancellation_digest.
+
+issued_at MUST fall within the live lease window after allowed skew.
 
 Cancellation is authenticated, idempotent and fenced by the lease generation.
 Agent derives its local AbortSignal from chat shutdown, host shutdown, the
@@ -318,6 +425,7 @@ Schema: aether.managed-tool-result/1.
 
 Required fields:
 
+- schema, exactly aether.managed-tool-result/1;
 - result_id, request_id and cloud_tool_call_id;
 - lease_id, host_session_id, local_session_id, session_generation,
   revocation_epoch and run_id;
@@ -339,9 +447,12 @@ error is a closed object containing code and a bounded safe display message. It
 contains no exception body, path, token, page content or provider response.
 
 code MUST be one of the stable failure codes in section 14. The safe display
-message is 1 to 256 characters. evidence_refs contains at most 16 opaque IDs.
-bounded_bytes is the canonical serialized result size as an integer from 0
-through the registered max_result_bytes. redaction_profile is exactly
+message is 1 to 256 characters. evidence_refs contains at most 16 unique opaque
+safe references; each follows the common ID grammar and is not dereferenceable
+by a model. bounded_bytes is the byte length of the RFC 8785 serialization of
+payload alone, or zero when payload is null. It is an integer from 0 through the
+registered max_result_bytes. The complete ToolResultV1 frame must also fit the
+262,144-byte common frame limit. redaction_profile is exactly
 aether.safe-display/1.
 
 When state is succeeded, payload, output_schema_id and output_schema_digest are
@@ -349,6 +460,12 @@ non-null and error is null. For every other state, those three output fields
 are null and error is non-null. retry_class is redeliver_stored_result only for
 a stored completed result; new_call_after_recovery never permits replay of the
 same cloud_tool_call_id.
+
+retry_class redeliver_stored_result requires replay_status stored_redelivery.
+replay_status interrupted_before_result requires state unavailable and
+retry_class new_call_after_recovery. started_at is not earlier than the
+invocation issued_at after allowed skew; completed_at is not earlier than
+started_at and not later than the time the terminal record is durably stored.
 
 A succeeded payload MUST validate against the exact output_schema_id and
 output_schema_digest registered for the selected tool version. Missing or
@@ -411,7 +528,7 @@ display summary of 1 to 256 characters. No arbitrary detail field exists.
 
 binding_digest is derived as:
 
-sha256("aether.ats.workspace-status-binding/1\\n" + JCS({
+sha256("aether.ats.workspace-status-binding/1\n" + JCS({
 "account_scope_digest": account_scope_digest, "agent_id": agent_id,
 "device_id": device_id, "local_session_id": local_session_id,
 "session_generation": session_generation})).
