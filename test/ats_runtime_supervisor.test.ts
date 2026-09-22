@@ -832,3 +832,39 @@ test("readiness is scoped, so a healthy runtime with no strategies is not 'ready
   assert.match(report.axes.find(axis => axis.name === "Strategies")?.detail ?? "", /0 compiled/);
   assert.match(report.axes.find(axis => axis.name === "Execution")?.detail ?? "", /Requested paper; effective observe/);
 });
+
+test("paper readiness requires fresh probe evidence for every configured symbol", async t => {
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  const started = await startRuntime(path, record, { now: clock, pidAlive: () => false,
+    startToken: async () => "tok-1", spawn: () => fakeChild(4242) });
+  const dataPath = join(root, "data-profile.json");
+  const profile = { schema_version: "aether.ats.data-profile/1" as const, profile_id: "dp_two",
+    provider: "yfinance" as const, symbols: ["AAPL", "MSFT"], timeframe: "M5",
+    poll_interval_ms: 5000, credential_ref: null, configured_at: "2026-09-22T12:00:00Z" };
+  const probe = { schema_version: "aether.ats.data-probe/1" as const, probe_id: "pb_partial",
+    profile_id: profile.profile_id, provider: "yfinance" as const, state: "verified" as const,
+    sample_count: 1, symbols_verified: ["AAPL"], observed_at: "2026-09-22T12:00:00Z",
+    received_at: "2026-09-22T12:00:00Z", freshness_ms: 0, reason: null };
+  const recordFor = (symbols: string[]) => ({ schema_version: "aether.ats.data-state/1" as const,
+    profile, last_probe: { ...probe, sample_count: symbols.length, symbols_verified: symbols }, updated_at: "2026-09-22T12:00:00Z" });
+  const input = { runtimeStatePath: path, dataProfilePath: dataPath,
+    dashboardStatePath: join(root, "dashboard.json"), now: clock,
+    strategies: { compiled: 1, rejected: 0, needs_conversion: 0, unavailable: 0, total: 1 } };
+  const deps: SupervisorDeps = { now: clock, pidAlive: () => true, startToken: async () => "tok-1",
+    probe: async () => ({ schema_version: "aether.ats.runtime-capabilities/1",
+      runtime_instance_id: started.record.runtime_instance_id, observed_at: "2026-09-22T12:00:00Z",
+      state: "healthy", capabilities: { status: true, market_data: true, nano_compile: true,
+        nano_activation: true, trade_ledger: true, journal: true, paper_controller: false },
+      requested_mode: "paper", effective_mode: "observe", effective_reason: "No execution grant is attached." }) };
+  await writeDataRecord(dataPath, recordFor(["AAPL"]));
+  const partial = await buildAtsDoctorReport(input, deps);
+  assert.equal(partial.readiness.runtime_ready, true);
+  assert.equal(partial.readiness.strategy_ready, true);
+  assert.equal(partial.readiness.paper_ready, false);
+  assert.equal(partial.axes.find(axis => axis.name === "Data")?.state, "degraded");
+  await writeDataRecord(dataPath, recordFor(["AAPL", "MSFT"]));
+  const complete = await buildAtsDoctorReport(input, deps);
+  assert.equal(complete.readiness.paper_ready, true);
+  assert.equal(complete.axes.find(axis => axis.name === "Data")?.state, "ok");
+});

@@ -147,10 +147,24 @@ function dataAxis(record: DataRecordV1 | null, now: number): DoctorAxis {
   if (!probe) {
     return { name: "Data", state: "incomplete", detail: truth };
   }
+  if (probe.state === "verified" && !dataFullyVerified(record, now)) {
+    return { name: "Data", state: "degraded", detail: `${truth} · not every configured symbol was verified; run a full probe` };
+  }
   // Data gates ACTIVATION, not setup. Section 5 permits finishing setup with
   // data configured and unverified, so this axis reports the truth without
   // failing the whole report.
   return { name: "Data", state: probe.state === "verified" ? "ok" : "degraded", detail: truth };
+}
+
+function dataFullyVerified(record: DataRecordV1, now: number): boolean {
+  const { profile, last_probe: probe } = record;
+  return profile.provider !== "none"
+    && profile.symbols.length > 0
+    && probe !== null
+    && probe.profile_id === profile.profile_id
+    && probe.provider === profile.provider
+    && ageProbeReceipt(probe, now).state === "verified"
+    && profile.symbols.every(symbol => probe.symbols_verified.includes(symbol));
 }
 
 function strategyAxis(counts: StrategyReadiness | undefined): DoctorAxis {
@@ -222,9 +236,7 @@ export async function buildAtsDoctorReport(
     && snapshot !== null
     && snapshot.state === "healthy";
   const strategyReady = input.strategies !== undefined && strategiesReady(input.strategies);
-  const dataVerified = dataRecord?.last_probe
-    ? ageProbeReceipt(dataRecord.last_probe, now).state === "verified"
-    : false;
+  const dataVerified = dataRecord ? dataFullyVerified(dataRecord, now) : false;
 
   const setupState = input.setupStatePath ? await readSetupState(input.setupStatePath) : null;
 
