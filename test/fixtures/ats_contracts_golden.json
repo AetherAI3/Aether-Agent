@@ -104,10 +104,10 @@
         "schema_version": "aether.ats.execution-state/1",
         "requested_mode": "approve",
         "effective_mode": "review_only",
-        "effective_reason": "live-capital qualification not complete"
+        "effective_reason": "live-capital qualification incomplete — limits shown in €"
       },
-      "canonical_digest": "sha256:7fd01aa36a4d6203debc07b790b57dcd7aafe113a67f5ca6d15bbbdcdd51c7ef",
-      "canonical_bytes_sha256": "7fd01aa36a4d6203debc07b790b57dcd7aafe113a67f5ca6d15bbbdcdd51c7ef"
+      "canonical_digest": "sha256:3e98bbc40285a84e59b45579c81b8e2b07831c111cc39a6dd728307fb9287d5e",
+      "canonical_bytes_sha256": "3e98bbc40285a84e59b45579c81b8e2b07831c111cc39a6dd728307fb9287d5e"
     },
     {
       "schema_version": "aether.ats.connector-capability/1",
@@ -140,14 +140,14 @@
           "schema_version": "aether.ats.execution-state/1",
           "requested_mode": "approve",
           "effective_mode": "review_only",
-          "effective_reason": "live-capital qualification not complete"
+          "effective_reason": "live-capital qualification incomplete — limits shown in €"
         },
         "observed_at": "2026-09-22T14:30:00Z",
         "expires_at": "2026-09-22T14:35:00Z",
         "grants_execution_authority": false
       },
-      "canonical_digest": "sha256:ae0a931c54849bdc582dfaf7f9af356c1437da82c59d9fac14d2e3dc0a329808",
-      "canonical_bytes_sha256": "ae0a931c54849bdc582dfaf7f9af356c1437da82c59d9fac14d2e3dc0a329808"
+      "canonical_digest": "sha256:161662cb2eabd4ab80de4ba200cfc8b8f698b6a8d6eebe6a426a30c6f495bef6",
+      "canonical_bytes_sha256": "161662cb2eabd4ab80de4ba200cfc8b8f698b6a8d6eebe6a426a30c6f495bef6"
     },
     {
       "schema_version": "aether.ats.account-binding/1",
@@ -158,7 +158,7 @@
         "credential_ref": "vault_rh_primary01",
         "encrypted_account_ref": "enc_rh_acct_0001",
         "opaque_account_ref": "acct_9f2c4ab77e10",
-        "masked_label": "Agentic ****41",
+        "masked_label": "Agentic · ••••41",
         "asset_capabilities": [
           "equity"
         ],
@@ -166,8 +166,8 @@
         "selected_at": "2026-09-22T14:20:00Z",
         "binding_generation": 1
       },
-      "canonical_digest": "sha256:e1bbbced396489aebd9c2f117118019a86496e47f9cedea98a58805fa79a8b0e",
-      "canonical_bytes_sha256": "e1bbbced396489aebd9c2f117118019a86496e47f9cedea98a58805fa79a8b0e"
+      "canonical_digest": "sha256:8de3a398129629cba639c60491ede8ca16d275253d8354027706173ce39377ff",
+      "canonical_bytes_sha256": "8de3a398129629cba639c60491ede8ca16d275253d8354027706173ce39377ff"
     },
     {
       "schema_version": "aether.ats.delegated-trading-grant/1",
