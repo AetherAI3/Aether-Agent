@@ -30,6 +30,10 @@ into the terminal, with guided ATS setup.
 <!-- SOURCE-0.3-WORKFLOWS:START -->
 
 > **Requires 0.3.2 or newer.** Check what you have with `aether --version`.
+>
+> npm `latest` is still the published 0.3.2 line. The account-agent and ATS
+> sections below describe the 0.4.0 source candidate on `main`; they are not a
+> claim that 0.4.0 has been tagged or published.
 
 ## Quickstart
 
@@ -195,6 +199,7 @@ at your configured endpoint.
 |---|---|
 | `aether auth login` | Sign in for hosted models. |
 | `aether agent [task]` | Run the coding agent, or open its REPL. |
+| `aether agent list\|create\|configure\|chat` | List, create and configure account agents, or open their shared Online DM conversation (0.4.0 source candidate). |
 | `aether agent --local [task]` | Same, through your Ollama endpoint. |
 | `aether models` | Show the hosted models your account can see. |
 | `aether local doctor\|models\|use\|pull` | Diagnose and manage local Ollama. |
@@ -225,12 +230,14 @@ standalone and open source: on the local route it needs no Aether account at
 all. Coding workspace sessions stay on their host; the managed-agent workflow
 above shares account agents and their Online DM conversations.
 
-### Coming next: live session viewing
+### Remote viewing status in the 0.4.0 source candidate
 
-Remote viewing — /rc — is the bridge between the terminal and the browser, and
-it is being integrated now. The host lives in
-[PR #108](https://github.com/AetherAI3/aether-agent/pull/108) and is **not part
-of 0.3.x**, so nothing below is something you can run yet. What it will do:
+Remote viewing — `aether rc` — is the observer-only bridge between a terminal
+run and the browser. Its host foundation and local status/exposure controls are
+on `main`; they remain outside the published 0.3.x line. A fully qualified live
+Cloud viewer journey is still unproven, and the old draft
+[PR #108](https://github.com/AetherAI3/aether-agent/pull/108) is not release
+evidence for current `main`. The source-candidate contract is:
 
 - Starting a session prints a link and a QR code.
 - Your phone or browser **watches** the run. It never gets tool authority.
