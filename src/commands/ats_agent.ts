@@ -16,6 +16,17 @@ import { sanitizeTerm } from "../ui/text.js";
 import { AgentBrowserSession, type AgentBrowserObserver, type AgentBrowserPackage } from "../core/agent_browser_session.js";
 import { requireAtsPolicyAcceptance } from "./ats_policy.js";
 import { strategiesReady, type StrategyReadiness } from "../core/ats_contracts/strategy.js";
+import { formatRuntimeSnapshot } from "../core/ats_contracts/runtime.js";
+import { VERSION } from "../version.js";
+import {
+  dashboardStatePath, dataProfilePath, runtimeInstallDir, runtimePreviousDir, runtimeStatePath,
+} from "../core/ats_runtime/paths.js";
+import { readRuntimeRecord } from "../core/ats_runtime/store.js";
+import { installRuntime } from "../core/ats_runtime/install.js";
+import {
+  restartRuntime, rollbackRuntime, runtimeStatus, startRuntime, stopRuntime,
+} from "../core/ats_runtime/supervisor.js";
+import { atsDoctorJson, buildAtsDoctorReport, renderAtsDoctorReport } from "../core/ats_runtime/doctor.js";
 
 export const ATS_PROFILE_MARKER = "aether.ats.profile/1";
 
@@ -389,11 +400,11 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     const settingsPath = join(dirname(path), "settings.json");
     await refuseLinks(settingsPath);
     const settings = await pack.loadSettings(settingsPath);
-    return { binding, pack, settingsPath, settings, path };
+    return { binding, pack, settingsPath, settings, path, account };
   };
   return {
     help: (agent) => typedAts(agent)
-      ? "ATS · Shift-Tab: mode · /ats mode · /ats strategies · /ats library · /ats data · /ats journal · /ats status\nBrowser · /browser open · /browser status · /browser setup" : "Browser · /browser setup · /browser open · /browser status",
+      ? "ATS · Shift-Tab: mode · /ats mode · /ats strategies · /ats library · /ats data · /ats journal · /ats status · /ats doctor · /ats runtime\nBrowser · /browser open · /browser status · /browser setup" : "Browser · /browser setup · /browser open · /browser status",
     cycleMode: async (ctx, agent, surface) => {
       const output = surface?.write ?? deps.output ?? ((text: string) => process.stdout.write(text));
       const state = await local(ctx, agent, surface);
@@ -488,7 +499,58 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
       } else if (command === "status") {
         output(`ATS · ${binding.agent_id}\nMemory: ${binding.memory_gb} GiB limit · ${sanitizeTerm(binding.memory_directory)}\nStrategies: ${sanitizeTerm(binding.strategies_directory)}\nMode: ${settings.permission_mode} requested · runtime unconfirmed\n`);
         output(sanitizeTerm(JSON.stringify(pack.dataStreamStatus(settings))) + `\nCloud chat: ${surface?.connection?.().chat ?? "unverified"}. Local execution is not connected to this conversation.\n`);
-      } else output("Use /ats status, /ats mode, /ats strategies, /ats library, /ats data, /ats journal, or /ats browser.\n");
+      } else if (command === "doctor") {
+        // Spec 2 step 2.7. The scan is re-run rather than remembered so the
+        // strategy axis reports what is on disk now, not what setup once saw.
+        const scan = await pack.scanStrategies({ directory: binding.strategies_directory, signal: surface?.signal,
+          ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) }).catch(() => null);
+        const report = await buildAtsDoctorReport({
+          runtimeStatePath: runtimeStatePath(root, state.account, agent.agent_id),
+          dataProfilePath: dataProfilePath(root, state.account, agent.agent_id),
+          dashboardStatePath: dashboardStatePath(root, state.account, agent.agent_id),
+          ...(scan ? { strategies: strategyReadiness(scan) } : {}),
+          memoryVerified: binding.memory_verification !== undefined,
+          ...(surface?.signal ? { signal: surface.signal } : {}),
+        });
+        output(args.includes("--json") ? atsDoctorJson(report) : sanitizeTerm(renderAtsDoctorReport(report)));
+      } else if (command === "runtime") {
+        const recordPath = runtimeStatePath(root, state.account, agent.agent_id);
+        const record = await readRuntimeRecord(recordPath);
+        const action = args[0] ?? "status";
+        if (action === "status") {
+          // No record is not an error. It is the honest state of a device that
+          // has never installed a runtime.
+          if (!record) { output("ATS runtime · not configured on this device\n"); return true; }
+          output(sanitizeTerm(formatRuntimeSnapshot(await runtimeStatus(record, {}, surface?.signal))) + "\n");
+        } else if (action === "install") {
+          // The verification pipeline is wired; the entitled transport is not,
+          // so this reports honestly instead of pretending to install.
+          const outcome = await installRuntime({
+            recordPath,
+            installDir: runtimeInstallDir(root, state.account, agent.agent_id),
+            previousDir: runtimePreviousDir(root, state.account, agent.agent_id),
+            agentVersion: VERSION,
+            requestedMode: "observe",
+            ...(surface?.signal ? { signal: surface.signal } : {}),
+          });
+          output(sanitizeTerm(outcome.ok ? "ATS runtime installed · provenance verified\n" : `ATS runtime not installed · ${outcome.reason ?? "refused"}\n`));
+          await appendJournal(pack, path, agent.agent_id, "runtime.install", "ATS runtime installation attempted.", {
+            installed: outcome.ok, failure: outcome.failure,
+          });
+        } else if (action === "start" || action === "stop" || action === "restart") {
+          if (!record) throw new Error("No ATS runtime is configured on this device.");
+          const run = action === "start" ? startRuntime : action === "stop" ? stopRuntime : restartRuntime;
+          const result = await run(recordPath, record, {});
+          output(sanitizeTerm(result.reason ?? `ATS runtime ${action} complete`) + "\n");
+          await appendJournal(pack, path, agent.agent_id, `runtime.${action}`, "ATS runtime lifecycle command.", {
+            changed: result.changed, reason: result.reason,
+          });
+        } else if (action === "rollback") {
+          if (!record) throw new Error("No ATS runtime is configured on this device.");
+          const result = await rollbackRuntime(recordPath, record, runtimePreviousDir(root, state.account, agent.agent_id), {});
+          output(sanitizeTerm(result.reason ?? "Rolled back.") + "\n");
+        } else throw new Error("Use /ats runtime status|install|start|stop|restart|rollback.");
+      } else output("Use /ats status, /ats doctor, /ats runtime, /ats mode, /ats strategies, /ats library, /ats data, /ats journal, or /ats browser.\n");
       return true;
     },
     createATS: async (ctx, name, signal) => {

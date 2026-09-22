@@ -889,3 +889,49 @@ test("setup with compiled strategies reports readiness without the incomplete wa
     assert.equal(details?.["strategies_ready"], true);
   });
 });
+
+test("/ats doctor reports an unconfigured runtime honestly instead of claiming health", async () => {
+  await fixture(async dir => {
+    await binding(dir);
+    let output = "";
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      load: async () => fakePackage({
+        scanStrategies: async () => ({ state: "scanned", compiler: "unavailable", strategies: [{ file: "a.pine", state: "needs_conversion" }] }),
+      }) });
+
+    assert.equal(await hooks.onChatCommand!(context(), agent(), "/ats doctor"), true);
+    assert.match(output, /ATS not ready/);
+    assert.match(output, /Runtime\s+unavailable/);
+    // The strategy axis reflects a fresh scan, and nothing compiled.
+    assert.match(output, /0 compiled/);
+    // Requested and effective are shown separately and never collapsed.
+    assert.match(output, /Requested .+; effective offline/);
+  });
+});
+
+test("/ats runtime status says not configured rather than inventing a runtime", async () => {
+  await fixture(async dir => {
+    await binding(dir);
+    let output = "";
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; }, load: async () => fakePackage() });
+
+    assert.equal(await hooks.onChatCommand!(context(), agent(), "/ats runtime status"), true);
+    assert.match(output, /not configured on this device/);
+    await assert.rejects(hooks.onChatCommand!(context(), agent(), "/ats runtime start"), /No ATS runtime is configured/);
+    await assert.rejects(hooks.onChatCommand!(context(), agent(), "/ats runtime nonsense"), /status\|install\|start\|stop\|restart\|rollback/);
+  });
+});
+
+test("/ats runtime install refuses honestly when no entitled source is configured", async () => {
+  await fixture(async dir => {
+    await binding(dir);
+    let output = ""; const events: string[] = [];
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      load: async () => fakePackage({ appendJournalEvent: async (_path, event) => { events.push(event.type); return {}; } }) });
+
+    assert.equal(await hooks.onChatCommand!(context(), agent(), "/ats runtime install"), true);
+    assert.match(output, /ATS runtime not installed/);
+    // No receipt is fabricated, and the attempt is still journalled.
+    assert.ok(events.includes("runtime.install"));
+  });
+});
