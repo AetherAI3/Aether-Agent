@@ -1,0 +1,286 @@
+{
+  "schema": "aether.ats.spec2-golden/1",
+  "note": "Frozen Spec 2 contract vectors. Changing a digest here is a deliberate, versioned act.",
+  "canonical_profile": "jcs-integer-subset/1",
+  "vectors": [
+    {
+      "name": "runtime-installation",
+      "document": {
+        "schema_version": "aether.ats.runtime-installation/1",
+        "installation_id": "inst_01HZY8N4Q7",
+        "runtime_version": "0.4.0",
+        "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "platform": "linux-x64",
+        "python_version": "3.12.4",
+        "component_versions": {
+          "llmre": "0.4.0",
+          "features": "0.4.0",
+          "ats_mcp": "0.4.0"
+        },
+        "installed_at": "2026-09-22T12:00:00Z",
+        "provenance_verified": true
+      },
+      "canonical_digest": "sha256:545617b2816c7c81dea5be93b8972375fa286b6fa1cccf94fc4f4aa945b3da6a"
+    },
+    {
+      "name": "runtime-capabilities-healthy-observe",
+      "document": {
+        "schema_version": "aether.ats.runtime-capabilities/1",
+        "runtime_instance_id": "rt_01HZY8N4Q7",
+        "observed_at": "2026-09-22T12:00:05Z",
+        "state": "healthy",
+        "capabilities": {
+          "status": true,
+          "market_data": true,
+          "nano_compile": true,
+          "nano_activation": true,
+          "trade_ledger": true,
+          "journal": true,
+          "paper_controller": false
+        },
+        "requested_mode": "paper",
+        "effective_mode": "observe",
+        "effective_reason": "No execution grant is attached to this runtime."
+      },
+      "canonical_digest": "sha256:12ec3f834dc5a10bcd7a96a5411ee5e81c3c7b97cbe8bd5b19dff0c99aeb5c97"
+    },
+    {
+      "name": "runtime-capabilities-offline",
+      "document": {
+        "schema_version": "aether.ats.runtime-capabilities/1",
+        "runtime_instance_id": "rt_01HZY8N4Q7",
+        "observed_at": "2026-09-22T12:00:05Z",
+        "state": "stopped",
+        "capabilities": {
+          "status": false,
+          "market_data": false,
+          "nano_compile": false,
+          "nano_activation": false,
+          "trade_ledger": false,
+          "journal": false,
+          "paper_controller": false
+        },
+        "requested_mode": "observe",
+        "effective_mode": "offline",
+        "effective_reason": "The ATS runtime is not running."
+      },
+      "canonical_digest": "sha256:e2c0532c860bdcab24aaaffa379a487497bfba13a2a2c91687745ea2ef642fce"
+    },
+    {
+      "name": "data-profile-polygon",
+      "document": {
+        "schema_version": "aether.ats.data-profile/1",
+        "profile_id": "dp_01HZY8N4Q7",
+        "provider": "polygon",
+        "symbols": [
+          "SPY",
+          "QQQ"
+        ],
+        "timeframe": "M5",
+        "poll_interval_ms": 5000,
+        "credential_ref": "env:POLYGON_API_KEY",
+        "configured_at": "2026-09-22T12:00:00Z"
+      },
+      "canonical_digest": "sha256:45d6ec181e70e5caeb7f65f57617a1ce98420b3d14423071cbefd5a6cc002a0a"
+    },
+    {
+      "name": "data-profile-none",
+      "document": {
+        "schema_version": "aether.ats.data-profile/1",
+        "profile_id": "dp_unconfigured",
+        "provider": "none",
+        "symbols": [],
+        "timeframe": "M5",
+        "poll_interval_ms": 5000,
+        "credential_ref": null,
+        "configured_at": "2026-09-22T12:00:00Z"
+      },
+      "canonical_digest": "sha256:325c225e558462ccb28b4d2528eb90f453ebe87c43a0684704221eae0c32cf20"
+    },
+    {
+      "name": "data-probe-verified",
+      "document": {
+        "schema_version": "aether.ats.data-probe/1",
+        "probe_id": "pb_01HZY8N4Q7",
+        "profile_id": "dp_01HZY8N4Q7",
+        "provider": "polygon",
+        "state": "verified",
+        "sample_count": 2,
+        "symbols_verified": [
+          "SPY",
+          "QQQ"
+        ],
+        "observed_at": "2026-09-22T12:00:01Z",
+        "received_at": "2026-09-22T12:00:02Z",
+        "freshness_ms": 1000,
+        "reason": null
+      },
+      "canonical_digest": "sha256:2470190db339f225388c987b290b5cfc018a0e0ad0cfe1e3e286f6899f4bc584"
+    },
+    {
+      "name": "data-probe-stale",
+      "document": {
+        "schema_version": "aether.ats.data-probe/1",
+        "probe_id": "pb_stale",
+        "profile_id": "dp_01HZY8N4Q7",
+        "provider": "polygon",
+        "state": "stale",
+        "sample_count": 2,
+        "symbols_verified": [
+          "SPY",
+          "QQQ"
+        ],
+        "observed_at": "2026-09-22T11:00:00Z",
+        "received_at": "2026-09-22T11:00:01Z",
+        "freshness_ms": 1000,
+        "reason": "The last verified sample is older than the freshness ceiling. Run a fresh probe."
+      },
+      "canonical_digest": "sha256:425b78c9c859d900375869c4f9cc943dce45235c0aae34bd5a378bc446e6f811"
+    },
+    {
+      "name": "data-probe-unavailable",
+      "document": {
+        "schema_version": "aether.ats.data-probe/1",
+        "probe_id": "pb_unavailable",
+        "profile_id": "dp_01HZY8N4Q7",
+        "provider": "polygon",
+        "state": "unavailable",
+        "sample_count": 0,
+        "symbols_verified": [],
+        "observed_at": null,
+        "received_at": "2026-09-22T12:00:02Z",
+        "freshness_ms": null,
+        "reason": "The data provider probe failed or timed out."
+      },
+      "canonical_digest": "sha256:5a80dd27f2c0f3a8f38d77bc31644c156a28cfd4b920183b0be3db3b212d4148"
+    },
+    {
+      "name": "strategy-source-nano",
+      "document": {
+        "schema_version": "aether.ats.strategy-source/1",
+        "strategy_id": "st_ema_cross",
+        "display_name": "EMA cross",
+        "source_type": "nano",
+        "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "relative_path": "strategies/ema_cross.nano",
+        "imported_at": "2026-09-22T12:00:00Z",
+        "provenance": "bundled"
+      },
+      "canonical_digest": "sha256:a798733bdc59cc142b4a316cf524d5d814ce817a0269d31ccf4b2c9085df9e5c"
+    },
+    {
+      "name": "strategy-source-pine-reference",
+      "document": {
+        "schema_version": "aether.ats.strategy-source/1",
+        "strategy_id": "st_pine_ref",
+        "display_name": "Imported Pine reference",
+        "source_type": "pine_reference",
+        "source_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "relative_path": "strategies/reference.pine",
+        "imported_at": "2026-09-22T12:00:00Z",
+        "provenance": "user"
+      },
+      "canonical_digest": "sha256:d8d7d3128ab4a0a5bdf3b31b801d6ec60b0a7cc28fd45ad2ffc59c031916cd1f"
+    },
+    {
+      "name": "strategy-compile-artifact-compiled",
+      "document": {
+        "schema_version": "aether.ats.strategy-compile-artifact/1",
+        "strategy_id": "st_ema_cross",
+        "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "compiler_version": "0.4.0",
+        "runtime_version": "0.4.0",
+        "ir_version": "1",
+        "ir_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "effects": [
+          "signal_emit"
+        ],
+        "required_signals": [
+          "close",
+          "ema_20"
+        ],
+        "interval": "M5",
+        "diagnostics": [],
+        "state": "compiled",
+        "compiled_at": "2026-09-22T12:00:00Z",
+        "artifact_id": "sha256:163364ba5a0877475e8f478a83035114b86b2ec401e0725bf0f024da6fd5bccb"
+      },
+      "canonical_digest": "sha256:5cce4fd2d47ca47e955c4f8ae6958e021baafbab754d6db52315fdbc23086347"
+    },
+    {
+      "name": "strategy-activation-observe-active",
+      "document": {
+        "schema_version": "aether.ats.strategy-activation/1",
+        "activation_id": "act_01HZY8N4Q7",
+        "artifact_id": "sha256:163364ba5a0877475e8f478a83035114b86b2ec401e0725bf0f024da6fd5bccb",
+        "requested_mode": "observe",
+        "effective_mode": "observe",
+        "state": "active",
+        "data_profile_id": "dp_01HZY8N4Q7",
+        "data_probe_id": "pb_01HZY8N4Q7",
+        "runtime_instance_id": "rt_01HZY8N4Q7",
+        "grant_ref": null,
+        "reason": null,
+        "revision": 1,
+        "recorded_at": "2026-09-22T12:00:10Z"
+      },
+      "canonical_digest": "sha256:a433a1fd2dc81a3e16e14a13073b7eb494132caf2c9f671bfaf1d0c46cb9a5d1"
+    },
+    {
+      "name": "trade-journal-controller-entry",
+      "document": {
+        "schema_version": "aether.ats.trade-journal/2",
+        "journal_entry_id": "je_01HZY8N4Q7",
+        "trade_id": "tr_01HZY8N4Q7",
+        "execution_case_id": "ec_01HZY8N4Q7",
+        "source": "controller",
+        "fact_revision": 1,
+        "confidence": "complete",
+        "reflection": {
+          "thesis": "Trend continuation",
+          "notes": "Entered on retest.",
+          "lessons": "",
+          "tags": [
+            "swing"
+          ],
+          "grade": "B"
+        },
+        "reflection_revision": 2,
+        "created_at": "2026-09-22T12:00:00Z",
+        "updated_at": "2026-09-22T12:05:00Z",
+        "deleted_at": null
+      },
+      "canonical_digest": "sha256:fa061ae3005bd7966c76ca3482d16b415abbb94a7165372313786488411080c1"
+    },
+    {
+      "name": "human-note-revision-2",
+      "document": {
+        "schema_version": "aether.ats.human-note-revision/1",
+        "note_id": "hn_01HZY8N4Q7",
+        "revision": 2,
+        "trade_id": "tr_01HZY8N4Q7",
+        "author": "human",
+        "body": "Revised: the retest was weaker than it looked.",
+        "supersedes_revision": 1,
+        "client_request_id": "req_01HZY8N4Q7",
+        "created_at": "2026-09-22T12:05:00Z",
+        "deleted_at": null
+      },
+      "canonical_digest": "sha256:6be57f82339ecb843ccc1e2b145ef4ff93d1b565b22cd6d87800024886d0d544"
+    },
+    {
+      "name": "journal-preferences-default",
+      "document": {
+        "schema_version": "aether.ats.journal-preferences/1",
+        "prompt_style": "minimal",
+        "prompt_after_close": false,
+        "prompt_delay_seconds": 0,
+        "default_tags": [],
+        "quick_note_hotkey": "x",
+        "timezone": "UTC"
+      },
+      "canonical_digest": "sha256:a25c9a6d6daed4d885f7dfd4242f00e1587dc44925c685fcc0ff3e2923ba33bb"
+    }
+  ]
+}
