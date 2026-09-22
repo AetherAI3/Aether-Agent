@@ -21,6 +21,7 @@
 //      an advisory number.
 
 import {
+  bool,
   choice,
   closed,
   fail,
@@ -185,7 +186,11 @@ export function validateTradingGrant(value: unknown, name = "Trading grant"): De
     ),
     confirmation: pinned(raw.confirmation, "per_order" as const, `${name} confirmation`),
     state: choice(raw.state, GRANT_STATES, `${name} state`),
-    abuse_flagged: raw.abuse_flagged === true,
+    // Strict. `raw.abuse_flagged === true` would have turned a missing key, a
+    // null, or the string "true" into `false` — i.e. silently downgraded an
+    // abuse flag to "not abusive", which is the one direction this field must
+    // never fail in.
+    abuse_flagged: bool(raw.abuse_flagged, `${name} abuse flag`),
     issued_at: issuedAt,
     expires_at: expiresAt,
   });

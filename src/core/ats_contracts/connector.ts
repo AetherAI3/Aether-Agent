@@ -195,6 +195,14 @@ function maskedLabel(value: unknown, name: string): string {
 
 export interface BrokerAccountBindingV1 {
   readonly schema_version: typeof ACCOUNT_BINDING_SCHEMA;
+  /**
+   * Stable identity of THIS binding, distinct from the account it points at
+   * and from the generation counter. `binding_generation` alone cannot tell
+   * two accounts apart — both are generation 1 the day they are linked — so
+   * the approval chain compares this as well. Minted by the connector core and
+   * never reused across a re-link.
+   */
+  readonly account_binding_id: string;
   readonly provider_id: string;
   /** Reference into the ATS connector vault. Never a credential value. */
   readonly credential_ref: string;
@@ -217,6 +225,7 @@ export interface BrokerAccountBindingV1 {
 
 const BINDING_FIELDS = [
   "schema_version",
+  "account_binding_id",
   "provider_id",
   "credential_ref",
   "encrypted_account_ref",
@@ -232,6 +241,7 @@ export function validateAccountBinding(value: unknown, name = "Account binding")
   const raw = closed(value, name, BINDING_FIELDS);
   return Object.freeze({
     schema_version: schemaTag(raw.schema_version, ACCOUNT_BINDING_SCHEMA, name) as typeof ACCOUNT_BINDING_SCHEMA,
+    account_binding_id: opaqueRef(raw.account_binding_id, `${name} binding id`),
     provider_id: ident(raw.provider_id, `${name} provider`),
     credential_ref: opaqueRef(raw.credential_ref, `${name} credential reference`),
     encrypted_account_ref: opaqueRef(raw.encrypted_account_ref, `${name} encrypted account reference`),

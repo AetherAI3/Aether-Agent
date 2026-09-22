@@ -156,24 +156,63 @@ not a test to relax.
 | `aether.ats.operator-approval/1` | `OperatorApprovalReceiptV1` | 1 §11.6 |
 | `aether.ats.execution-receipt/1` | `ExecutionReceiptV1` | 1 §11.7 |
 
-### Canonicalization  ·  `jcs-integer-subset/1`
+### Canonicalization  ·  `rfc8785/1`
 
-The specs say "RFC 8785". What is implemented is a **stricter subset**, and the
-difference is deliberate — stated here because this doc wins over the code:
+A real RFC 8785 (JCS) implementation, in `src/core/ats_contracts/canonical.ts`.
 
-- RFC 8785 serializes numbers with the ECMAScript Number-to-String algorithm and
-  therefore admits floats. This profile **refuses any non-integer or non-finite
-  number**.
-- On the values these contracts carry (integers only) the two agree byte for
-  byte, and both agree with Python's
-  `json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`.
+**It is not shared with `device_runtime/canonical_json.ts`, and must not be.**
+That encoder is pinned to the Cloud's Python `json.dumps(..., ensure_ascii=True)`
+and changing it would invalidate device signatures. Two encoders exist here
+deliberately, each pinned to a different counterpart.
 
-Every monetary field is an integer count of **minor units** (`58012` = $580.12)
-and every quantity is a **whole share**. Floats are how a preview and a commit
-come to disagree about a number that looked equal; the encoder throws instead.
+An earlier revision of this section described a profile called
+`jcs-integer-subset/1` and claimed it was 8785 minus floats. **That was wrong.**
+It escaped every non-ASCII character (`ensure_ascii=True`), while JCS requires
+non-control Unicode emitted literally and encoded as UTF-8 — a different byte
+string, and therefore a different digest, for any document containing a
+non-ASCII character. The name implied a narrowing when the difference was the
+string encoding.
 
-Both mirrors assert the profile string, so adopting a full RFC 8785 encoder is a
-deliberate, versioned act rather than a silent digest change.
+What the profile actually guarantees:
+
+- Non-control Unicode is emitted **literally**; only `"` `\` `\b` `\f` `\n` `\r`
+  `\t` and lowercase `\u00xx` for remaining C0 controls are escaped.
+- Object keys sort by **UTF-16 code unit** (§3.2.3).
+- Numbers use ECMAScript Number-to-String; `-0` normalizes to `0`.
+- **Lone surrogates are refused** — they have no UTF-8 encoding, so runtimes
+  substitute or throw differently and the digest stops being reproducible.
+
+**Floats are legal in JCS and this encoder accepts them.** Integer-only money is
+an *ATS contract rule*, enforced one layer up by the schema validators
+(`integer()`, `minorUnits()`): every monetary field is an integer count of minor
+units (`58012` = $580.12) and every quantity is a whole share. Keeping the split
+means the encoder stays a faithful 8785 implementation instead of quietly being
+something else again.
+
+#### Python mirrors: read this before implementing
+
+`sorted(keys)` **is wrong.** Python compares code points; RFC 8785 requires
+UTF-16 code units. They disagree whenever an astral character (U+10000+) meets a
+BMP character at or above U+E000, because the astral character's UTF-16 form
+begins with high surrogate `0xD800`, which is numerically *below* `U+FFFF`:
+
+```
+UTF-16 (correct):  {"\U00010000":1,"￿":2}
+sorted()  (wrong): {"￿":2,"\U00010000":1}
+```
+
+Sort on `key.encode("utf-16-be", errors="surrogatepass")`, and serialize with
+`ensure_ascii=False`. `test/fixtures/ats_contracts_golden_verify.py` is a
+complete reference implementation plus a fixture checker; ATSv2 should lift its
+functions. It is not wired into `npm test` because CI has no guaranteed Python —
+a conditional skip would give false assurance. Verified at freeze time:
+
+```
+OK: 18 checks reproduced byte-for-byte by an independent Python implementation.
+```
+
+Both mirrors assert the profile string, so changing the encoder is a deliberate,
+versioned act rather than a silent digest change.
 
 ### Invariants the shapes enforce (not merely document)
 
@@ -186,13 +225,28 @@ deliberate, versioned act rather than a silent digest change.
 3. **An empty symbol allowlist permits nothing.** There is no wildcard token.
 4. **`confirmation` is pinned to `per_order`.** Standing or session approval is
    not expressible, even though the provider may offer it.
-5. **Raw account numbers cannot leave the connector core.** Opaque refs require a
-   namespace prefix (`acct_…`); a masked label with 5+ consecutive digits is
-   refused; `redactBindingForExport()` is the only exported projection.
-6. **Preview, approval and commit must name the same** adapter, endpoint/schema
-   digest, execution environment and account binding generation.
-   `verifyApprovalChain()` returns a verdict and there is deliberately **no
-   re-preview or reroute path** — a mismatch is terminal.
+5. **A bare account number cannot be passed where a reference belongs.** Opaque
+   refs require a namespace prefix (`acct_…`); a masked label with 5+
+   consecutive digits is refused; `redactBindingForExport()` is the only
+   exported projection. **Scope limit, stated plainly:** a prefix cannot prove
+   an account number is absent from the body — `acct_000123456789` satisfies the
+   shape. Non-reversibility must be produced upstream, by the connector core
+   *minting* these as random or keyed-digest identifiers. The validator cannot
+   see the difference, so that half of the invariant belongs to whoever
+   generates them.
+6. **Preview, approval and commit must name the same** provider, account binding
+   id, binding generation, adapter, endpoint/schema digest and execution
+   environment. `verifyApprovalChain()` **computes both digests itself** from
+   the intent and review — an earlier revision accepted the intent digest as an
+   argument, which proved only that three documents agreed about a number the
+   caller supplied. It also refuses a refused or expired review and a spent or
+   expired approval. There is deliberately **no re-preview or reroute path**; a
+   mismatch is terminal.
+   `verifyCommitAuthority()` is the gate immediately before a broker commit: it
+   additionally proves the order is aimed at the account the local binding
+   names, under a grant that still permits it, in a mode that still allows
+   submission. Kill and pause are re-checked **there**, not inherited from
+   whatever the review said minutes earlier.
 7. **Fill facts exist only when broker-confirmed.** A receipt cannot express a
    fill for a refused, cancelled or ambiguous outcome, nor fill more than it
    ordered.

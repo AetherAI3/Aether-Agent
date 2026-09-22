@@ -22,6 +22,7 @@ import {
   integer,
   minorUnits,
   nullable,
+  opaqueRef,
   orderedWindow,
   schemaTag,
   symbol as tickerSymbol,
@@ -70,8 +71,19 @@ export function validateMarketEvidence(value: unknown, name = "Market evidence")
   });
 }
 
-/** Which adapter, at which pinned schema, in which environment. */
+/**
+ * Which provider, which account binding, which adapter, at which pinned
+ * schema, in which environment.
+ *
+ * `provider_id` and `account_binding_id` are here because an earlier revision
+ * carried only `binding_generation`, which cannot distinguish two different
+ * accounts: both are generation 1 the day they are linked. A chain check that
+ * compared generation alone would accept an approval minted for one account
+ * against a commit aimed at another.
+ */
 export interface ConnectorBindingRef {
+  readonly provider_id: string;
+  readonly account_binding_id: string;
   readonly adapter_id: string;
   readonly endpoint_schema_digest: string;
   readonly execution_environment: ExecutionEnvironment;
@@ -79,6 +91,8 @@ export interface ConnectorBindingRef {
 }
 
 const CONNECTOR_REF_FIELDS = [
+  "provider_id",
+  "account_binding_id",
   "adapter_id",
   "endpoint_schema_digest",
   "execution_environment",
@@ -88,6 +102,8 @@ const CONNECTOR_REF_FIELDS = [
 export function validateConnectorBindingRef(value: unknown, name = "Connector binding"): ConnectorBindingRef {
   const raw = closed(value, name, CONNECTOR_REF_FIELDS);
   return Object.freeze({
+    provider_id: ident(raw.provider_id, `${name} provider`),
+    account_binding_id: opaqueRef(raw.account_binding_id, `${name} account binding id`),
     adapter_id: ident(raw.adapter_id, `${name} adapter`),
     endpoint_schema_digest: digest(raw.endpoint_schema_digest, `${name} endpoint schema digest`),
     execution_environment: choice(raw.execution_environment, EXECUTION_ENVIRONMENTS, `${name} execution environment`),
@@ -96,17 +112,32 @@ export function validateConnectorBindingRef(value: unknown, name = "Connector bi
 }
 
 /**
- * The four facts a preview, an approval and a commit must all agree on
- * (Spec 1 section 11.6). Compared as a unit so a caller cannot check three and
- * forget the fourth.
+ * Every fact a preview, an approval and a commit must agree on (Spec 1 section
+ * 11.6). Compared as a unit, and derived from the field list rather than
+ * written out by hand, so adding a field to `ConnectorBindingRef` cannot leave
+ * this comparison silently checking the old set.
  */
 export function connectorBindingMatches(a: ConnectorBindingRef, b: ConnectorBindingRef): boolean {
-  return (
-    a.adapter_id === b.adapter_id &&
-    a.endpoint_schema_digest === b.endpoint_schema_digest &&
-    a.execution_environment === b.execution_environment &&
-    a.binding_generation === b.binding_generation
-  );
+  return CONNECTOR_REF_FIELDS.every((field) => a[field] === b[field]);
+}
+
+/**
+ * Build the reference an intent carries from the authoritative binding. Using
+ * this rather than hand-assembling a ref is what keeps `account_binding_id`
+ * and `binding_generation` agreeing with the record they came from.
+ */
+export function connectorRefFromBinding(
+  binding: { account_binding_id: string; provider_id: string; binding_generation: number },
+  adapter: { adapter_id: string; endpoint_schema_digest: string; execution_environment: ExecutionEnvironment },
+): ConnectorBindingRef {
+  return Object.freeze({
+    provider_id: binding.provider_id,
+    account_binding_id: binding.account_binding_id,
+    adapter_id: adapter.adapter_id,
+    endpoint_schema_digest: adapter.endpoint_schema_digest,
+    execution_environment: adapter.execution_environment,
+    binding_generation: binding.binding_generation,
+  });
 }
 
 export interface NormalizedEquityOrderIntentV1 {

@@ -1,7 +1,102 @@
 {
-  "schema_version": "aether.ats.contract-golden-vectors/1",
-  "canonical_profile": "jcs-integer-subset/1",
-  "note": "Mirror of this file lives in the ATSv2 Python test suite. Both sides validate every document and assert the recorded digests byte-for-byte. A mismatch is canonicalization drift.",
+  "schema_version": "aether.ats.contract-golden-vectors/2",
+  "canonical_profile": "rfc8785/1",
+  "note": "Mirror of this file lives in the ATSv2 Python test suite. Both sides must reproduce every canonical_vectors[].canonical byte-for-byte, refuse every canonical_rejects[] input, and reproduce every vectors[].canonical_digest. PYTHON MIRRORS: sort object keys by UTF-16 code unit, NOT by code point — plain sorted() fails the astral key-ordering vector. Serialize with ensure_ascii=False and encode UTF-8.",
+  "canonical_vectors": [
+    {
+      "name": "ascii object, keys sorted",
+      "value": {
+        "b": 1,
+        "a": "x"
+      },
+      "canonical": "{\"a\":\"x\",\"b\":1}",
+      "digest": "sha256:cdab067e9f3beb32d1252cfd63e492592fecbf591b0d08cadb24bb17f3864246"
+    },
+    {
+      "name": "non-ASCII is emitted literally, never \\u-escaped",
+      "value": {
+        "a": "café"
+      },
+      "canonical": "{\"a\":\"café\"}",
+      "digest": "sha256:e3c598cda7afb08d1ddede0a770feb8db4312dece093d15449a1856192c34a2f"
+    },
+    {
+      "name": "astral character survives as a surrogate pair",
+      "value": {
+        "a": "𝄞"
+      },
+      "canonical": "{\"a\":\"𝄞\"}",
+      "digest": "sha256:fb30136d50ba755c7574e1d90e74e844235fe9c57080ec5df85b37f79d8c4641"
+    },
+    {
+      "name": "key ordering is UTF-16 code units, not code points",
+      "value": {
+        "𐀀": 1,
+        "￿": 2
+      },
+      "canonical": "{\"𐀀\":1,\"￿\":2}",
+      "digest": "sha256:0fb1ca74b1cef468cf02400d7482be699443487cdd7439c2fb4ad356839b82af"
+    },
+    {
+      "name": "negative zero normalizes to zero",
+      "value": {
+        "a": 0
+      },
+      "canonical": "{\"a\":0}",
+      "digest": "sha256:45b619e97b5d9b029af4522e9ffb02fa99ff2bf226c82ee22a7cc10269a557e8"
+    },
+    {
+      "name": "control characters use the short escapes, then lowercase \\u00xx",
+      "value": {
+        "a": "\b\t\n\f\r\u0001"
+      },
+      "canonical": "{\"a\":\"\\b\\t\\n\\f\\r\\u0001\"}",
+      "digest": "sha256:c984a2dc66dd0cf76b99d5293c9b9730f4bdba8ed008fd66733087448264186a"
+    },
+    {
+      "name": "nested structures and empty containers",
+      "value": {
+        "z": [],
+        "a": {},
+        "m": [
+          1,
+          [
+            2,
+            {
+              "k": null
+            }
+          ],
+          true
+        ]
+      },
+      "canonical": "{\"a\":{},\"m\":[1,[2,{\"k\":null}],true],\"z\":[]}",
+      "digest": "sha256:2359c6bfe6876d89035bdf380158c4eeefb42244e3899abe34d87aed588e55f1"
+    },
+    {
+      "name": "large integers keep ECMAScript number-to-string form",
+      "value": {
+        "a": 1e+21,
+        "b": -1234567890123,
+        "c": 0
+      },
+      "canonical": "{\"a\":1e+21,\"b\":-1234567890123,\"c\":0}",
+      "digest": "sha256:e4f8f8e24ab9b690c2db7decb4377ab083cad63e5283ffd61d2ed45e690e3041"
+    }
+  ],
+  "canonical_rejects": [
+    {
+      "name": "unpaired high surrogate",
+      "value": {
+        "a": "\ud800"
+      }
+    },
+    {
+      "name": "unpaired low surrogate",
+      "value": {
+        "a": "\udc00"
+      }
+    }
+  ],
   "vectors": [
     {
       "schema_version": "aether.ats.execution-state/1",
@@ -58,6 +153,7 @@
       "schema_version": "aether.ats.account-binding/1",
       "document": {
         "schema_version": "aether.ats.account-binding/1",
+        "account_binding_id": "bind_rh_agentic01",
         "provider_id": "robinhood",
         "credential_ref": "vault_rh_primary01",
         "encrypted_account_ref": "enc_rh_acct_0001",
@@ -70,8 +166,8 @@
         "selected_at": "2026-09-22T14:20:00Z",
         "binding_generation": 1
       },
-      "canonical_digest": "sha256:8a0299f9a2b645eb9bba0921980a1beb588d760d1c3ddd4be36f329ce05ce1c2",
-      "canonical_bytes_sha256": "8a0299f9a2b645eb9bba0921980a1beb588d760d1c3ddd4be36f329ce05ce1c2"
+      "canonical_digest": "sha256:e1bbbced396489aebd9c2f117118019a86496e47f9cedea98a58805fa79a8b0e",
+      "canonical_bytes_sha256": "e1bbbced396489aebd9c2f117118019a86496e47f9cedea98a58805fa79a8b0e"
     },
     {
       "schema_version": "aether.ats.delegated-trading-grant/1",
@@ -123,6 +219,8 @@
         "intent_id": "intent_7c1a4f20",
         "request_id": "req_7c1a4f20",
         "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
           "adapter_id": "robinhood_trading_mcp",
           "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
           "execution_environment": "ats_paper",
@@ -144,8 +242,8 @@
         "created_at": "2026-09-22T14:30:00Z",
         "expires_at": "2026-09-22T14:33:00Z"
       },
-      "canonical_digest": "sha256:ea0f01068062c0183435afb5d11671acf73bbc714d1780b2568426341780b59d",
-      "canonical_bytes_sha256": "ea0f01068062c0183435afb5d11671acf73bbc714d1780b2568426341780b59d"
+      "canonical_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
+      "canonical_bytes_sha256": "6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130"
     },
     {
       "schema_version": "aether.ats.order-review-receipt/1",
@@ -153,8 +251,10 @@
         "schema_version": "aether.ats.order-review-receipt/1",
         "review_id": "review_3d91b7",
         "request_id": "req_7c1a4f20",
-        "intent_digest": "sha256:ea0f01068062c0183435afb5d11671acf73bbc714d1780b2568426341780b59d",
+        "intent_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
         "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
           "adapter_id": "robinhood_trading_mcp",
           "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
           "execution_environment": "ats_paper",
@@ -190,8 +290,8 @@
         },
         "recorded_at": "2026-09-22T14:30:05Z"
       },
-      "canonical_digest": "sha256:f78c4630f9977cb40c52b4bdc172cdd8825c57fad1c0cc0997f05551b2439acb",
-      "canonical_bytes_sha256": "f78c4630f9977cb40c52b4bdc172cdd8825c57fad1c0cc0997f05551b2439acb"
+      "canonical_digest": "sha256:5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c",
+      "canonical_bytes_sha256": "5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c"
     },
     {
       "schema_version": "aether.ats.operator-approval/1",
@@ -199,10 +299,12 @@
         "schema_version": "aether.ats.operator-approval/1",
         "approval_id": "appr_3d91b7c2",
         "request_id": "req_7c1a4f20",
-        "intent_digest": "sha256:ea0f01068062c0183435afb5d11671acf73bbc714d1780b2568426341780b59d",
+        "intent_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
         "review_id": "review_3d91b7",
-        "review_digest": "sha256:f78c4630f9977cb40c52b4bdc172cdd8825c57fad1c0cc0997f05551b2439acb",
+        "review_digest": "sha256:5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c",
         "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
           "adapter_id": "robinhood_trading_mcp",
           "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
           "execution_environment": "ats_paper",
@@ -231,8 +333,8 @@
         "expires_at": "2026-09-22T14:32:00Z",
         "consumed_at": null
       },
-      "canonical_digest": "sha256:78c4adaeb8297406344bd1c68347356872dc13258a739004276ec5e8b6f1a7be",
-      "canonical_bytes_sha256": "78c4adaeb8297406344bd1c68347356872dc13258a739004276ec5e8b6f1a7be"
+      "canonical_digest": "sha256:8085ceffcd9c59c1b2f9624d87efff5bf061f5642ad25554030548833a09e2be",
+      "canonical_bytes_sha256": "8085ceffcd9c59c1b2f9624d87efff5bf061f5642ad25554030548833a09e2be"
     },
     {
       "schema_version": "aether.ats.execution-receipt/1",

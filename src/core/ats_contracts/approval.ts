@@ -30,9 +30,21 @@ import {
   text,
   timestamp,
 } from "./primitives.js";
-import { ORDER_SIDES, ORDER_TYPES, type OrderSide, type OrderType } from "./grant.js";
+import { digestEquals, digestOf } from "./canonical.js";
+import { isHalted, permitsOrderSubmission } from "./mode.js";
+import type { BrokerAccountBindingV1 } from "./connector.js";
+import {
+  grantPermits,
+  ORDER_SIDES,
+  ORDER_TYPES,
+  type DelegatedTradingGrantV1,
+  type GrantUsage,
+  type OrderSide,
+  type OrderType,
+} from "./grant.js";
 import {
   connectorBindingMatches,
+  isReviewApprovable,
   validateConnectorBindingRef,
   type BrokerOrderReviewReceiptV1,
   type ConnectorBindingRef,
@@ -185,7 +197,14 @@ function broken(reason: string): ChainVerdict {
  * execution environment. A mismatch is a terminal refusal, never an automatic
  * re-preview or reroute."
  *
- * This returns a verdict rather than repairing anything, and every caller must
+ * The digests are COMPUTED HERE from the intent and review themselves. An
+ * earlier revision accepted an `intentDigest` argument from the caller, which
+ * meant the check proved only that three documents agreed about a number the
+ * attacker supplied — a forged intent plus a matching digest sailed through.
+ * The inputs must be the validated, frozen objects the validators return;
+ * digesting a raw payload would canonicalize a different key set.
+ *
+ * Returns a verdict rather than repairing anything, and every caller must
  * treat `consistent: false` as terminal. The temptation on a mismatch is to
  * re-run the preview and carry on; that is precisely how an approval minted
  * against a paper preview ends up authorizing a live order, so there is no
@@ -195,20 +214,32 @@ export function verifyApprovalChain(
   intent: NormalizedEquityOrderIntentV1,
   review: BrokerOrderReviewReceiptV1,
   approval: OperatorApprovalReceiptV1,
-  intentDigest: string,
+  nowMs: number = Date.now(),
 ): ChainVerdict {
-  if (review.intent_digest !== intentDigest) return broken("Review does not answer this intent.");
-  if (approval.intent_digest !== intentDigest) return broken("Approval does not bind this intent.");
+  const intentDigest = digestOf(intent);
+  const reviewDigest = digestOf(review);
+
+  if (!digestEquals(review.intent_digest, intentDigest)) return broken("Review does not answer this intent.");
+  if (!digestEquals(approval.intent_digest, intentDigest)) return broken("Approval does not bind this intent.");
+  if (!digestEquals(approval.review_digest, reviewDigest)) {
+    return broken("Approval does not bind this exact review.");
+  }
   if (approval.review_id !== review.review_id) return broken("Approval does not bind this review.");
   if (intent.request_id !== review.request_id || review.request_id !== approval.request_id) {
     return broken("Request identity differs across the chain.");
   }
+  if (approval.intent_digest !== review.intent_digest) return broken("Approval and review disagree about the intent.");
 
+  // Provider, account binding, generation, adapter, schema digest and
+  // environment, compared as a unit across every hop.
   if (!connectorBindingMatches(intent.connector, review.connector)) {
     return broken("Review connector binding differs from the intent.");
   }
   if (!connectorBindingMatches(review.connector, approval.connector)) {
     return broken("Approval connector binding differs from the review.");
+  }
+  if (approval.provider_id !== approval.connector.provider_id) {
+    return broken("Approval provider disagrees with its own connector binding.");
   }
 
   if (approval.grant_id !== review.grant_id || approval.grant_version !== review.grant_version) {
@@ -218,6 +249,9 @@ export function verifyApprovalChain(
   if (approval.broker_preview_id !== review.broker_preview_id) return broken("Broker preview changed after review.");
   if (approval.evidence_digest !== review.evidence.evidence_digest) {
     return broken("Market evidence changed after review.");
+  }
+  if (approval.evidence_digest !== intent.evidence.evidence_digest) {
+    return broken("Approved evidence differs from the evidence the intent was formed on.");
   }
 
   // The restated order facts must match what the intent actually said.
@@ -239,6 +273,88 @@ export function verifyApprovalChain(
   if (Date.parse(approval.expires_at) > Date.parse(review.reservation_expires_at)) {
     return broken("Approval outlives its reservation.");
   }
+
+  // State of the chain, not just its shape. A structurally perfect chain over
+  // a refused review or a spent approval must still refuse.
+  const approvable = isReviewApprovable(review, nowMs);
+  if (!approvable.approvable) return broken(approvable.reason);
+  const usable = isApprovalUsable(approval, nowMs);
+  if (!usable.usable) return broken(usable.reason);
+  if (nowMs >= Date.parse(intent.expires_at)) return broken("Intent expired.");
+
+  return Object.freeze({ consistent: true as const });
+}
+
+/** Everything the commit gate needs. Supplied by ATSv2, never by a model. */
+export interface CommitAuthorityRequest {
+  readonly now: number;
+  readonly grant: DelegatedTradingGrantV1;
+  readonly usage: GrantUsage;
+  /** The authoritative local binding — the account that will actually be hit. */
+  readonly binding: BrokerAccountBindingV1;
+  readonly intent: NormalizedEquityOrderIntentV1;
+  readonly review: BrokerOrderReviewReceiptV1;
+  readonly approval: OperatorApprovalReceiptV1;
+  /** Position notional for this symbol if the order fills, from ATSv2. */
+  readonly resultingPositionNotionalMinor: number;
+}
+
+/**
+ * The gate immediately before a broker commit.
+ *
+ * `verifyApprovalChain` proves the three documents describe one order. This
+ * additionally proves that order is aimed at the account the binding names,
+ * under a grant that still permits it, in a mode that still allows submission.
+ * Spec 1 section 16 requires kill and pause to win *after* review and
+ * immediately before commit, so the effective-mode check lives here rather
+ * than being inherited from whatever the review said minutes ago.
+ */
+export function verifyCommitAuthority(request: CommitAuthorityRequest): ChainVerdict {
+  const { now, grant, usage, binding, intent, review, approval } = request;
+
+  const chain = verifyApprovalChain(intent, review, approval, now);
+  if (!chain.consistent) return chain;
+
+  // The chain agrees with itself; does it agree with the account on disk?
+  if (intent.connector.account_binding_id !== binding.account_binding_id) {
+    return broken("Order is bound to a different account binding.");
+  }
+  if (intent.connector.provider_id !== binding.provider_id) return broken("Order provider differs from the binding.");
+  if (intent.connector.binding_generation !== binding.binding_generation) {
+    return broken("Account was re-linked after this order was reviewed.");
+  }
+  if (approval.opaque_account_ref !== binding.opaque_account_ref) {
+    return broken("Approved account differs from the bound account.");
+  }
+
+  if (grant.grant_id !== review.grant_id || grant.grant_version !== review.grant_version) {
+    return broken("Grant changed after review.");
+  }
+  if (grant.opaque_account_ref !== binding.opaque_account_ref) return broken("Grant is for a different account.");
+  if (grant.provider_id !== binding.provider_id) return broken("Grant is for a different provider.");
+  if (grant.execution_environment !== intent.connector.execution_environment) {
+    return broken("Grant environment differs from the order environment.");
+  }
+
+  // Kill, pause and degraded modes are checked HERE, not carried over.
+  const effective = review.execution_state.effective_mode;
+  if (isHalted(effective)) return broken(`Execution is halted (${effective}).`);
+  if (!permitsOrderSubmission(effective)) return broken(`Effective mode ${effective} does not permit submission.`);
+
+  const decision = grantPermits(
+    grant,
+    {
+      symbol: intent.symbol,
+      side: intent.side,
+      order_type: intent.order_type,
+      worst_case_notional_minor: review.worst_case_notional_minor,
+      resulting_position_notional_minor: request.resultingPositionNotionalMinor,
+      execution_environment: intent.connector.execution_environment,
+    },
+    usage,
+    now,
+  );
+  if (!decision.allowed) return broken(decision.reason);
 
   return Object.freeze({ consistent: true as const });
 }

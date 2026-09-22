@@ -9,6 +9,8 @@
 // The Spec 2 runtime, data, strategy and journal contracts are a separate lane
 // and land alongside these under the same directory.
 
+export { multilineText } from "./primitives.js";
+
 export {
   ATS_CANONICAL_PROFILE,
   canonicalJson,
@@ -80,6 +82,7 @@ export {
   ORDER_REVIEW_SCHEMA,
   RISK_VERDICTS,
   connectorBindingMatches,
+  connectorRefFromBinding,
   isReviewApprovable,
   validateConnectorBindingRef,
   validateMarketEvidence,
@@ -103,9 +106,11 @@ export {
   validateExecutionReceipt,
   validateOperatorApproval,
   verifyApprovalChain,
+  verifyCommitAuthority,
   type ApprovalUsability,
   type BrokerConfirmedFill,
   type ChainVerdict,
+  type CommitAuthorityRequest,
   type ExecutionOutcome,
   type ExecutionReceiptV1,
   type OperatorApprovalReceiptV1,
