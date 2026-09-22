@@ -49,9 +49,34 @@ Prefer Python? `pipx install aether-agent` installs the same CLI and forwards
 every command to it, so `aether-agent code "..."` and `aether code "..."` do the
 same work. See [`packages/pypi-cli`](packages/pypi-cli/README.md).
 
-## Account agents and ATS — 0.4.0 source candidate
+## Aether Agent 0.4.0 — account agents and ATS
 
 ATS is the trading adapter for account agents.
+
+### What works now — and what does not
+
+Aether Agent 0.4.0 has a real, account-bound ATS setup and observation path. It
+can create the managed-agent draft, verify local memory, install and compile the
+reviewed Nano starter strategies, save data-provider configuration, and open a
+bounded browser observer. Those capabilities are useful today, but they are not
+broker execution.
+
+| Stage | 0.4.0 status | Release boundary |
+|---|---|---|
+| Account agent, consent and local ownership | **Available in the source candidate** | Identity-bound setup; consent never grants trading authority. |
+| Memory, strategy scan/compile and data configuration | **Available in the source candidate** | Preparation and diagnostics only; no order can result. |
+| Browser observation | **Available in the source candidate** | Read-only, freshness-checked images; no model-controlled browser action. |
+| ATS runtime and market-data session | **Next implementation gate** | Must prove lifecycle, health, freshness, cancellation and cleanup before paper trading. |
+| Paper-order execution and reconciliation | **Not shipped** | Requires typed intents, limits, idempotency, venue receipts and uncertain-outcome recovery. |
+| Supervised live orders | **Not shipped** | Requires separate, scoped user authority, broker connectivity, preflight limits, confirmation and a kill switch. |
+| Autonomous live trading | **Not shipped** | No setup choice, mode preference, strategy, chat message or policy receipt enables it. |
+
+Execution work is deliberately sequential: establish the runtime and data-plane
+contracts first, then paper execution and reconciliation, then supervised live
+execution. Autonomous live authority is a later, separately qualified product
+gate—not a side effect of installing 0.4.0. The exact candidate evidence and
+remaining qualification are tracked in the
+[operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md).
 
 After signing in, use `aether agent list` to see the same managed agents as
 Aether Online. `aether agent chat` opens the one-column picker; select an agent
@@ -100,9 +125,10 @@ host; Cloud DM does not yet receive those images or control this browser.
 These commands require the matching Cloud terminal adapter. ATS setup also
 requires its Python engine and a separately running Agent Browser runtime;
 missing services are reported explicitly. This candidate prepares and observes
-an ATS workspace. It does not yet provide model-controlled broker actions or
-automatic live orders. See the [candidate packet](docs/releases/OPERATOR-PACKET-v0.4.0.md)
-for the qualification still required before publication.
+an ATS workspace. It does not start an execution engine, connect a broker,
+submit or reconcile orders, or provide model-controlled trading actions. See
+the [candidate packet](docs/releases/OPERATOR-PACKET-v0.4.0.md) for the
+qualification still required before publication.
 
 ## Pick where the model runs
 
