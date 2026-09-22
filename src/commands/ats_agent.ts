@@ -15,6 +15,24 @@ import { theme } from "../ui/theme.js";
 import { sanitizeTerm } from "../ui/text.js";
 import { AgentBrowserSession, type AgentBrowserObserver, type AgentBrowserPackage } from "../core/agent_browser_session.js";
 import { requireAtsPolicyAcceptance } from "./ats_policy.js";
+import { strategiesReady, type StrategyReadiness } from "../core/ats_contracts/strategy.js";
+import { formatRuntimeSnapshot } from "../core/ats_contracts/runtime.js";
+import { VERSION } from "../version.js";
+import {
+  dashboardStatePath, dataProfilePath, runtimeInstallDir, runtimeStatePath, setupStatePath,
+} from "../core/ats_runtime/paths.js";
+import {
+  defaultDashboardRecord, readDashboardRecord, readDataRecord, readRuntimeRecord,
+  writeDashboardRecord, writeDataRecord,
+} from "../core/ats_runtime/store.js";
+import {
+  SETUP_STEPS, beginSetup, completeStep, readSetupState, resumable, writeSetupState,
+} from "../core/ats_runtime/wizard.js";
+import { installRuntime } from "../core/ats_runtime/install.js";
+import {
+  restartRuntime, rollbackRuntime, runtimeStatus, startRuntime, stopRuntime, tearDownForAccountSwitch,
+} from "../core/ats_runtime/supervisor.js";
+import { atsDoctorJson, buildAtsDoctorReport, renderAtsDoctorReport } from "../core/ats_runtime/doctor.js";
 
 export const ATS_PROFILE_MARKER = "aether.ats.profile/1";
 
@@ -136,9 +154,31 @@ function renderStrategyScan(scan: Record<string, unknown>): string {
   return sanitizeTerm(lines.join("\n")) + "\n";
 }
 
-function strategyCount(scan: Record<string, unknown>): number {
+/**
+ * Break a scan into the counts callers actually mean.
+ *
+ * This replaces a single `strategyCount` that returned `strategies.length` —
+ * every scanned file, including rejected, needs_conversion and unavailable
+ * ones. Its value then fed a persisted `strategy_count` and a journal entry,
+ * so setup could report "6 strategies" with nothing compiled, which is exactly
+ * the dishonest readiness Spec 2 section 2.1 calls out and section 5 step 5
+ * forbids: setup may finish with zero compiled strategies, but it must SAY
+ * `0 compiled` and leave strategy readiness incomplete.
+ *
+ * Returning the whole set rather than one number means each call site has to
+ * name which count it wants, so the ambiguity cannot silently come back.
+ */
+function strategyReadiness(scan: Record<string, unknown>): StrategyReadiness {
   if (scan["state"] !== "scanned" || !Array.isArray(scan["strategies"])) throw new Error("The strategy scanner did not return a valid result.");
-  return scan["strategies"].length;
+  const rows = scan["strategies"] as Array<Record<string, unknown>>;
+  const withState = (state: string): number => rows.filter(row => row["state"] === state).length;
+  return {
+    compiled: withState("compiled"),
+    rejected: withState("rejected"),
+    needs_conversion: withState("needs_conversion"),
+    unavailable: withState("unavailable"),
+    total: rows.length,
+  };
 }
 
 function journalPath(path: string): string { return join(dirname(path), "journal.jsonl"); }
@@ -217,18 +257,24 @@ export async function askSetup(signal?: AbortSignal, input: NodeJS.ReadableStrea
     const size = (await reader.question("Memory size in GiB [5]: ", { signal: active })).trim() || "5";
     if (!/^\d+$/.test(size) || Number(size) < 5 || Number(size) > 1024) throw new Error("Choose a whole memory size from 5 to 1,024 GiB.");
     const strategies = (await reader.question("Strategy folder [./strategies]: ", { signal: active })).trim() || "./strategies";
-    const provider = (await reader.question("Data provider: none, yfinance, polygon, custom [none]: ", { signal: active })).trim().toLowerCase() || "none";
-    if (!["none", "yfinance", "polygon", "custom"].includes(provider)) throw new Error("Choose none, yfinance, polygon or custom for data.");
-    let endpoint: string | null = null;
+    // Spec 2 section 5 step 4: offer only adapters the headless runtime
+    // actually implements. `custom` used to be offered here and prompted for
+    // an endpoint, which presented an unimplemented adapter as a working one.
+    // It is NOT removed from packages/ats-skills' own validator in this PR —
+    // that is a breaking schema change (an operator with provider:'custom'
+    // already persisted would have validateSettings throw on load) and belongs
+    // with the settings/1 to /2 migration in section 15, under PR 2.4.
+    const provider = (await reader.question("Data provider: none, yfinance, polygon [none]: ", { signal: active })).trim().toLowerCase() || "none";
+    if (!["none", "yfinance", "polygon"].includes(provider)) throw new Error("Choose none, yfinance or polygon for data.");
+    const endpoint: string | null = null;
     let keyEnv: string | null = null;
     let symbols: string[] = [];
     if (provider !== "none") {
       const raw = await reader.question("Symbols, comma-separated [configure later]: ", { signal: active });
       symbols = raw.split(",").map(value => value.trim().toUpperCase()).filter(Boolean);
-      if (provider === "custom") endpoint = (await reader.question("Data endpoint URL: ", { signal: active })).trim();
-      if (provider === "polygon" || provider === "custom") {
-        keyEnv = (await reader.question(`Credential environment variable name [${provider === "polygon" ? "POLYGON_API_KEY" : "none"}]: `, { signal: active })).trim() || (provider === "polygon" ? "POLYGON_API_KEY" : null);
-        if (keyEnv !== null && !/^[A-Z_][A-Z0-9_]{0,127}$/.test(keyEnv)) throw new Error("Enter only an environment variable name, never the credential value.");
+      if (provider === "polygon") {
+        keyEnv = (await reader.question("Credential environment variable name [POLYGON_API_KEY]: ", { signal: active })).trim() || "POLYGON_API_KEY";
+        if (!/^[A-Z_][A-Z0-9_]{0,127}$/.test(keyEnv)) throw new Error("Enter only an environment variable name, never the credential value.");
       }
     }
     active.throwIfAborted();
@@ -278,6 +324,94 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     }
     return session;
   };
+  /** Keep a profile id only while every setting it describes stays the same.
+   * An id is an opaque random identifier, not a hash of a credential reference.
+   * Changing a provider, symbol, timeframe, polling interval or reference
+   * rotates the id and drops the old probe, including on /ats data edits.
+   */
+  const syncDataProfile = async (account: ManagedAccountScope, agentId: string, settings: AtsSettings, now: string, note: (text: string) => void, strict = false): Promise<void> => {
+    const stream = settings.data_stream;
+    const profilePath = dataProfilePath(root, account, agentId);
+    // `custom` has no DataProfileV1 representation — section 5 step 4 admits
+    // only none/yfinance/polygon. Preserve the legacy settings, but discard
+    // any prior profile evidence so it cannot describe a different feed.
+    //
+    // Nothing in here may fail setup. These files are a derived convenience:
+    // the authority is `ats.json` plus the runtime's own receipts, so a legacy
+    // settings value this schema cannot represent means "no profile derived".
+    if (!["none", "yfinance", "polygon"].includes(stream.provider)) {
+      // No Spec 2 representation for a legacy custom adapter. An old profile
+      // and its verified probe must not keep describing the newly selected feed.
+      try {
+        if (await readDataRecord(profilePath)) await unlink(profilePath);
+      } catch (error) {
+        note("Data profile not cleared · inspect existing state before using data readiness\n");
+        if (strict) throw error;
+      }
+      return;
+    }
+    {
+      const configured = {
+        provider: stream.provider,
+        symbols: [...stream.symbols].sort(),
+        timeframe: stream.timeframe,
+        poll_interval_ms: stream.poll_interval_ms,
+        credential_ref: stream.api_key_env ? `env:${stream.api_key_env}` : null,
+      };
+      try {
+        // A corrupt existing record must remain available for inspection; never
+        // replace it as if it were an absent record.
+        const existing = await readDataRecord(profilePath);
+        const prior = existing?.profile;
+        const unchanged = prior?.provider === configured.provider
+          && JSON.stringify(prior.symbols) === JSON.stringify(configured.symbols)
+          && prior.timeframe === configured.timeframe
+          && prior.poll_interval_ms === configured.poll_interval_ms
+          && prior.credential_ref === configured.credential_ref;
+        const profileId = unchanged ? prior.profile_id : `dp_${randomUUID().replaceAll("-", "")}`;
+        await writeDataRecord(profilePath, {
+          schema_version: "aether.ats.data-state/1",
+          profile: {
+            schema_version: "aether.ats.data-profile/1",
+            profile_id: profileId,
+            provider: configured.provider as "none" | "yfinance" | "polygon",
+            symbols: configured.symbols,
+            timeframe: configured.timeframe,
+            poll_interval_ms: configured.poll_interval_ms,
+            credential_ref: configured.credential_ref,
+            configured_at: now,
+          },
+          // Only a probe taken against THIS configuration survives.
+          last_probe: unchanged ? existing?.last_probe ?? null : null,
+          updated_at: now,
+        });
+      } catch (error) {
+        note("Data profile not updated · inspect existing state and saved data settings\n");
+        if (strict) throw error;
+      }
+    }
+  };
+
+  /** Derive the Spec 2 files from completed setup and record wizard progress. */
+  const syncSpec2State = async (account: ManagedAccountScope, agentId: string, settings: AtsSettings, now: string, note: (text: string) => void): Promise<void> => {
+    await syncDataProfile(account, agentId, settings, now, note);
+
+    const dashboardPath = dashboardStatePath(root, account, agentId);
+    if (!(await readDashboardRecord(dashboardPath).catch(() => null))) {
+      await writeDashboardRecord(dashboardPath, defaultDashboardRecord(now));
+    }
+
+    // Record the steps this flow actually completed. The runtime step counts
+    // as done because finishing without a runtime is one of step 2's three
+    // offered outcomes — `aether ats doctor` reports separately that no
+    // runtime is installed, so this cannot read as "a runtime exists".
+    const statePath = setupStatePath(root, account, agentId);
+    const prior = await readSetupState(statePath).catch(() => null);
+    let state = prior && resumable(prior, account, agentId) ? prior : beginSetup(account, agentId, now);
+    for (const step of SETUP_STEPS) state = completeStep(state, step, now);
+    await writeSetupState(statePath, state);
+  };
+
   const initialize = async (account: ManagedAccountScope, agent: ManagedAgent, options: Awaited<ReturnType<typeof askSetup>>, pack: AtsPackage, write = output, signal?: AbortSignal): Promise<Binding> => {
     signal?.throwIfAborted();
     const path = bindingPath(account, agent.agent_id, root);
@@ -310,7 +444,11 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     let scan = await pack.scanStrategies({ directory: binding.strategies_directory, signal,
       ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
     signal?.throwIfAborted();
-    if (strategyCount(scan) === 0) {
+    // Seed the starter set only when the folder is genuinely EMPTY. Keying
+    // this off the compiled count instead would reinstall the starters over a
+    // folder whose files merely failed to compile, duplicating sources every
+    // time setup resumes.
+    if (strategyReadiness(scan).total === 0) {
       const installed = await pack.installBundledStrategies({ directory: binding.strategies_directory, selection: "starter" });
       write(`Installed ${installed.installed.length} bundled Nano starter sources · no execution authority granted\n`);
       await appendJournal(pack, path, agent.agent_id, "strategy.library_installed", "Installed bundled Nano starter sources.", {
@@ -320,13 +458,31 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
       signal?.throwIfAborted();
     }
+    const readiness = strategyReadiness(scan);
     write(renderStrategyScan(scan));
     await saveBinding(path, binding);
     await unlink(`${path}.pending`);
     await appendJournal(pack, path, agent.agent_id, "setup.ready", "ATS device setup verified.", {
-      memory_gb: binding.memory_gb, strategy_count: strategyCount(scan), data_provider: settings.data_stream.provider,
+      memory_gb: binding.memory_gb,
+      // Each count is recorded under its own name. A single `strategy_count`
+      // read as readiness by anything downstream, which is the bug this
+      // replaces (Spec 2 section 2.1).
+      strategies_compiled: readiness.compiled,
+      strategies_rejected: readiness.rejected,
+      strategies_need_conversion: readiness.needs_conversion,
+      strategies_found: readiness.total,
+      strategies_ready: strategiesReady(readiness),
+      data_provider: settings.data_stream.provider,
     });
+    // Section 5 step 5: finishing with nothing compiled is permitted, but it
+    // must be said out loud and readiness must stay incomplete.
+    if (!strategiesReady(readiness)) {
+      write("Strategy readiness incomplete · 0 compiled · nothing can be staged or activated yet\n");
+    }
     write(`Data: ${sanitizeTerm(settings.data_stream.provider)} · ${String(pack.dataStreamStatus(settings)["state"] ?? "unverified")} · connection requires a live probe\n`);
+    // Spec 2 section 15's separate files, derived once setup has actually
+    // succeeded rather than optimistically at the start.
+    await syncSpec2State(account, agent.agent_id, settings, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), write);
     write(theme.cyan("ATS setup saved") + ` · ${binding.memory_gb} GiB context limit · ${sanitizeTerm(binding.strategies_directory)}\n`);
     return binding;
   };
@@ -341,11 +497,11 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     const settingsPath = join(dirname(path), "settings.json");
     await refuseLinks(settingsPath);
     const settings = await pack.loadSettings(settingsPath);
-    return { binding, pack, settingsPath, settings, path };
+    return { binding, pack, settingsPath, settings, path, account };
   };
   return {
     help: (agent) => typedAts(agent)
-      ? "ATS · Shift-Tab: mode · /ats mode · /ats strategies · /ats library · /ats data · /ats journal · /ats status\nBrowser · /browser open · /browser status · /browser setup" : "Browser · /browser setup · /browser open · /browser status",
+      ? "ATS · Shift-Tab: mode · /ats mode · /ats strategies · /ats library · /ats data · /ats journal · /ats status · /ats doctor · /ats runtime\nBrowser · /browser open · /browser status · /browser setup" : "Browser · /browser setup · /browser open · /browser status",
     cycleMode: async (ctx, agent, surface) => {
       const output = surface?.write ?? deps.output ?? ((text: string) => process.stdout.write(text));
       const state = await local(ctx, agent, surface);
@@ -387,8 +543,16 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         await refuseLinks(binding.strategies_directory);
         const scan = await pack.scanStrategies({ directory: binding.strategies_directory, signal: surface?.signal,
           ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) });
+        const scanned = strategyReadiness(scan);
         output(renderStrategyScan(scan));
-        await appendJournal(pack, path, agent.agent_id, "strategy.scan", "Strategy directory scanned.", { count: strategyCount(scan), compiler: String(scan["compiler"] ?? "unavailable") });
+        if (!strategiesReady(scanned)) output("Strategy readiness incomplete · 0 compiled\n");
+        await appendJournal(pack, path, agent.agent_id, "strategy.scan", "Strategy directory scanned.", {
+          strategies_compiled: scanned.compiled,
+          strategies_rejected: scanned.rejected,
+          strategies_need_conversion: scanned.needs_conversion,
+          strategies_found: scanned.total,
+          compiler: String(scan["compiler"] ?? "unavailable"),
+        });
       } else if (command === "library") {
         if (args[0] === "add") {
           const requested = args.slice(1);
@@ -412,10 +576,12 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
           if (["none", "yfinance"].includes(provider) && (endpoint || keyEnv)) throw new Error("This provider needs no endpoint or credential argument.");
           settings.data_stream = { ...settings.data_stream, provider, endpoint: endpoint ?? null, api_key_env: keyEnv ?? null,
             ...(provider === "none" ? { symbols: [] } : {}) };
+          await syncDataProfile(state.account, agent.agent_id, settings, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), output, true);
           await pack.saveSettings(settingsPath, settings);
           await appendJournal(pack, path, agent.agent_id, "data.configured", "Data provider configuration changed.", { provider, symbol_count: settings.data_stream.symbols.length, connected: false });
         } else if (args[0] === "symbols") {
           settings.data_stream.symbols = args.slice(1).join(",").split(",").map(x => x.trim().toUpperCase()).filter(Boolean);
+          await syncDataProfile(state.account, agent.agent_id, settings, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), output, true);
           await pack.saveSettings(settingsPath, settings);
           await appendJournal(pack, path, agent.agent_id, "data.symbols_changed", "Data symbols changed.", { provider: settings.data_stream.provider, symbol_count: settings.data_stream.symbols.length, connected: false });
         } else if (args.length && args[0] !== "list") throw new Error("Use /ats data, /ats data set, or /ats data symbols AAPL,MSFT.");
@@ -432,7 +598,57 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
       } else if (command === "status") {
         output(`ATS · ${binding.agent_id}\nMemory: ${binding.memory_gb} GiB limit · ${sanitizeTerm(binding.memory_directory)}\nStrategies: ${sanitizeTerm(binding.strategies_directory)}\nMode: ${settings.permission_mode} requested · runtime unconfirmed\n`);
         output(sanitizeTerm(JSON.stringify(pack.dataStreamStatus(settings))) + `\nCloud chat: ${surface?.connection?.().chat ?? "unverified"}. Local execution is not connected to this conversation.\n`);
-      } else output("Use /ats status, /ats mode, /ats strategies, /ats library, /ats data, /ats journal, or /ats browser.\n");
+      } else if (command === "doctor") {
+        // Spec 2 step 2.7. The scan is re-run rather than remembered so the
+        // strategy axis reports what is on disk now, not what setup once saw.
+        const scan = await pack.scanStrategies({ directory: binding.strategies_directory, signal: surface?.signal,
+          ...(env["AETHER_ATS_PYTHON"] ? { python: env["AETHER_ATS_PYTHON"] } : {}) }).catch(() => null);
+        const report = await buildAtsDoctorReport({
+          runtimeStatePath: runtimeStatePath(root, state.account, agent.agent_id),
+          dataProfilePath: dataProfilePath(root, state.account, agent.agent_id),
+          dashboardStatePath: dashboardStatePath(root, state.account, agent.agent_id),
+          ...(scan ? { strategies: strategyReadiness(scan) } : {}),
+          memoryVerified: binding.memory_verification !== undefined,
+          ...(surface?.signal ? { signal: surface.signal } : {}),
+        });
+        output(args.includes("--json") ? atsDoctorJson(report) : sanitizeTerm(renderAtsDoctorReport(report)));
+      } else if (command === "runtime") {
+        const recordPath = runtimeStatePath(root, state.account, agent.agent_id);
+        const record = await readRuntimeRecord(recordPath);
+        const action = args[0] ?? "status";
+        if (action === "status") {
+          // No record is not an error. It is the honest state of a device that
+          // has never installed a runtime.
+          if (!record) { output("ATS runtime · not configured on this device\n"); return true; }
+          output(sanitizeTerm(formatRuntimeSnapshot(await runtimeStatus(record, {}, surface?.signal))) + "\n");
+        } else if (action === "install") {
+          // The verification pipeline is wired; the entitled transport is not,
+          // so this reports honestly instead of pretending to install.
+          const outcome = await installRuntime({
+            recordPath,
+            installRoot: runtimeInstallDir(root, state.account, agent.agent_id),
+            agentVersion: VERSION,
+            requestedMode: "observe",
+            ...(surface?.signal ? { signal: surface.signal } : {}),
+          });
+          output(sanitizeTerm(outcome.ok ? "ATS runtime installed · provenance verified\n" : `ATS runtime not installed · ${outcome.reason ?? "refused"}\n`));
+          await appendJournal(pack, path, agent.agent_id, "runtime.install", "ATS runtime installation attempted.", {
+            installed: outcome.ok, failure: outcome.failure,
+          });
+        } else if (action === "start" || action === "stop" || action === "restart") {
+          if (!record) throw new Error("No ATS runtime is configured on this device.");
+          const run = action === "start" ? startRuntime : action === "stop" ? stopRuntime : restartRuntime;
+          const result = await run(recordPath, record, {});
+          output(sanitizeTerm(result.reason ?? `ATS runtime ${action} complete`) + "\n");
+          await appendJournal(pack, path, agent.agent_id, `runtime.${action}`, "ATS runtime lifecycle command.", {
+            changed: result.changed, reason: result.reason,
+          });
+        } else if (action === "rollback") {
+          if (!record) throw new Error("No ATS runtime is configured on this device.");
+          const result = await rollbackRuntime(recordPath, record, {});
+          output(sanitizeTerm(result.reason ?? "Rolled back.") + "\n");
+        } else throw new Error("Use /ats runtime status|install|start|stop|restart|rollback.");
+      } else output("Use /ats status, /ats doctor, /ats runtime, /ats mode, /ats strategies, /ats library, /ats data, /ats journal, or /ats browser.\n");
       return true;
     },
     createATS: async (ctx, name, signal) => {
@@ -488,6 +704,15 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         owner.closed = true;
         let failure: unknown;
         try { await session.close(); } catch (error) { failure = error; }
+        // Section 17: an account switch closes runtime access along with the
+        // browser and the memory lease. The runtime is stopped and its
+        // credential revoked; the installation and its slots are kept, because
+        // the bytes on disk are still what they were and the same canary
+        // requires disabling a runtime without data loss.
+        if (marked) {
+          try { await tearDownForAccountSwitch(runtimeStatePath(root, account, agent.agent_id)); }
+          catch (error) { failure ??= error; }
+        }
         try { await memoryLease?.close(); } catch (error) { failure ??= error; }
         const id = key(account, agent);
         if (browsers.get(id) === session) browsers.delete(id);
