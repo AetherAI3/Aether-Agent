@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import {
   ATS_CANONICAL_PROFILE,
   ATS_SPEC1_SCHEMAS,
@@ -30,6 +31,14 @@ import {
 
 const GOLDEN = "test/fixtures/ats_contracts_golden.json";
 const NOW = Date.parse("2026-09-22T14:30:45Z");
+
+/**
+ * Minimum non-ASCII coverage the golden fixture must retain, as constants
+ * independent of the fixture itself. See the encoder-regression test below for
+ * why a derived or too-low floor is worse than useless.
+ */
+const MIN_CANONICAL_COVERAGE = 3;
+const MIN_CONTRACT_COVERAGE = 3;
 
 interface GoldenFixture {
   schema_version: string;
@@ -76,7 +85,7 @@ test("every canonical vector reproduces its recorded bytes and digest", async ()
 test("non-ASCII is emitted literally, not escaped", () => {
   // The regression guard for the bug this profile replaced: the previous
   // encoder produced {"a":"caf\\u00e9"} (Python ensure_ascii=True), which is
-  // JCS and yields a different digest for the same document.
+  // NOT JCS and yields a different digest for the same document.
   assert.equal(canonicalJson({ a: "café" }), '{"a":"café"}');
   assert.ok(!canonicalJson({ a: "café" }).includes("\\u00e9"));
   assert.equal(canonicalJson({ a: "\u{1D11E}" }), '{"a":"\u{1D11E}"}');
@@ -124,6 +133,74 @@ test("JCS itself accepts floats; the contracts reject them one layer up", async 
 test("key order and unset fields never change the digest", () => {
   assert.equal(canonicalJson({ a: 1, b: 2 }), canonicalJson({ b: 2, a: 1 }));
   assert.equal(canonicalJson({ a: 1, b: undefined }), canonicalJson({ a: 1 }));
+});
+
+test("the fixture would actually catch a regression to the old escaping encoder", async () => {
+  // A fixture of pure-ASCII documents cannot detect \u-escaping: the old
+  // ensure_ascii encoder and a correct JCS encoder produce byte-identical
+  // output on ASCII, so every recorded digest would still match. The contract
+  // documents were all ASCII until this was noticed, which meant the schema
+  // layer pinned nothing about the encoding.
+  //
+  // This test fails if someone "tidies" the non-ASCII out of the fixture.
+  //
+  // The floors below are CONSTANTS, never derived from the fixture. A floor
+  // computed from the list it guards lowers itself as the list shrinks and
+  // stays green all the way to one — and a floor set far below actual coverage
+  // has the same effect, because it never rises to meet reality. This one was
+  // `>= 1` against actual coverage of 3, which permitted a silent 3 -> 1
+  // erosion. One catching vector that nobody knows is the only one is strictly
+  // worse than zero: zero is at least unambiguous. Raising these is a
+  // deliberate edit; lowering one should be argued for in review.
+  const fixture = await golden();
+  const hasNonAscii = (value: unknown) => [...JSON.stringify(value)].some((c) => c.codePointAt(0)! > 0x7f);
+
+  const canonicalCovered = fixture.canonical_vectors.filter((entry) => hasNonAscii(entry.value));
+  assert.ok(
+    canonicalCovered.length >= MIN_CANONICAL_COVERAGE,
+    `canonical coverage fell to ${canonicalCovered.length}; at least ${MIN_CANONICAL_COVERAGE} vectors must carry non-ASCII (café, astral, key ordering)`,
+  );
+  const contractCovered = fixture.vectors.filter((entry) => hasNonAscii(entry.document));
+  assert.ok(
+    contractCovered.length >= MIN_CONTRACT_COVERAGE,
+    `contract coverage fell to ${contractCovered.length}; at least ${MIN_CONTRACT_COVERAGE} documents must carry non-ASCII, or the schema layer pins little about the encoder`,
+  );
+
+  // Prove the coverage is real rather than assumed: re-digest a covered
+  // document under the OLD escaping rule and require disagreement.
+  const escapeNonAscii = (json: string) =>
+    [...json]
+      .map((ch) => {
+        const c = ch.codePointAt(0)!;
+        if (c < 0x80) return ch;
+        if (c <= 0xffff) return `\\u${c.toString(16).padStart(4, "0")}`;
+        const x = c - 0x10000;
+        return `\\u${(0xd800 + (x >> 10)).toString(16)}\\u${(0xdc00 + (x & 0x3ff)).toString(16)}`;
+      })
+      .join("");
+  const oldEncode = (value: unknown): string => {
+    if (value === null) return "null";
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (typeof value === "number") return JSON.stringify(value);
+    if (typeof value === "string") return escapeNonAscii(JSON.stringify(value));
+    if (Array.isArray(value)) return `[${value.map(oldEncode).join(",")}]`;
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort();
+    return `{${keys.map((key) => `${escapeNonAscii(JSON.stringify(key))}:${oldEncode(record[key])}`).join(",")}}`;
+  };
+
+  // EVERY covered document must disagree, not just the first one. Checking
+  // only contractCovered[0] would let the other two be regenerated under a
+  // regressed encoder while the test stayed green.
+  for (const covered of contractCovered) {
+    assert.notEqual(
+      `sha256:${createHash("sha256").update(oldEncode(covered.document), "utf8").digest("hex")}`,
+      covered.canonical_digest,
+      `${covered.schema_version}: the old encoder produced the same digest, so this document pins nothing about the encoding`,
+    );
+  }
 });
 
 // --- Golden contract vectors -------------------------------------------------
