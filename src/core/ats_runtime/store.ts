@@ -60,11 +60,23 @@ export function absolutePath(value: unknown, name: string): string {
 export interface SupervisorStateV1 {
   readonly pid: number | null;
   readonly started_at: string | null;
+  /**
+   * An opaque, platform-supplied identity for the PROCESS START, not just the
+   * pid. A pid is reused freely by the OS, so `kill(pid, 0)` proves only that
+   * *some* process holds that number — signalling on that basis can terminate
+   * an unrelated program. Pairing the pid with its start identity makes
+   * reuse detectable: same number, different token, not our process.
+   *
+   * Null when the platform cannot supply one, in which case the supervisor
+   * falls back to requiring an authenticated instance handshake before it will
+   * terminate anything.
+   */
+  readonly start_token: string | null;
   readonly last_exit_code: number | null;
   readonly last_error: string | null;
 }
 
-const SUPERVISOR_FIELDS = ["pid", "started_at", "last_exit_code", "last_error"] as const;
+const SUPERVISOR_FIELDS = ["pid", "started_at", "start_token", "last_exit_code", "last_error"] as const;
 
 function supervisorState(value: unknown, name: string): SupervisorStateV1 {
   const raw = closed(value, name, SUPERVISOR_FIELDS);
@@ -75,9 +87,15 @@ function supervisorState(value: unknown, name: string): SupervisorStateV1 {
   if ((pid === null) !== (startedAt === null)) {
     fail(`${name} must record a pid and a start time together.`);
   }
+  const startToken = raw.start_token === null ? null : text(raw.start_token, `${name} start token`, 128);
+  // A start token without a pid identifies nothing.
+  if (startToken !== null && pid === null) {
+    fail(`${name} cannot carry a process start token without a pid.`);
+  }
   return Object.freeze({
     pid,
     started_at: startedAt,
+    start_token: startToken,
     last_exit_code: raw.last_exit_code === null ? null : integer(raw.last_exit_code, `${name} exit code`, -256, 256),
     // Bounded and redacted by the caller: a spawn failure message can carry a
     // full install path, which section 14 keeps out of diagnostics by default.
@@ -231,7 +249,7 @@ export function emptyRuntimeRecord(input: {
     runtime_instance_id: input.runtimeInstanceId,
     install_dir: input.installDir,
     installation: null,
-    supervisor: { pid: null, started_at: null, last_exit_code: null, last_error: null },
+    supervisor: { pid: null, started_at: null, start_token: null, last_exit_code: null, last_error: null },
     requested_mode: input.requestedMode,
     credential_file: null,
     updated_at: input.updatedAt,

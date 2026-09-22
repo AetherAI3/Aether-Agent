@@ -332,13 +332,127 @@ export function installationReceiptFrom(input: {
  * account-entitlement transport can land separately without reopening this
  * file. An implementation returns the manifest document and its detached
  * signature exactly as served.
+ *
+ * IT DOES NOT RETURN TRUST ANCHORS, and that omission is the security
+ * property. An earlier revision let `resolve()` hand back the anchors
+ * alongside the manifest it signed, which made the signature check circular: a
+ * compromised or spoofed source could generate its own keypair, sign its own
+ * malicious manifest, return the matching public key as an "anchor", and
+ * verify perfectly. A signature is only evidence when the verifying key
+ * arrives through a channel the attacker does not control, so anchors come
+ * from `RuntimeTrustAnchorProvider` below and never from this response.
  */
 export interface EntitledManifestSource {
   resolve(input: { agentVersion: string; platform: string; signal?: AbortSignal }): Promise<{
     manifest: unknown;
     signatureBase64: string;
-    anchors: readonly unknown[];
   }>;
+}
+
+/**
+ * Where verifying keys come from: a channel independent of whoever served the
+ * manifest. Pinned Agent configuration, OS or package trust, or a rotation
+ * document signed by an already-trusted root (see `verifyAnchorRotation`).
+ */
+export interface RuntimeTrustAnchorProvider {
+  anchors(): readonly RuntimeTrustAnchor[];
+}
+
+/**
+ * Anchors compiled into this Agent build.
+ *
+ * Deliberately EMPTY. No Aether ATS runtime signing key is published for this
+ * release, and inventing a placeholder would be worse than having none: a
+ * caller could not tell a real pin from a filler value. An empty set makes
+ * `verifyManifest` refuse with `no_trust_anchor`, which is the correct answer
+ * for a build that cannot yet establish provenance. Populating this is a
+ * deliberate, reviewable act — it is the root of trust for every runtime
+ * install.
+ */
+export const PINNED_TRUST_ANCHORS: readonly RuntimeTrustAnchor[] = Object.freeze([]);
+
+export function pinnedTrustAnchorProvider(): RuntimeTrustAnchorProvider {
+  return { anchors: () => PINNED_TRUST_ANCHORS };
+}
+
+/** A provider over an explicit set — used by tests and by pinned configuration. */
+export function fixedTrustAnchorProvider(anchors: readonly RuntimeTrustAnchor[]): RuntimeTrustAnchorProvider {
+  const frozen = Object.freeze([...anchors]);
+  return { anchors: () => frozen };
+}
+
+export const TRUST_ROTATION_SCHEMA = "aether.ats.runtime-trust-rotation/1" as const;
+
+/**
+ * A signed statement that the trusted anchor set has changed. Rotation has to
+ * exist — a pinned key that can never be replaced is a key that gets used long
+ * past its compromise — but it must chain to trust that already existed.
+ */
+export interface RuntimeTrustRotationV1 {
+  readonly schema_version: typeof TRUST_ROTATION_SCHEMA;
+  readonly issued_at: string;
+  readonly expires_at: string;
+  readonly anchors: readonly RuntimeTrustAnchor[];
+}
+
+const ROTATION_FIELDS = ["schema_version", "issued_at", "expires_at", "anchors"] as const;
+
+export function validateTrustRotation(value: unknown, name = "Runtime trust rotation"): RuntimeTrustRotationV1 {
+  const raw = closed(value, name, ROTATION_FIELDS);
+  const issuedAt = timestamp(raw.issued_at, `${name} issued at`);
+  const expiresAt = timestamp(raw.expires_at, `${name} expires at`);
+  if (Date.parse(expiresAt) <= Date.parse(issuedAt)) fail(`${name} must expire after it was issued.`);
+  const anchors = list(raw.anchors, `${name} anchors`, 8, validateTrustAnchor);
+  if (!anchors.length) fail(`${name} cannot rotate to an empty anchor set.`);
+  const ids = new Set(anchors.map(anchor => anchor.key_id));
+  if (ids.size !== anchors.length) fail(`${name} repeats a key id.`);
+  return Object.freeze({
+    schema_version: schemaTag(raw.schema_version, TRUST_ROTATION_SCHEMA, name) as typeof TRUST_ROTATION_SCHEMA,
+    issued_at: issuedAt,
+    expires_at: expiresAt,
+    anchors: Object.freeze(anchors),
+  });
+}
+
+/**
+ * Adopt a rotated anchor set, but only when the rotation document itself
+ * verifies against anchors that are ALREADY trusted. That chain is what keeps
+ * rotation from becoming the same circular hole as the manifest response: an
+ * attacker who can serve a rotation document still cannot sign one.
+ *
+ * Returns the new anchors, or null when the rotation is refused — refusing
+ * leaves the caller on its existing anchors rather than on none, because
+ * falling back to an empty set would turn a bad rotation into a denial of
+ * every future install.
+ */
+export function verifyAnchorRotation(input: {
+  rotation: unknown;
+  signatureBase64: string;
+  trusted: RuntimeTrustAnchorProvider;
+  now: number;
+}): readonly RuntimeTrustAnchor[] | null {
+  const current = input.trusted.anchors();
+  if (!current.length) return null;
+  const rotation = validateTrustRotation(input.rotation);
+  if (Date.parse(rotation.expires_at) <= input.now) return null;
+
+  const message = Buffer.from(canonicalJson(rotation as unknown), "utf8");
+  const signature = Buffer.from(input.signatureBase64, "base64");
+  if (signature.length !== 64) return null;
+
+  for (const anchor of current) {
+    try {
+      const key = createPublicKey({
+        key: Buffer.from(anchor.public_key_spki_base64, "base64"),
+        format: "der",
+        type: "spki",
+      });
+      if (verifyEd25519(null, message, key, signature)) return rotation.anchors;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 export const RUNTIME_ENTITLEMENT_UNAVAILABLE =
@@ -359,19 +473,20 @@ export function unavailableManifestSource(): EntitledManifestSource {
   };
 }
 
-/** Parse whatever a source returned, refusing anything malformed. */
+/**
+ * Parse whatever a source returned, refusing anything malformed. Note the
+ * absence of anchors: they are not the source's to supply.
+ */
 export function readManifestResponse(response: {
   manifest: unknown;
   signatureBase64: string;
-  anchors: readonly unknown[];
-}): { manifest: RuntimeManifestV1; signatureBase64: string; anchors: RuntimeTrustAnchor[] } {
+}): { manifest: RuntimeManifestV1; signatureBase64: string } {
   if (typeof response.signatureBase64 !== "string" || response.signatureBase64.length > 512) {
     fail("The runtime manifest signature is malformed.");
   }
   return {
     manifest: validateRuntimeManifest(response.manifest),
     signatureBase64: response.signatureBase64,
-    anchors: list(response.anchors, "Runtime trust anchors", 8, validateTrustAnchor),
   };
 }
 

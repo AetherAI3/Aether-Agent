@@ -1,7 +1,7 @@
-// PR 2.2 — entitled-manifest verification, installation, supervision and the
-// ATS doctor.
+// PR 2.2 — manifest verification, transactional install, supervision, rollback
+// and the ATS doctor.
 //
-// Every signing key here is generated in-process, and nothing reaches the
+// Every signing key here is generated in-process and nothing reaches the
 // network: `manifest.ts` is deliberately I/O-free so the security decision can
 // be tested exhaustively, and `install.ts` takes its fetcher and extractor as
 // injected seams for the same reason.
@@ -9,20 +9,32 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign as signEd25519, type KeyObject } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   canonicalManifestBytes,
+  fixedTrustAnchorProvider,
   installationReceiptFrom,
+  PINNED_TRUST_ANCHORS,
   validateRuntimeManifest,
+  verifyAnchorRotation,
   verifyArchive,
   verifyManifest,
   type RuntimeManifestV1,
   type RuntimeTrustAnchor,
 } from "../src/core/ats_runtime/manifest.js";
 import { adoptExistingInstall, installRuntime } from "../src/core/ats_runtime/install.js";
+import { verifyExtractedTree } from "../src/core/ats_runtime/archive_guard.js";
+import {
+  computeTreeDigest,
+  readActivePointer,
+  readSlotReceipt,
+  recoverActiveSlot,
+  slotDir,
+  slotReceiptPath,
+} from "../src/core/ats_runtime/slots.js";
 import {
   emptyRuntimeRecord,
   readRuntimeRecord,
@@ -31,6 +43,7 @@ import {
   type RuntimeRecordV1,
 } from "../src/core/ats_runtime/store.js";
 import {
+  processOwnership,
   rollbackRuntime,
   runtimeStatus,
   startRuntime,
@@ -51,21 +64,18 @@ async function temporary(t: TestContext): Promise<string> {
   return root;
 }
 
-function keypair(): { anchor: RuntimeTrustAnchor; privateKey: KeyObject } {
+function keypair(id = "anchor_test"): { anchor: RuntimeTrustAnchor; privateKey: KeyObject } {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   return {
-    anchor: {
-      key_id: "anchor_test",
-      public_key_spki_base64: publicKey.export({ format: "der", type: "spki" }).toString("base64"),
-    },
+    anchor: { key_id: id, public_key_spki_base64: publicKey.export({ format: "der", type: "spki" }).toString("base64") },
     privateKey,
   };
 }
 
-function manifestFor(bytes: Uint8Array, platform = "linux-x64"): RuntimeManifestV1 {
+function manifestFor(bytes: Uint8Array, platform = "linux-x64", runtimeVersion = "0.4.0"): RuntimeManifestV1 {
   return validateRuntimeManifest({
     schema_version: "aether.ats.runtime-manifest/1",
-    runtime_version: "0.4.0",
+    runtime_version: runtimeVersion,
     agent_compatibility: { min: "0.4.0", max: "0.5.0" },
     issued_at: "2026-09-22T00:00:00Z",
     expires_at: "2026-10-22T00:00:00Z",
@@ -85,25 +95,41 @@ function signManifest(manifest: RuntimeManifestV1, privateKey: KeyObject): strin
 
 // ---------------------------------------------------------------- manifest
 
-test("a manifest with no configured trust anchor is refused, not trusted on its digest", () => {
+test("the build ships no pinned trust anchor, so verification refuses by default", () => {
+  assert.equal(PINNED_TRUST_ANCHORS.length, 0);
   const manifest = manifestFor(Buffer.from("runtime archive"));
   const verdict = verifyManifest({
-    manifest, signatureBase64: "", anchors: [], agentVersion: AGENT_VERSION, platform: "linux-x64", now: NOW,
+    manifest, signatureBase64: "", anchors: PINNED_TRUST_ANCHORS,
+    agentVersion: AGENT_VERSION, platform: "linux-x64", now: NOW,
+  });
+  assert.equal(verdict.failure, "no_trust_anchor");
+});
+
+// The blocker: a manifest source must not be able to supply the key that
+// verifies its own manifest.
+test("a key the manifest source could have minted does not verify against pinned anchors", () => {
+  const manifest = manifestFor(Buffer.from("runtime archive"));
+  const attacker = keypair("anchor_attacker");
+  const pinned = keypair("anchor_pinned");
+
+  // The attacker signs its own manifest perfectly. Under the old design it
+  // also returned `attacker.anchor` and this verified.
+  const verdict = verifyManifest({
+    manifest,
+    signatureBase64: signManifest(manifest, attacker.privateKey),
+    anchors: fixedTrustAnchorProvider([pinned.anchor]).anchors(),
+    agentVersion: AGENT_VERSION, platform: "linux-x64", now: NOW,
   });
   assert.equal(verdict.ok, false);
-  assert.equal(verdict.failure, "no_trust_anchor");
+  assert.equal(verdict.failure, "bad_signature");
 });
 
 test("a correctly signed manifest verifies and names the artifact for this platform", () => {
   const manifest = manifestFor(Buffer.from("runtime archive"));
   const { anchor, privateKey } = keypair();
   const verdict = verifyManifest({
-    manifest,
-    signatureBase64: signManifest(manifest, privateKey),
-    anchors: [anchor],
-    agentVersion: AGENT_VERSION,
-    platform: "linux-x64",
-    now: NOW,
+    manifest, signatureBase64: signManifest(manifest, privateKey), anchors: [anchor],
+    agentVersion: AGENT_VERSION, platform: "linux-x64", now: NOW,
   });
   assert.equal(verdict.ok, true);
   assert.equal(verdict.key_id, "anchor_test");
@@ -114,25 +140,11 @@ test("a manifest edited after signing fails verification", () => {
   const manifest = manifestFor(Buffer.from("runtime archive"));
   const { anchor, privateKey } = keypair();
   const signature = signManifest(manifest, privateKey);
-
   const tampered = validateRuntimeManifest({ ...manifest, runtime_version: "9.9.9" });
-  const verdict = verifyManifest({
+  assert.equal(verifyManifest({
     manifest: tampered, signatureBase64: signature, anchors: [anchor],
     agentVersion: AGENT_VERSION, platform: "linux-x64", now: NOW,
-  });
-  assert.equal(verdict.ok, false);
-  assert.equal(verdict.failure, "bad_signature");
-});
-
-test("a signature from a key outside the anchor set is refused", () => {
-  const manifest = manifestFor(Buffer.from("runtime archive"));
-  const trusted = keypair();
-  const attacker = keypair();
-  const verdict = verifyManifest({
-    manifest, signatureBase64: signManifest(manifest, attacker.privateKey), anchors: [trusted.anchor],
-    agentVersion: AGENT_VERSION, platform: "linux-x64", now: NOW,
-  });
-  assert.equal(verdict.failure, "bad_signature");
+  }).failure, "bad_signature");
 });
 
 test("expiry, compatibility and platform are each refused with their own reason", () => {
@@ -140,31 +152,23 @@ test("expiry, compatibility and platform are each refused with their own reason"
   const { anchor, privateKey } = keypair();
   const base = { manifest, signatureBase64: signManifest(manifest, privateKey), anchors: [anchor], platform: "linux-x64" };
 
-  assert.equal(
-    verifyManifest({ ...base, agentVersion: AGENT_VERSION, now: Date.parse("2026-11-01T00:00:00Z") }).failure,
-    "manifest_expired",
-  );
+  assert.equal(verifyManifest({ ...base, agentVersion: AGENT_VERSION, now: Date.parse("2026-11-01T00:00:00Z") }).failure, "manifest_expired");
   assert.equal(verifyManifest({ ...base, agentVersion: "0.3.0", now: NOW }).failure, "agent_incompatible");
-  assert.equal(
-    verifyManifest({ ...base, platform: "win32-x64", agentVersion: AGENT_VERSION, now: NOW }).failure,
-    "platform_unsupported",
-  );
+  assert.equal(verifyManifest({ ...base, platform: "win32-x64", agentVersion: AGENT_VERSION, now: NOW }).failure, "platform_unsupported");
 });
 
 test("a pre-release agent build stays inside its compatibility window", () => {
   const manifest = manifestFor(Buffer.from("runtime archive"));
   const { anchor, privateKey } = keypair();
-  const verdict = verifyManifest({
+  assert.equal(verifyManifest({
     manifest, signatureBase64: signManifest(manifest, privateKey), anchors: [anchor],
     agentVersion: "0.4.0-rc.1", platform: "linux-x64", now: NOW,
-  });
-  assert.equal(verdict.ok, true);
+  }).ok, true);
 });
 
 test("archive bytes are checked for size and digest separately", () => {
   const bytes = Buffer.from("runtime archive");
   const artifact = manifestFor(bytes).artifacts[0]!;
-
   assert.equal(verifyArchive(bytes, artifact).ok, true);
   assert.equal(verifyArchive(Buffer.from("runtime archiv"), artifact).failure, "size_mismatch");
   assert.equal(verifyArchive(Buffer.from("runtime archivE"), artifact).failure, "digest_mismatch");
@@ -173,20 +177,73 @@ test("archive bytes are checked for size and digest separately", () => {
 test("no installation receipt can be built from a refused verdict", () => {
   const manifest = manifestFor(Buffer.from("runtime archive"));
   const refused = { ok: false, failure: "bad_signature" as const, reason: "no", key_id: null, artifact: null };
-  assert.throws(
-    () => installationReceiptFrom({
-      manifestVerdict: refused, archiveVerdict: refused, manifest,
-      installationId: "inst_test", installedAt: "2026-09-22T12:00:00Z",
-    }),
-    /cannot be written for an unverified runtime/,
-  );
+  assert.throws(() => installationReceiptFrom({
+    manifestVerdict: refused, archiveVerdict: refused, manifest,
+    installationId: "inst_test", installedAt: "2026-09-22T12:00:00Z",
+  }), /cannot be written for an unverified runtime/);
 });
+
+test("anchor rotation must chain to an already-trusted key", () => {
+  const rooted = keypair("anchor_root");
+  const next = keypair("anchor_next");
+  const rotation = {
+    schema_version: "aether.ats.runtime-trust-rotation/1",
+    issued_at: "2026-09-22T00:00:00Z",
+    expires_at: "2026-12-22T00:00:00Z",
+    anchors: [next.anchor],
+  };
+  const message = Buffer.from(JSON.stringify(rotation), "utf8");
+  void message;
+
+  // Signed by the existing root: accepted.
+  const signedByRoot = signEd25519(
+    null,
+    Buffer.from(canonicalRotationBytes(rotation), "utf8"),
+    rooted.privateKey,
+  ).toString("base64");
+  const adopted = verifyAnchorRotation({
+    rotation, signatureBase64: signedByRoot, trusted: fixedTrustAnchorProvider([rooted.anchor]), now: NOW,
+  });
+  assert.deepEqual(adopted?.map(a => a.key_id), ["anchor_next"]);
+
+  // Self-signed by the key it is trying to introduce: refused.
+  const selfSigned = signEd25519(
+    null,
+    Buffer.from(canonicalRotationBytes(rotation), "utf8"),
+    next.privateKey,
+  ).toString("base64");
+  assert.equal(verifyAnchorRotation({
+    rotation, signatureBase64: selfSigned, trusted: fixedTrustAnchorProvider([rooted.anchor]), now: NOW,
+  }), null);
+
+  // With nothing already trusted there is no chain to extend.
+  assert.equal(verifyAnchorRotation({
+    rotation, signatureBase64: signedByRoot, trusted: fixedTrustAnchorProvider([]), now: NOW,
+  }), null);
+});
+
+/** Mirrors the canonical encoding verifyAnchorRotation signs over. */
+function canonicalRotationBytes(rotation: Record<string, unknown>): string {
+  const sortDeep = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sortDeep);
+    if (value && typeof value === "object") {
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+        out[key] = sortDeep((value as Record<string, unknown>)[key]);
+      }
+      return out;
+    }
+    return value;
+  };
+  return JSON.stringify(sortDeep(rotation));
+}
 
 // ---------------------------------------------------------------- install
 
 function installDeps(bytes: Uint8Array, manifest: RuntimeManifestV1, anchor: RuntimeTrustAnchor, signature: string) {
   return {
-    source: { resolve: async () => ({ manifest, signatureBase64: signature, anchors: [anchor] }) },
+    source: { resolve: async () => ({ manifest, signatureBase64: signature }) },
+    trustAnchors: fixedTrustAnchorProvider([anchor]),
     fetcher: { fetch: async () => bytes },
     extractor: {
       extract: async ({ destination }: { bytes: Uint8Array; destination: string }) => {
@@ -198,12 +255,23 @@ function installDeps(bytes: Uint8Array, manifest: RuntimeManifestV1, anchor: Run
   };
 }
 
+async function install(root: string, bytes = Buffer.from("runtime archive"), version = "0.4.0") {
+  const manifest = manifestFor(bytes, "linux-x64", version);
+  const { anchor, privateKey } = keypair();
+  return installRuntime({
+    recordPath: join(root, "runtime.json"),
+    installRoot: join(root, "runtime"),
+    agentVersion: AGENT_VERSION,
+    requestedMode: "paper",
+    platform: "linux-x64",
+  }, installDeps(bytes, manifest, anchor, signManifest(manifest, privateKey)));
+}
+
 test("install refuses honestly when no entitled source is configured", async t => {
   const root = await temporary(t);
   const outcome = await installRuntime({
     recordPath: join(root, "runtime.json"),
-    installDir: join(root, "runtime"),
-    previousDir: join(root, "runtime.previous"),
+    installRoot: join(root, "runtime"),
     agentVersion: AGENT_VERSION,
     requestedMode: "observe",
     platform: "linux-x64",
@@ -213,30 +281,19 @@ test("install refuses honestly when no entitled source is configured", async t =
   assert.equal(await readRuntimeRecord(join(root, "runtime.json")), null);
 });
 
-test("a verified install writes a provenance receipt and a 0600 credential", async t => {
+test("a verified install commits a slot, a pointer and a 0600 credential", async t => {
   const root = await temporary(t);
-  const bytes = Buffer.from("runtime archive");
-  const manifest = manifestFor(bytes);
-  const { anchor, privateKey } = keypair();
-
-  const outcome = await installRuntime({
-    recordPath: join(root, "runtime.json"),
-    installDir: join(root, "runtime"),
-    previousDir: join(root, "runtime.previous"),
-    agentVersion: AGENT_VERSION,
-    requestedMode: "observe",
-    platform: "linux-x64",
-  }, installDeps(bytes, manifest, anchor, signManifest(manifest, privateKey)));
-
+  const outcome = await install(root);
   assert.equal(outcome.ok, true);
-  const record = await readRuntimeRecord(join(root, "runtime.json"));
-  assert.ok(record?.installation);
-  assert.equal(record.installation.provenance_verified, true);
-  assert.equal(record.installation.runtime_version, "0.4.0");
-  assert.equal(record.installation.artifact_sha256, createHash("sha256").update(bytes).digest("hex"));
 
-  // The credential is a path in the record and a secret only on disk.
-  assert.ok(record.credential_file);
+  const pointer = await readActivePointer(join(root, "runtime"));
+  assert.equal(pointer?.slot, "a");
+  const receipt = await readSlotReceipt(join(root, "runtime"), "a");
+  assert.equal(receipt?.installation.provenance_verified, true);
+  assert.equal(receipt?.tree_sha256, pointer?.tree_sha256);
+
+  const record = await readRuntimeRecord(join(root, "runtime.json"));
+  assert.ok(record?.credential_file);
   const rawRecord = await readFile(join(root, "runtime.json"), "utf8");
   const credential = (await readFile(record.credential_file, "utf8")).trim();
   assert.match(credential, /^[0-9a-f]{64}$/);
@@ -244,6 +301,18 @@ test("a verified install writes a provenance receipt and a 0600 credential", asy
   if (process.platform !== "win32") {
     assert.equal((await stat(record.credential_file)).mode & 0o777, 0o600);
   }
+});
+
+test("a second install lands in the other slot and leaves the first intact", async t => {
+  const root = await temporary(t);
+  await install(root, Buffer.from("runtime archive"), "0.4.0");
+  await install(root, Buffer.from("runtime archive two"), "0.4.1");
+
+  const pointer = await readActivePointer(join(root, "runtime"));
+  assert.equal(pointer?.slot, "b");
+  // Both receipts survive — that is what makes rollback non-destructive.
+  assert.equal((await readSlotReceipt(join(root, "runtime"), "a"))?.installation.runtime_version, "0.4.0");
+  assert.equal((await readSlotReceipt(join(root, "runtime"), "b"))?.installation.runtime_version, "0.4.1");
 });
 
 test("a tampered archive is refused and nothing is installed", async t => {
@@ -255,8 +324,7 @@ test("a tampered archive is refused and nothing is installed", async t => {
 
   const outcome = await installRuntime({
     recordPath: join(root, "runtime.json"),
-    installDir: join(root, "runtime"),
-    previousDir: join(root, "runtime.previous"),
+    installRoot: join(root, "runtime"),
     agentVersion: AGENT_VERSION,
     requestedMode: "observe",
     platform: "linux-x64",
@@ -267,13 +335,63 @@ test("a tampered archive is refused and nothing is installed", async t => {
   assert.equal(await readRuntimeRecord(join(root, "runtime.json")), null);
 });
 
+test("an extractor that escapes its slot is caught and the slot is discarded", async t => {
+  if (process.platform === "win32") {
+    t.skip("Windows symlink creation needs elevation");
+    return;
+  }
+  const root = await temporary(t);
+  const bytes = Buffer.from("runtime archive");
+  const manifest = manifestFor(bytes);
+  const { anchor, privateKey } = keypair();
+  const deps = installDeps(bytes, manifest, anchor, signManifest(manifest, privateKey));
+
+  const outcome = await installRuntime({
+    recordPath: join(root, "runtime.json"),
+    installRoot: join(root, "runtime"),
+    agentVersion: AGENT_VERSION,
+    requestedMode: "observe",
+    platform: "linux-x64",
+  }, {
+    ...deps,
+    extractor: {
+      extract: async ({ destination }: { bytes: Uint8Array; destination: string }) => {
+        await mkdir(join(destination, "bin"), { recursive: true });
+        await symlink("/etc/passwd", join(destination, "bin", "escape"));
+      },
+    },
+  });
+
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.failure, "symlink");
+  // No pointer, no receipt, and the staged bytes are gone.
+  assert.equal(await readActivePointer(join(root, "runtime")), null);
+  await assert.rejects(stat(slotDir(join(root, "runtime"), "a")));
+});
+
+test("the extraction guard rejects links, devices and oversize trees", async t => {
+  const root = await temporary(t);
+  const clean = join(root, "clean");
+  await mkdir(join(clean, "bin"), { recursive: true });
+  await writeFile(join(clean, "bin", "ats-runtime"), "x");
+  assert.equal((await verifyExtractedTree(clean)).ok, true);
+
+  assert.equal(
+    (await verifyExtractedTree(clean, { maxEntries: 200_000, maxTotalBytes: 0, maxPathLength: 1024 })).violation,
+    "too_large",
+  );
+  assert.equal(
+    (await verifyExtractedTree(clean, { maxEntries: 1, maxTotalBytes: 1 << 30, maxPathLength: 1024 })).violation,
+    "too_many_entries",
+  );
+});
+
 test("adopting an existing directory records no provenance receipt", async t => {
   const root = await temporary(t);
-  const installDir = join(root, "existing");
-  await mkdir(installDir, { recursive: true });
-
+  const installRoot = join(root, "existing");
+  await mkdir(installRoot, { recursive: true });
   const outcome = await adoptExistingInstall(
-    { recordPath: join(root, "runtime.json"), installDir, requestedMode: "observe" },
+    { recordPath: join(root, "runtime.json"), installRoot, requestedMode: "observe" },
     { now: clock },
   );
   assert.equal(outcome.ok, true);
@@ -281,27 +399,59 @@ test("adopting an existing directory records no provenance receipt", async t => 
   assert.match(outcome.reason ?? "", /provenance is unverified/);
 });
 
-// ---------------------------------------------------------------- supervisor
+// ------------------------------------------------------------- transaction
 
-async function installedRecord(root: string): Promise<{ path: string; record: RuntimeRecordV1 }> {
-  const bytes = Buffer.from("runtime archive");
-  const manifest = manifestFor(bytes);
-  const { anchor, privateKey } = keypair();
-  const path = join(root, "runtime.json");
-  const outcome = await installRuntime({
-    recordPath: path,
-    installDir: join(root, "runtime"),
-    previousDir: join(root, "runtime.previous"),
-    agentVersion: AGENT_VERSION,
-    requestedMode: "paper",
-    platform: "linux-x64",
-  }, installDeps(bytes, manifest, anchor, signManifest(manifest, privateKey)));
-  assert.ok(outcome.record);
-  return { path, record: outcome.record };
-}
+test("an install interrupted before the pointer switch recovers the previous slot", async t => {
+  const root = await temporary(t);
+  await install(root, Buffer.from("runtime archive"), "0.4.0");
+
+  // Simulate a crash after slot b's receipt was written but before the pointer
+  // moved: forge a receipt in b while the pointer still names a.
+  const installRoot = join(root, "runtime");
+  const slotB = slotDir(installRoot, "b");
+  await mkdir(join(slotB, "bin"), { recursive: true });
+  await writeFile(join(slotB, "bin", "ats-runtime"), "#!/bin/sh\n");
+
+  const resolution = await recoverActiveSlot(installRoot, "2026-09-22T12:00:00Z");
+  assert.equal(resolution?.slot, "a", "the committed slot is still the live one");
+  assert.equal(resolution?.recovered, false);
+  assert.equal(resolution?.receipt.installation.runtime_version, "0.4.0");
+});
+
+test("a pointer naming a slot with no receipt falls back to the consistent slot", async t => {
+  const root = await temporary(t);
+  await install(root, Buffer.from("runtime archive"), "0.4.0");
+  await install(root, Buffer.from("runtime archive two"), "0.4.1");
+  const installRoot = join(root, "runtime");
+
+  // Destroy the live slot's receipt: the commit looks unfinished.
+  await rm(slotReceiptPath(installRoot, "b"), { force: true });
+
+  const resolution = await recoverActiveSlot(installRoot, "2026-09-22T12:00:00Z");
+  assert.equal(resolution?.slot, "a");
+  assert.equal(resolution?.recovered, true);
+  assert.equal((await readActivePointer(installRoot))?.slot, "a", "the pointer is repaired on disk");
+});
+
+test("a tree digest changes when any installed byte changes", async t => {
+  const root = await temporary(t);
+  await install(root);
+  const dir = slotDir(join(root, "runtime"), "a");
+  const before = await computeTreeDigest(dir);
+  await writeFile(join(dir, "bin", "ats-runtime"), "#!/bin/sh\necho tampered\n");
+  assert.notEqual(await computeTreeDigest(dir), before);
+});
+
+// ---------------------------------------------------------------- supervisor
 
 function fakeChild(pid: number): SupervisedChild {
   return { pid, kill: () => true, unref: () => {} };
+}
+
+async function installedRecord(root: string): Promise<{ path: string; record: RuntimeRecordV1 }> {
+  const outcome = await install(root);
+  assert.ok(outcome.record);
+  return { path: join(root, "runtime.json"), record: outcome.record };
 }
 
 test("the runtime cannot start without a verified installation", async t => {
@@ -312,43 +462,120 @@ test("the runtime cannot start without a verified installation", async t => {
     requestedMode: "observe", updatedAt: "2026-09-22T12:00:00Z",
   });
   await writeRuntimeRecord(path, record);
-
   const result = await startRuntime(path, record, { now: clock, spawn: () => fakeChild(4242) });
   assert.equal(result.changed, false);
   assert.match(result.reason ?? "", /No verified ATS runtime is installed/);
 });
 
-test("starting records a pid and stopping clears it", async t => {
+test("the runtime refuses to launch bytes that do not match its receipt", async t => {
   const root = await temporary(t);
   const { path, record } = await installedRecord(root);
-  const deps: SupervisorDeps = { now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, terminate: () => {} };
+  // Tamper with the installed tree after the receipt was committed.
+  await writeFile(join(slotDir(join(root, "runtime"), "a"), "bin", "ats-runtime"), "#!/bin/sh\necho tampered\n");
+
+  const result = await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => false, startToken: async () => "tok-1",
+  });
+  assert.equal(result.changed, false);
+  assert.match(result.reason ?? "", /does not match its installation receipt/);
+});
+
+test("starting records a pid and a start token, and stopping clears them", async t => {
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  let alive = false;
+  const deps: SupervisorDeps = {
+    now: clock,
+    spawn: () => { alive = true; return fakeChild(4242); },
+    pidAlive: () => alive,
+    startToken: async () => "tok-1",
+    terminate: () => { alive = false; },
+    waitMs: 200,
+  };
 
   const started = await startRuntime(path, record, deps);
   assert.equal(started.record.supervisor.pid, 4242);
+  assert.equal(started.record.supervisor.start_token, "tok-1");
 
   const stopped = await stopRuntime(path, started.record, deps);
   assert.equal(stopped.record.supervisor.pid, null);
+  assert.equal(stopped.record.supervisor.start_token, null);
   assert.equal((await readRuntimeRecord(path))?.supervisor.pid, null);
+});
+
+// The blocker: a recycled pid must never be signalled.
+test("a recycled pid is disowned and released, never terminated", async t => {
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  let terminated = 0;
+  const started = await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, startToken: async () => "tok-1",
+  });
+  assert.equal(started.record.supervisor.start_token, "tok-1");
+
+  // Same pid, different process: the OS reused the number.
+  const foreignDeps: SupervisorDeps = {
+    now: clock, pidAlive: () => true, startToken: async () => "tok-2",
+    terminate: () => { terminated += 1; }, waitMs: 200,
+  };
+  assert.equal(await processOwnership(started.record, foreignDeps), "foreign");
+
+  const stopped = await stopRuntime(path, started.record, foreignDeps);
+  assert.equal(terminated, 0, "an unowned process must not be signalled");
+  assert.equal(stopped.record.supervisor.pid, null, "but the stale pid is released");
+  assert.match(stopped.reason ?? "", /no longer belongs to this runtime/);
+});
+
+test("a termination failure is reported, not swallowed", async t => {
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  const started = await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, startToken: async () => "tok-1",
+  });
+
+  const stopped = await stopRuntime(path, started.record, {
+    now: clock, pidAlive: () => true, startToken: async () => "tok-1", waitMs: 100,
+    terminate: () => { const error = new Error("denied") as NodeJS.ErrnoException; error.code = "EPERM"; throw error; },
+  });
+  assert.equal(stopped.changed, false);
+  assert.match(stopped.reason ?? "", /could not be stopped/);
+  assert.equal(stopped.record.supervisor.pid, 4242, "the pid stays recorded when the stop failed");
+});
+
+test("a process that does not exit keeps its pid recorded", async t => {
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  const started = await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, startToken: async () => "tok-1",
+  });
+  const stopped = await stopRuntime(path, started.record, {
+    now: clock, pidAlive: () => true, startToken: async () => "tok-1", terminate: () => {}, waitMs: 120,
+  });
+  assert.equal(stopped.changed, false);
+  assert.match(stopped.reason ?? "", /did not exit/);
+  assert.equal(stopped.record.supervisor.pid, 4242);
 });
 
 test("status is offline whenever the runtime cannot be observed", async t => {
   const root = await temporary(t);
   const { path, record } = await installedRecord(root);
-  const started = await startRuntime(path, record, { now: clock, spawn: () => fakeChild(4242), pidAlive: () => true });
+  const started = await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, startToken: async () => "tok-1",
+  });
 
-  // Dead process: the stored pid is a claim, not evidence.
   const dead = await runtimeStatus(started.record, { now: clock, pidAlive: () => false });
   assert.equal(dead.effective_mode, "offline");
   assert.match(dead.effective_reason, /not running/);
 
-  // Alive but no channel — still offline, never the requested mode.
-  const noChannel = await runtimeStatus(started.record, { now: clock, pidAlive: () => true });
+  const noChannel = await runtimeStatus(started.record, {
+    now: clock, pidAlive: () => true, startToken: async () => "tok-1",
+  });
   assert.equal(noChannel.effective_mode, "offline");
   assert.equal(started.record.requested_mode, "paper");
 
-  // Alive but the probe throws.
   const broken = await runtimeStatus(started.record, {
-    now: clock, pidAlive: () => true, probe: async () => { throw new Error("socket /tmp/secret failed"); },
+    now: clock, pidAlive: () => true, startToken: async () => "tok-1",
+    probe: async () => { throw new Error("socket /tmp/secret failed"); },
   });
   assert.equal(broken.effective_mode, "offline");
   assert.ok(!broken.effective_reason.includes("/tmp/secret"), "probe failures must not leak paths");
@@ -357,9 +584,10 @@ test("status is offline whenever the runtime cannot be observed", async t => {
 test("a runtime-authored snapshot is honoured, and one from another instance is not", async t => {
   const root = await temporary(t);
   const { path, record } = await installedRecord(root);
-  const started = await startRuntime(path, record, { now: clock, spawn: () => fakeChild(4242), pidAlive: () => true });
+  const started = await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, startToken: async () => "tok-1",
+  });
   const instance = started.record.runtime_instance_id;
-
   const reply = (id: string): Record<string, unknown> => ({
     schema_version: "aether.ats.runtime-capabilities/1",
     runtime_instance_id: id,
@@ -373,52 +601,59 @@ test("a runtime-authored snapshot is honoured, and one from another instance is 
     effective_mode: "observe",
     effective_reason: "No execution grant is attached.",
   });
+  const base: SupervisorDeps = { now: clock, pidAlive: () => true, startToken: async () => "tok-1" };
 
-  const honoured = await runtimeStatus(started.record, {
-    now: clock, pidAlive: () => true, probe: async () => reply(instance),
-  });
+  const honoured = await runtimeStatus(started.record, { ...base, probe: async () => reply(instance) });
   assert.equal(honoured.state, "healthy");
   assert.equal(honoured.effective_mode, "observe");
 
-  const foreign = await runtimeStatus(started.record, {
-    now: clock, pidAlive: () => true, probe: async () => reply("rt_someoneelse"),
-  });
+  const foreign = await runtimeStatus(started.record, { ...base, probe: async () => reply("rt_someoneelse") });
   assert.equal(foreign.effective_mode, "offline");
 });
 
-test("rollback restores the previous tree and clears the receipt", async t => {
+// The blocker: rollback must leave a usable runtime on both sides.
+test("rollback switches slots, keeps both receipts, and stays startable", async t => {
   const root = await temporary(t);
-  const first = await installedRecord(root);
-  await writeFile(join(root, "runtime", "marker"), "v1");
+  await install(root, Buffer.from("runtime archive"), "0.4.0");
+  await install(root, Buffer.from("runtime archive two"), "0.4.1");
+  const path = join(root, "runtime.json");
+  const installRoot = join(root, "runtime");
 
-  // A second install parks v1 as runtime.previous.
-  const bytes = Buffer.from("runtime archive two");
-  const manifest = manifestFor(bytes);
-  const { anchor, privateKey } = keypair();
-  await installRuntime({
-    recordPath: first.path,
-    installDir: join(root, "runtime"),
-    previousDir: join(root, "runtime.previous"),
-    agentVersion: AGENT_VERSION,
-    requestedMode: "paper",
-    platform: "linux-x64",
-  }, installDeps(bytes, manifest, anchor, signManifest(manifest, privateKey)));
-  await assert.rejects(stat(join(root, "runtime", "marker")));
-
-  const current = await readRuntimeRecord(first.path);
+  const current = await readRuntimeRecord(path);
   assert.ok(current);
-  const rolled = await rollbackRuntime(first.path, current, join(root, "runtime.previous"), {
-    now: clock, terminate: () => {},
-  });
+  assert.equal(current.installation?.runtime_version, "0.4.1");
+
+  const rolled = await rollbackRuntime(path, current, { now: clock, terminate: () => {}, waitMs: 100 });
   assert.equal(rolled.changed, true);
-  assert.equal(rolled.record.installation, null, "a rolled-back runtime must re-verify before starting");
-  assert.equal(await readFile(join(root, "runtime", "marker"), "utf8"), "v1");
+  // The receipt is the rolled-back version's own — not null, which is what
+  // used to leave the restored runtime unstartable.
+  assert.equal(rolled.record.installation?.runtime_version, "0.4.0");
+  assert.equal((await readActivePointer(installRoot))?.slot, "a");
+  // Both versions are still on disk, so the rollback can be rolled back.
+  assert.equal((await readSlotReceipt(installRoot, "a"))?.installation.runtime_version, "0.4.0");
+  assert.equal((await readSlotReceipt(installRoot, "b"))?.installation.runtime_version, "0.4.1");
+});
+
+test("rollback with only one slot installed refuses", async t => {
+  const root = await temporary(t);
+  const { path, record } = await installedRecord(root);
+  const rolled = await rollbackRuntime(path, record, { now: clock, terminate: () => {}, waitMs: 100 });
+  assert.equal(rolled.changed, false);
+  assert.match(rolled.reason ?? "", /No previous ATS runtime/);
 });
 
 test("an account switch stops the runtime and revokes its credential", async t => {
   const root = await temporary(t);
   const { path, record } = await installedRecord(root);
-  const deps: SupervisorDeps = { now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, terminate: () => {} };
+  let alive = false;
+  const deps: SupervisorDeps = {
+    now: clock,
+    spawn: () => { alive = true; return fakeChild(4242); },
+    pidAlive: () => alive,
+    startToken: async () => "tok-1",
+    terminate: () => { alive = false; },
+    waitMs: 200,
+  };
   const started = await startRuntime(path, record, deps);
   const credential = started.record.credential_file;
   assert.ok(credential);
@@ -472,15 +707,18 @@ test("the doctor reports an absent runtime as not ready", async t => {
     dashboardStatePath: join(root, "dashboard.json"),
     now: clock,
   });
-  assert.equal(report.ready, false);
+  assert.equal(report.readiness.runtime_ready, false);
   assert.equal(report.axes.find(axis => axis.name === "Runtime")?.state, "unavailable");
-  assert.match(renderAtsDoctorReport(report), /ATS not ready/);
+  assert.match(renderAtsDoctorReport(report), /not ready/);
 });
 
-test("zero compiled strategies is reported honestly without failing the install", async t => {
+// The blocker: one boolean cannot answer five different questions.
+test("readiness is scoped, so a healthy runtime with no strategies is not 'ready'", async t => {
   const root = await temporary(t);
   const { path, record } = await installedRecord(root);
-  await startRuntime(path, record, { now: clock, spawn: () => fakeChild(4242), pidAlive: () => true });
+  await startRuntime(path, record, {
+    now: clock, spawn: () => fakeChild(4242), pidAlive: () => true, startToken: async () => "tok-1",
+  });
   const instance = (await readRuntimeRecord(path))!.runtime_instance_id;
 
   const report = await buildAtsDoctorReport({
@@ -491,6 +729,7 @@ test("zero compiled strategies is reported honestly without failing the install"
     now: clock,
   }, {
     pidAlive: () => true,
+    startToken: async () => "tok-1",
     probe: async () => ({
       schema_version: "aether.ats.runtime-capabilities/1",
       runtime_instance_id: instance,
@@ -506,10 +745,12 @@ test("zero compiled strategies is reported honestly without failing the install"
     }),
   });
 
-  const strategies = report.axes.find(axis => axis.name === "Strategies");
-  assert.equal(strategies?.state, "incomplete");
-  assert.match(strategies?.detail ?? "", /0 compiled/);
-  // Strategy readiness does not gate: section 5 permits finishing setup here.
-  assert.equal(report.ready, true);
+  assert.equal(report.readiness.runtime_ready, true);
+  // Each of these is false for its own reason, and none of them is hidden
+  // behind the runtime being healthy.
+  assert.equal(report.readiness.strategy_ready, false);
+  assert.equal(report.readiness.paper_ready, false);
+  assert.equal(report.readiness.broker_live_ready, false);
+  assert.match(report.axes.find(axis => axis.name === "Strategies")?.detail ?? "", /0 compiled/);
   assert.match(report.axes.find(axis => axis.name === "Execution")?.detail ?? "", /Requested paper; effective observe/);
 });

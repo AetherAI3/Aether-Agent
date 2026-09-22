@@ -19,12 +19,18 @@ import { strategiesReady, type StrategyReadiness } from "../core/ats_contracts/s
 import { formatRuntimeSnapshot } from "../core/ats_contracts/runtime.js";
 import { VERSION } from "../version.js";
 import {
-  dashboardStatePath, dataProfilePath, runtimeInstallDir, runtimePreviousDir, runtimeStatePath,
+  dashboardStatePath, dataProfilePath, runtimeInstallDir, runtimeStatePath, setupStatePath,
 } from "../core/ats_runtime/paths.js";
-import { readRuntimeRecord } from "../core/ats_runtime/store.js";
+import {
+  defaultDashboardRecord, readDashboardRecord, readDataRecord, readRuntimeRecord,
+  writeDashboardRecord, writeDataRecord,
+} from "../core/ats_runtime/store.js";
+import {
+  SETUP_STEPS, beginSetup, completeStep, readSetupState, resumable, writeSetupState,
+} from "../core/ats_runtime/wizard.js";
 import { installRuntime } from "../core/ats_runtime/install.js";
 import {
-  restartRuntime, rollbackRuntime, runtimeStatus, startRuntime, stopRuntime,
+  restartRuntime, rollbackRuntime, runtimeStatus, startRuntime, stopRuntime, tearDownForAccountSwitch,
 } from "../core/ats_runtime/supervisor.js";
 import { atsDoctorJson, buildAtsDoctorReport, renderAtsDoctorReport } from "../core/ats_runtime/doctor.js";
 
@@ -318,6 +324,79 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
     }
     return session;
   };
+  /**
+   * Derive the Spec 2 state files from a completed setup, and record wizard
+   * progress so an interrupted run resumes instead of re-asking (section 5).
+   *
+   * The data profile's id is the digest of its own configuration. That is what
+   * makes section 8.2's "a previous successful probe is not perpetual
+   * evidence" mechanical: change the provider, the symbols or the timeframe
+   * and the id changes, so a stored probe receipt no longer matches the
+   * profile and the store refuses to keep it. Reusing a stable id would let a
+   * feed verified for SPY silently vouch for a newly added symbol.
+   */
+  const syncSpec2State = async (account: ManagedAccountScope, agentId: string, settings: AtsSettings, now: string, note: (text: string) => void): Promise<void> => {
+    const stream = settings.data_stream;
+    // `custom` has no DataProfileV1 representation — section 5 step 4 admits
+    // only none/yfinance/polygon. A legacy setting is left alone rather than
+    // coerced into a provider it is not.
+    //
+    // Nothing in here may fail setup. These files are a derived convenience:
+    // the authority is `ats.json` plus the runtime's own receipts, so a legacy
+    // settings value this schema cannot represent means "no profile derived",
+    // reported out loud, not "setup failed".
+    if (["none", "yfinance", "polygon"].includes(stream.provider)) {
+      const configured = {
+        provider: stream.provider,
+        symbols: [...stream.symbols].sort(),
+        timeframe: stream.timeframe,
+        poll_interval_ms: stream.poll_interval_ms,
+        credential_ref: stream.api_key_env ? `env:${stream.api_key_env}` : null,
+      };
+      const profileId = `dp_${createHash("sha256").update(JSON.stringify(configured)).digest("hex").slice(0, 32)}`;
+      const profilePath = dataProfilePath(root, account, agentId);
+      const existing = await readDataRecord(profilePath).catch(() => null);
+      try {
+        await writeDataRecord(profilePath, {
+          schema_version: "aether.ats.data-state/1",
+          profile: {
+            schema_version: "aether.ats.data-profile/1",
+            profile_id: profileId,
+            provider: configured.provider as "none" | "yfinance" | "polygon",
+            symbols: configured.symbols,
+            timeframe: configured.timeframe,
+            poll_interval_ms: configured.poll_interval_ms,
+            credential_ref: configured.credential_ref,
+            configured_at: now,
+          },
+          // Only a probe taken against THIS configuration survives.
+          last_probe: existing?.last_probe?.profile_id === profileId ? existing.last_probe : null,
+          updated_at: now,
+        });
+      } catch {
+        // A legacy value the Spec 2 schema cannot represent — an old timeframe
+        // spelling, say. The doctor will report data as not configured, which
+        // is the truth, rather than setup failing over a derived file.
+        note("Data profile not derived · the saved data settings are not representable in the Spec 2 schema\n");
+      }
+    }
+
+    const dashboardPath = dashboardStatePath(root, account, agentId);
+    if (!(await readDashboardRecord(dashboardPath).catch(() => null))) {
+      await writeDashboardRecord(dashboardPath, defaultDashboardRecord(now));
+    }
+
+    // Record the steps this flow actually completed. The runtime step counts
+    // as done because finishing without a runtime is one of step 2's three
+    // offered outcomes — `aether ats doctor` reports separately that no
+    // runtime is installed, so this cannot read as "a runtime exists".
+    const statePath = setupStatePath(root, account, agentId);
+    const prior = await readSetupState(statePath).catch(() => null);
+    let state = prior && resumable(prior, account, agentId) ? prior : beginSetup(account, agentId, now);
+    for (const step of SETUP_STEPS) state = completeStep(state, step, now);
+    await writeSetupState(statePath, state);
+  };
+
   const initialize = async (account: ManagedAccountScope, agent: ManagedAgent, options: Awaited<ReturnType<typeof askSetup>>, pack: AtsPackage, write = output, signal?: AbortSignal): Promise<Binding> => {
     signal?.throwIfAborted();
     const path = bindingPath(account, agent.agent_id, root);
@@ -386,6 +465,9 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
       write("Strategy readiness incomplete · 0 compiled · nothing can be staged or activated yet\n");
     }
     write(`Data: ${sanitizeTerm(settings.data_stream.provider)} · ${String(pack.dataStreamStatus(settings)["state"] ?? "unverified")} · connection requires a live probe\n`);
+    // Spec 2 section 15's separate files, derived once setup has actually
+    // succeeded rather than optimistically at the start.
+    await syncSpec2State(account, agent.agent_id, settings, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), write);
     write(theme.cyan("ATS setup saved") + ` · ${binding.memory_gb} GiB context limit · ${sanitizeTerm(binding.strategies_directory)}\n`);
     return binding;
   };
@@ -527,8 +609,7 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
           // so this reports honestly instead of pretending to install.
           const outcome = await installRuntime({
             recordPath,
-            installDir: runtimeInstallDir(root, state.account, agent.agent_id),
-            previousDir: runtimePreviousDir(root, state.account, agent.agent_id),
+            installRoot: runtimeInstallDir(root, state.account, agent.agent_id),
             agentVersion: VERSION,
             requestedMode: "observe",
             ...(surface?.signal ? { signal: surface.signal } : {}),
@@ -547,7 +628,7 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
           });
         } else if (action === "rollback") {
           if (!record) throw new Error("No ATS runtime is configured on this device.");
-          const result = await rollbackRuntime(recordPath, record, runtimePreviousDir(root, state.account, agent.agent_id), {});
+          const result = await rollbackRuntime(recordPath, record, {});
           output(sanitizeTerm(result.reason ?? "Rolled back.") + "\n");
         } else throw new Error("Use /ats runtime status|install|start|stop|restart|rollback.");
       } else output("Use /ats status, /ats doctor, /ats runtime, /ats mode, /ats strategies, /ats library, /ats data, /ats journal, or /ats browser.\n");
@@ -606,6 +687,15 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         owner.closed = true;
         let failure: unknown;
         try { await session.close(); } catch (error) { failure = error; }
+        // Section 17: an account switch closes runtime access along with the
+        // browser and the memory lease. The runtime is stopped and its
+        // credential revoked; the installation and its slots are kept, because
+        // the bytes on disk are still what they were and the same canary
+        // requires disabling a runtime without data loss.
+        if (marked) {
+          try { await tearDownForAccountSwitch(runtimeStatePath(root, account, agent.agent_id)); }
+          catch (error) { failure ??= error; }
+        }
         try { await memoryLease?.close(); } catch (error) { failure ??= error; }
         const id = key(account, agent);
         if (browsers.get(id) === session) browsers.delete(id);

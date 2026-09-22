@@ -46,19 +46,19 @@ export function setupStatePath(root: string, account: ManagedAccountScope, agent
 }
 
 /**
- * The private runtime directory. Spec 2 step 2.3 requires the runtime to be
+ * The private runtime install ROOT. Spec 2 step 2.3 requires the runtime to be
  * installed into an Agent-owned private directory, so it sits under the same
  * account- and agent-scoped root as the rest of the local state: an account
  * switch invalidates the whole subtree at once rather than leaving an
  * installed runtime reachable from a different account.
+ *
+ * This is not the runtime tree itself. It contains `active.json` and `slots/`
+ * (see slots.ts); the live tree is whichever slot the pointer names. There is
+ * deliberately no "previous directory" helper any more — parking the displaced
+ * version in a sibling directory is what made rollback destructive.
  */
 export function runtimeInstallDir(root: string, account: ManagedAccountScope, agentId: string): string {
   return join(atsStateDir(root, account, agentId), "runtime");
-}
-
-/** Where a previous installation is parked so a failed upgrade can roll back. */
-export function runtimePreviousDir(root: string, account: ManagedAccountScope, agentId: string): string {
-  return join(atsStateDir(root, account, agentId), "runtime.previous");
 }
 
 /**
