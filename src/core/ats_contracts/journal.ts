@@ -25,10 +25,10 @@ import {
   fail,
   ident,
   integer,
+  multilineText,
   nullable,
   pinned,
   schemaTag,
-  text,
   timestamp,
   uniqueList,
 } from "./primitives.js";
@@ -90,9 +90,9 @@ function reflection(value: unknown, name: string): JournalReflectionV2 {
     // Reflection prose is untrusted local content (section 14: note and strategy
     // content is untrusted data and escaped everywhere). Empty is allowed —
     // a trade may be recorded before the human has written anything.
-    thesis: text(raw.thesis, `${name} thesis`, 4_000, { allowEmpty: true }),
-    notes: text(raw.notes, `${name} notes`, 20_000, { allowEmpty: true }),
-    lessons: text(raw.lessons, `${name} lessons`, 4_000, { allowEmpty: true }),
+    thesis: multilineText(raw.thesis, `${name} thesis`, 4_000, { allowEmpty: true }),
+    notes: multilineText(raw.notes, `${name} notes`, 20_000, { allowEmpty: true }),
+    lessons: multilineText(raw.lessons, `${name} lessons`, 4_000, { allowEmpty: true }),
     tags: Object.freeze(uniqueList(raw.tags, `${name} tags`, 50, journalTag)),
     grade: raw.grade === null ? null : journalTag(raw.grade, `${name} grade`),
   });
@@ -236,7 +236,7 @@ export function validateHumanNoteRevision(value: unknown, name = "Human note rev
     // agent- or model-authored variant of this document, because section 11
     // forbids chat claims and model summaries from reaching performance truth.
     author: pinned(raw.author, "human", `${name} author`),
-    body: text(raw.body, `${name} body`, 20_000, { allowEmpty: true }),
+    body: multilineText(raw.body, `${name} body`, 20_000, { allowEmpty: true }),
     supersedes_revision: supersedes,
     // The idempotency key for a save. Section 10.4 requires an unknown save
     // outcome to stay `indeterminate` rather than be blindly retried; a retry

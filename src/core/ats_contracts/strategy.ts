@@ -26,6 +26,7 @@ import {
   ident,
   integer,
   list,
+  multilineText,
   nullable,
   schemaTag,
   text,
@@ -129,7 +130,7 @@ function diagnostic(value: unknown, name: string): CompileDiagnostic {
     code: ident(raw.code, `${name} code`),
     // Compiler output is untrusted text that reaches a terminal and the local
     // dashboard. Section 9.4 additionally forbids executing diagnostics.
-    message: text(raw.message, `${name} message`, 500),
+    message: multilineText(raw.message, `${name} message`, 500),
     line: raw.line === null ? null : integer(raw.line, `${name} line`, 1, 1_000_000),
     column: raw.column === null ? null : integer(raw.column, `${name} column`, 1, 1_000_000),
   });

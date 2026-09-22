@@ -72,11 +72,71 @@ function doc(name: string): Record<string, unknown> {
 
 test("every Spec 2 golden vector still canonicalizes to its frozen digest", () => {
   assert.equal(golden.schema, "aether.ats.spec2-golden/1");
-  assert.equal(golden.canonical_profile, "jcs-integer-subset/1");
-  assert.equal(golden.vectors.length, 15);
+  assert.equal(golden.canonical_profile, "rfc8785/1");
+  assert.equal(golden.vectors.length, 16);
   for (const entry of golden.vectors) {
     assert.equal(digestOf(entry.document), entry.canonical_digest, `digest drift in ${entry.name}`);
   }
+});
+
+// RFC 8785 serializes non-control Unicode literally as UTF-8; the older
+// encoder escaped everything non-ASCII. Pinning a vector that actually
+// contains non-ASCII is what makes a silent regression to \u-escaping fail
+// here rather than at the Python mirror.
+test("non-ASCII survives canonicalization literally, not as an escape", () => {
+  const entry = vector("trade-journal-multiline-non-ascii");
+  const notes = (entry.document["reflection"] as { notes: string }).notes;
+  assert.match(notes, /café/);
+  assert.match(notes, /日本語/);
+  assert.equal(digestOf(entry.document), entry.canonical_digest);
+});
+
+// The base moved float rejection out of canonicalJson into the validators, so
+// a float now reaches digestOf instead of throwing there. Every numeric field
+// in these four contracts is therefore checked explicitly rather than trusted.
+test("every numeric field in the Spec 2 contracts refuses a float", () => {
+  const cases: Array<[string, () => unknown]> = [
+    ["data profile poll_interval_ms", () => validateDataProfile({ ...doc("data-profile-polygon"), poll_interval_ms: 5000.5 })],
+    ["data probe sample_count", () => validateDataProbeReceipt({ ...doc("data-probe-verified"), sample_count: 2.5 })],
+    ["data probe freshness_ms", () => validateDataProbeReceipt({ ...doc("data-probe-verified"), freshness_ms: 1000.5 })],
+    ["activation revision", () => validateStrategyActivation({ ...doc("strategy-activation-observe-active"), revision: 1.5 })],
+    ["journal fact_revision", () => validateJournalEntry({ ...doc("trade-journal-controller-entry"), fact_revision: 1.5 })],
+    ["journal reflection_revision", () => validateJournalEntry({ ...doc("trade-journal-controller-entry"), reflection_revision: 2.5 })],
+    ["note revision", () => validateHumanNoteRevision({ ...doc("human-note-revision-2"), revision: 2.5 })],
+    ["preferences prompt_delay_seconds", () => validateJournalPreferences({ ...doc("journal-preferences-default"), prompt_delay_seconds: 1.5 })],
+  ];
+  for (const [label, run] of cases) {
+    assert.throws(run, /whole number/, `${label} accepted a float`);
+  }
+
+  // Diagnostic line and column are the only other numbers, and they sit inside
+  // an artifact rather than at the top level.
+  const artifact = doc("strategy-compile-artifact-compiled");
+  assert.throws(() => validateStrategyArtifact({
+    ...artifact,
+    state: "rejected",
+    ir_sha256: "0".repeat(64),
+    diagnostics: [{ severity: "error", code: "E_PARSE", message: "bad", line: 3.5, column: 1 }],
+  }), /whole number/);
+});
+
+test("prose fields accept newlines and tabs but refuse a carriage return", () => {
+  const entry = doc("trade-journal-controller-entry");
+  const reflection = entry["reflection"] as Record<string, unknown>;
+
+  // Multi-line notes are the normal case for a human trade journal.
+  assert.doesNotThrow(() => validateJournalEntry({
+    ...entry,
+    reflection: { ...reflection, notes: "First line.\nSecond line.\n\tIndented." },
+  }));
+
+  // A carriage return is refused rather than normalized: silently folding CRLF
+  // would make a note round-tripped through a Windows editor digest
+  // differently from identical-looking text.
+  assert.throws(() => validateJournalEntry({
+    ...entry,
+    reflection: { ...reflection, notes: "First line.\r\nSecond line." },
+  }), /carriage return|control character/);
 });
 
 test("every Spec 2 golden vector is accepted by its own validator", () => {
@@ -93,6 +153,7 @@ test("every Spec 2 golden vector is accepted by its own validator", () => {
   validateStrategyArtifact(doc("strategy-compile-artifact-compiled"));
   validateStrategyActivation(doc("strategy-activation-observe-active"));
   validateJournalEntry(doc("trade-journal-controller-entry"));
+  validateJournalEntry(doc("trade-journal-multiline-non-ascii"));
   validateHumanNoteRevision(doc("human-note-revision-2"));
   validateJournalPreferences(doc("journal-preferences-default"));
 });
