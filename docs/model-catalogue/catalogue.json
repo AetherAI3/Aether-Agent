@@ -1,10 +1,10 @@
 {
   "schema": "aether-agent/public-model-catalogue@2",
-  "generatedAt": "2026-08-23T00:00:00.000Z",
+  "generatedAt": "2026-09-22T01:47:56.169Z",
   "source": {
     "kind": "cloud-public-projection",
     "version": "model-catalogue-v1",
-    "digest": "sha256:80ba3ba1144d301e2cca407ceced74cb2b371f1da6e3982b87305ff12a3d4712"
+    "digest": "sha256:f5f516625932d8932bfca221aa5dbf3eb1d7b415eba8dabe298da24b984c64f7"
   },
   "availabilitySemantics": "listed-not-entitled",
   "offlineFallback": true,
@@ -17,7 +17,7 @@
       "kind": "orchestrator",
       "tierMin": "pro",
       "modality": "text",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "aether-neo-5.1t",
@@ -35,7 +35,7 @@
       "kind": "orchestrator",
       "tierMin": "pro",
       "modality": "multimodal",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "dsv4_flash",
@@ -56,13 +56,31 @@
       "availability": "available"
     },
     {
+      "id": "fable51",
+      "label": "Claude Fable 5.1",
+      "provider": "text",
+      "kind": "model",
+      "tierMin": "pro",
+      "modality": "text",
+      "availability": "available"
+    },
+    {
       "id": "gemini36_flash",
       "label": "Gemini 3.6 Flash",
       "provider": "text",
       "kind": "model",
       "tierMin": "pro",
       "modality": "text",
-      "availability": "unavailable"
+      "availability": "available"
+    },
+    {
+      "id": "gemini38_flash",
+      "label": "Gemini 3.8 Flash",
+      "provider": "text",
+      "kind": "model",
+      "tierMin": "pro",
+      "modality": "text",
+      "availability": "available"
     },
     {
       "id": "gemma4_26b_moe",
@@ -80,7 +98,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "text",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "gemma4_31b_free",
@@ -137,6 +155,24 @@
       "availability": "available"
     },
     {
+      "id": "gpt6_astra",
+      "label": "GPT-6 Astra",
+      "provider": "text",
+      "kind": "model",
+      "tierMin": "pro",
+      "modality": "text",
+      "availability": "available"
+    },
+    {
+      "id": "grok46",
+      "label": "Grok 4.6",
+      "provider": "text",
+      "kind": "model",
+      "tierMin": "pro",
+      "modality": "text",
+      "availability": "available"
+    },
+    {
       "id": "haiku",
       "label": "Claude Haiku 4.5",
       "provider": "text",
@@ -152,7 +188,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "text",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "kimi_k26_thinking",
@@ -170,7 +206,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "text",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "opus",
@@ -184,6 +220,15 @@
     {
       "id": "opus5",
       "label": "Claude Opus 5",
+      "provider": "text",
+      "kind": "model",
+      "tierMin": "pro",
+      "modality": "text",
+      "availability": "available"
+    },
+    {
+      "id": "qwen38_max",
+      "label": "Qwen 3.8 Max",
       "provider": "text",
       "kind": "model",
       "tierMin": "pro",
@@ -206,7 +251,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_flux2_klein",
@@ -215,7 +260,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_flux2_max",
@@ -224,7 +269,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_flux2_pro",
@@ -233,7 +278,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_gpt_image2",
@@ -242,7 +287,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_gpt5_image",
@@ -251,7 +296,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_gpt5_image_mini",
@@ -260,7 +305,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_grok_video",
@@ -269,7 +314,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_hailuo23",
@@ -278,7 +323,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_happyhorse",
@@ -287,7 +332,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_kling",
@@ -296,7 +341,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_kling_o1",
@@ -305,7 +350,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_kling_pro",
@@ -314,16 +359,16 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_nano_banana",
       "label": "Nano Banana",
       "provider": "image",
       "kind": "model",
-      "tierMin": "solo",
+      "tierMin": "free",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_nano_banana2",
@@ -332,16 +377,16 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_nano_pro",
       "label": "Nano Banana Pro",
       "provider": "image",
       "kind": "model",
-      "tierMin": "free",
+      "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_recraft",
@@ -350,7 +395,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_recraft_v4",
@@ -359,7 +404,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_riverflow_fast",
@@ -368,7 +413,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_riverflow_pro",
@@ -377,7 +422,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_seedance",
@@ -386,7 +431,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_seedance_fast",
@@ -395,7 +440,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_seedance15_pro",
@@ -404,7 +449,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_seedream45",
@@ -413,7 +458,7 @@
       "kind": "model",
       "tierMin": "solo",
       "modality": "image",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_sora2_pro",
@@ -422,7 +467,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_veo31",
@@ -431,7 +476,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_veo31_fast",
@@ -440,7 +485,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_veo31_lite",
@@ -449,7 +494,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_wan26",
@@ -458,7 +503,7 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     },
     {
       "id": "vision_wan27",
@@ -467,8 +512,8 @@
       "kind": "model",
       "tierMin": "pro",
       "modality": "video",
-      "availability": "unavailable"
+      "availability": "available"
     }
   ],
-  "digest": "sha256:c9fe0efd73b5c390b0274e15640da7cbfe036e759d121984699d6d2d39564de1"
+  "digest": "sha256:62ee39eac95744da861e34e95eb1f41f4ffda6b86622614c68b01f036ecd8f48"
 }
