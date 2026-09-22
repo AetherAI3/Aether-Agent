@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { managedAgentStorageDirectory } from "../src/core/managed_agent_local.js";
+import { dataProfilePath } from "../src/core/ats_runtime/paths.js";
+import { readDataRecord, writeDataRecord } from "../src/core/ats_runtime/store.js";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { createAtsHooks, atsManagedConfig, ATS_PROFILE_MARKER, askSetup, type AtsHookDeps } from "../src/commands/ats_agent.js";
@@ -49,7 +51,7 @@ function fakePackage(overrides: Partial<Package> = {}): Package {
     formatJournal: () => "ATS journal · no local events\n",
     createBrowserObserver: async () => ({ open: async () => ({ state: "connected", viewUrl: null }), snapshot: async () => ({}), close: async () => {}, status: () => ({ state: "connected" }) }),
     observeBrowser: async function* () { yield {}; },
-    loadSettings: async () => ({ permission_mode: "plan", data_stream: { provider: "none", endpoint: null, api_key_env: null, symbols: [], timeframe: "1m", poll_interval_ms: 5000 } }),
+    loadSettings: async () => ({ permission_mode: "plan", data_stream: { provider: "none", endpoint: null, api_key_env: null, symbols: [], timeframe: "M1", poll_interval_ms: 5000 } }),
     saveSettings: async () => {},
     cyclePermissionMode: (mode) => mode === "plan" ? "skip" : mode === "skip" ? "danger" : "plan",
     dataStreamStatus: () => ({ state: "unavailable", live_orders_enabled: false }),
@@ -263,7 +265,7 @@ test("native ready receipts must match agent, directory, capacity and verified p
 test("ATS mode and data commands persist local settings and invalid requests cannot change them", async () => {
   await fixture(async (dir) => {
     await binding(dir);
-    let settings = { permission_mode: "plan", data_stream: { provider: "none", endpoint: null as string | null, api_key_env: null as string | null, symbols: [] as string[], timeframe: "1m", poll_interval_ms: 5000 } };
+    let settings = { permission_mode: "plan", data_stream: { provider: "none", endpoint: null as string | null, api_key_env: null as string | null, symbols: [] as string[], timeframe: "M1", poll_interval_ms: 5000 } };
     let saves = 0;
     let output = "";
     const pack = fakePackage({ loadSettings: async () => structuredClone(settings), saveSettings: async (_path, value) => { saves++; settings = structuredClone(value); } });
@@ -667,6 +669,44 @@ test("setup persists provider configuration through the ATS validator without cl
   });
 });
 
+test("data edits rotate the profile and discard old probe evidence, while identical settings retain it", async () => {
+  await fixture(async (dir) => {
+    const packageName = "aether-ats-skills";
+    const real = await import(packageName);
+    const hooks = createAtsHooks({ root: dir, env: {}, output: () => {}, acceptPolicy: async () => true,
+      setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies"),
+        dataStream: { provider: "polygon", endpoint: null, api_key_env: "POLYGON_API_KEY", symbols: ["AAPL"] } }),
+      load: async () => fakePackage({ loadSettings: real.loadSettings, saveSettings: real.saveSettings, dataStreamStatus: real.dataStreamStatus }),
+    });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Market Scout"), 0); });
+    const path = dataProfilePath(dir, ACCOUNT, ID);
+    const initial = await readDataRecord(path);
+    assert.ok(initial);
+    const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    await writeDataRecord(path, { ...initial, last_probe: {
+      schema_version: "aether.ats.data-probe/1", probe_id: "pb_one", profile_id: initial.profile.profile_id,
+      provider: "polygon", state: "verified", sample_count: 1, symbols_verified: ["AAPL"],
+      observed_at: now, received_at: now, freshness_ms: 0, reason: null,
+    } });
+    const surface = { signal: new AbortController().signal, write: () => {} };
+    await hooks.onChatCommand!(context(), agent(), "/ats data symbols AAPL", surface);
+    const same = await readDataRecord(path);
+    assert.equal(same?.profile.profile_id, initial.profile.profile_id);
+    assert.equal(same?.last_probe?.state, "verified");
+    await hooks.onChatCommand!(context(), agent(), "/ats data symbols AAPL,MSFT", surface);
+    const changed = await readDataRecord(path);
+    assert.notEqual(changed?.profile.profile_id, initial.profile.profile_id);
+    assert.deepEqual(changed?.profile.symbols, ["AAPL", "MSFT"]);
+    assert.equal(changed?.last_probe, null);
+    await hooks.onChatCommand!(context(), agent(), "/ats data set polygon https://api.polygon.io/ OTHER_API_KEY", surface);
+    const otherKey = await readDataRecord(path);
+    assert.notEqual(otherKey?.profile.profile_id, changed?.profile.profile_id);
+    assert.equal(otherKey?.profile.credential_ref, "env:OTHER_API_KEY");
+    await hooks.onChatCommand!(context(), agent(), "/ats data set custom https://example.test/feed OTHER_API_KEY", surface);
+    assert.equal(await readDataRecord(path), null, "an unrepresentable provider cannot inherit an old verified profile");
+  });
+});
+
 test("memory and strategy setup receive cancellation and cannot publish a ready binding after abort", async () => {
   await fixture(async (dir) => {
     const controller = new AbortController(); let scans = 0;
@@ -824,5 +864,114 @@ test("late cleanup from a closed chat cannot detach a reopened chat's browser", 
     await hooks.onChatCommand!(ctx, ordinary, "/browser open", current); await cleanup!();
     await hooks.onChatCommand!(ctx, ordinary, "/browser open", current);
     assert.equal(opens, 1); await nextCleanup!(); assert.equal(closes, 1);
+  });
+});
+
+// Spec 2 section 2.1 and section 5 step 5. `strategyCount` used to return every
+// scanned file, so a folder of uncompilable sources reported its file tally and
+// setup read as ready. These two tests pin the honest replacement.
+test("setup with nothing compiled says so and leaves strategy readiness incomplete", async () => {
+  await fixture(async dir => {
+    let installs = 0; let output = "";
+    let details: Record<string, string | number | boolean | null> | undefined;
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+      load: async () => fakePackage({
+        // A NON-EMPTY folder where nothing compiled.
+        scanStrategies: async () => ({ state: "scanned", compiler: "unavailable", strategies: [
+          { file: "a.pine", state: "needs_conversion" },
+          { file: "b.pine", state: "needs_conversion" },
+          { file: "c.nano", state: "rejected" },
+          { file: "d.nano", state: "unavailable" },
+        ] }),
+        installBundledStrategies: async ({ directory }) => { installs++; return { revision: "76c91e4b926c0aa8416cbb6b8724031d8141a8d9", installed: [{ id: "risk/stale_data_halt", file: join(directory, "risk--stale_data_halt.nano") }], execution_enabled: false, permission_granted: false }; },
+        appendJournalEvent: async (_path, event) => { if (event.type === "setup.ready") details = event.details; return {}; },
+      }) });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Atlas"), 0); });
+
+    assert.match(output, /0 compiled/);
+    assert.match(output, /Strategy readiness incomplete/);
+    // The starter pack seeds an EMPTY folder only. Keying it off the compiled
+    // count would duplicate sources into a folder that merely failed to compile.
+    assert.equal(installs, 0);
+
+    assert.equal(details?.["strategies_compiled"], 0);
+    assert.equal(details?.["strategies_rejected"], 1);
+    assert.equal(details?.["strategies_need_conversion"], 2);
+    assert.equal(details?.["strategies_found"], 4);
+    assert.equal(details?.["strategies_ready"], false);
+    // The ambiguous single count is gone, so nothing downstream can read a file
+    // tally as readiness.
+    assert.equal(details?.["strategy_count"], undefined);
+  });
+});
+
+test("setup with compiled strategies reports readiness without the incomplete warning", async () => {
+  await fixture(async dir => {
+    let output = "";
+    let details: Record<string, string | number | boolean | null> | undefined;
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      acceptPolicy: async () => true, setup: async () => ({ memoryGb: 5, strategiesDirectory: join(dir, "strategies") }),
+      load: async () => fakePackage({
+        scanStrategies: async () => ({ state: "scanned", compiler: "native_ats", strategies: [
+          { file: "a.nano", state: "compiled" },
+          { file: "b.nano", state: "compiled" },
+          { file: "c.pine", state: "needs_conversion" },
+        ] }),
+        appendJournalEvent: async (_path, event) => { if (event.type === "setup.ready") details = event.details; return {}; },
+      }) });
+    await withCreate(async () => { assert.equal(await hooks.createATS!(context(), "Atlas"), 0); });
+
+    assert.match(output, /2 compiled/);
+    assert.doesNotMatch(output, /Strategy readiness incomplete/);
+    assert.equal(details?.["strategies_compiled"], 2);
+    assert.equal(details?.["strategies_found"], 3);
+    assert.equal(details?.["strategies_ready"], true);
+  });
+});
+
+test("/ats doctor reports an unconfigured runtime honestly instead of claiming health", async () => {
+  await fixture(async dir => {
+    await binding(dir);
+    let output = "";
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      load: async () => fakePackage({
+        scanStrategies: async () => ({ state: "scanned", compiler: "unavailable", strategies: [{ file: "a.pine", state: "needs_conversion" }] }),
+      }) });
+
+    assert.equal(await hooks.onChatCommand!(context(), agent(), "/ats doctor"), true);
+    assert.match(output, /ATS not ready/);
+    assert.match(output, /Runtime\s+unavailable/);
+    // The strategy axis reflects a fresh scan, and nothing compiled.
+    assert.match(output, /0 compiled/);
+    // Requested and effective are shown separately and never collapsed.
+    assert.match(output, /Requested .+; effective offline/);
+  });
+});
+
+test("/ats runtime status says not configured rather than inventing a runtime", async () => {
+  await fixture(async dir => {
+    await binding(dir);
+    let output = "";
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; }, load: async () => fakePackage() });
+
+    assert.equal(await hooks.onChatCommand!(context(), agent(), "/ats runtime status"), true);
+    assert.match(output, /not configured on this device/);
+    await assert.rejects(hooks.onChatCommand!(context(), agent(), "/ats runtime start"), /No ATS runtime is configured/);
+    await assert.rejects(hooks.onChatCommand!(context(), agent(), "/ats runtime nonsense"), /status\|install\|start\|stop\|restart\|rollback/);
+  });
+});
+
+test("/ats runtime install refuses honestly when no entitled source is configured", async () => {
+  await fixture(async dir => {
+    await binding(dir);
+    let output = ""; const events: string[] = [];
+    const hooks = createAtsHooks({ root: dir, env: {}, output: text => { output += text; },
+      load: async () => fakePackage({ appendJournalEvent: async (_path, event) => { events.push(event.type); return {}; } }) });
+
+    assert.equal(await hooks.onChatCommand!(context(), agent(), "/ats runtime install"), true);
+    assert.match(output, /ATS runtime not installed/);
+    // No receipt is fabricated, and the attempt is still journalled.
+    assert.ok(events.includes("runtime.install"));
   });
 });

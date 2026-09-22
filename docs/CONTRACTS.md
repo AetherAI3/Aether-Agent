@@ -266,6 +266,59 @@ land in a separate lane under the same directory and import this base.
 
 ---
 
+## 3. ATS trading contracts (Spec 2, headless runtime)  ·  frozen
+
+Spec 2's half of the freeze, in `src/core/ats_contracts/`. These import the
+section 2 base (`primitives.ts`, `canonical.ts`, `mode.ts`) rather than
+redefining it, so both specs share one canonicalization profile
+(`jcs-integer-subset/1`) and one authority ladder.
+
+| Schema | Module | What it asserts |
+|---|---|---|
+| `aether.ats.runtime-installation/1` | `runtime.ts` | What was installed, and that its provenance was proven |
+| `aether.ats.runtime-capabilities/1` | `runtime.ts` | What the runtime honours right now |
+| `aether.ats.data-profile/1` | `data.ts` | What data was configured |
+| `aether.ats.data-probe/1` | `data.ts` | What a live probe actually saw |
+| `aether.ats.strategy-source/1` | `strategy.ts` | An imported strategy file |
+| `aether.ats.strategy-compile-artifact/1` | `strategy.ts` | An immutable, content-addressed compile result |
+| `aether.ats.strategy-activation/1` | `strategy.ts` | What the runtime was asked to run, and what it honoured |
+| `aether.ats.trade-journal/2` | `journal.ts` | A trade entry: immutable facts plus editable human context |
+| `aether.ats.human-note-revision/1` | `journal.ts` | One appended revision of a human note |
+| `aether.ats.journal-preferences/1` | `journal.ts` | Journal preferences, which grant no authority |
+
+Invariants these shapes make unrepresentable rather than merely forbidden:
+
+1. **A receipt cannot lie about provenance.** `provenance_verified` is pinned
+   `true`, so a failed verification produces no installation receipt at all.
+2. **Configured is not verified.** `DataProfileV1` has no field that can hold a
+   connection verdict, so settings cannot persist `connected: true`.
+3. **A verified probe expires.** `ageProbeReceipt` re-evaluates against the
+   clock, so a previous success is not perpetual evidence and a stale feed
+   blocks a new activation.
+4. **A credential reference is not a credential.** `credential_ref` requires an
+   `env:` or `vault:` prefix, so a pasted key fails validation at the boundary.
+5. **Compile is not activation.** Only a compiled, content-addressed artifact
+   whose id matches its contents can be staged; Pine and Python are reference
+   material and never compile to Nano.
+6. **Paper needs a grant.** An activation effective in `paper` without an
+   execution-grant reference is refused; `observe` may not carry one at all.
+7. **Notes append.** A note revision must supersede exactly its predecessor, a
+   save from a stale base returns a conflict, and editing a reflection advances
+   only `reflection_revision` — never `fact_revision`.
+8. **Effective mode is ATSv2's.** The only way to obtain a non-offline
+   capability snapshot is to parse a runtime-authored reply; there is no
+   constructor that derives one from a local preference.
+
+Golden vectors: `test/fixtures/ats_spec2_golden.json`, 15 frozen documents with
+their canonical digests, a sibling to section 2's fixture. Changing a digest
+there is a deliberate, versioned act.
+
+Runtime state lives in `runtime.json`, `data-profile.json`, `dashboard.json`
+and `setup.json` beside the immutable `ats.json` (`aether.ats.local/2`), so an
+older Agent build cannot misread runtime authority as setup state.
+
+---
+
 ## Other contracts
 
 - **Aether Code private host protocol** (`aether.code.host/1`): canonical
