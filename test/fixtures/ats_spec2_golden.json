@@ -41,9 +41,9 @@
         },
         "requested_mode": "paper",
         "effective_mode": "observe",
-        "effective_reason": "No execution grant is attached to this runtime."
+        "effective_reason": "No execution grant is attached — observe only."
       },
-      "canonical_digest": "sha256:12ec3f834dc5a10bcd7a96a5411ee5e81c3c7b97cbe8bd5b19dff0c99aeb5c97"
+      "canonical_digest": "sha256:c3cd6a08b023ab02b79d4e2c983d26be5f34f9bfb2aa025c20b249d179b1aeca"
     },
     {
       "name": "runtime-capabilities-offline",
@@ -134,9 +134,9 @@
         "observed_at": "2026-09-22T11:00:00Z",
         "received_at": "2026-09-22T11:00:01Z",
         "freshness_ms": 1000,
-        "reason": "The last verified sample is older than the freshness ceiling. Run a fresh probe."
+        "reason": "Last sample older than the freshness ceiling — run a fresh probe."
       },
-      "canonical_digest": "sha256:425b78c9c859d900375869c4f9cc943dce45235c0aae34bd5a378bc446e6f811"
+      "canonical_digest": "sha256:69a4e5ad3b6e8bc47c369cfef82697e8b852ae7d51ac9f515b9bbf286dcb6bbd"
     },
     {
       "name": "data-probe-unavailable",
@@ -160,14 +160,14 @@
       "document": {
         "schema_version": "aether.ats.strategy-source/1",
         "strategy_id": "st_ema_cross",
-        "display_name": "EMA cross",
+        "display_name": "EMA cross · moyenne mobile exponentielle (échantillon €)",
         "source_type": "nano",
         "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "relative_path": "strategies/ema_cross.nano",
         "imported_at": "2026-09-22T12:00:00Z",
         "provenance": "bundled"
       },
-      "canonical_digest": "sha256:a798733bdc59cc142b4a316cf524d5d814ce817a0269d31ccf4b2c9085df9e5c"
+      "canonical_digest": "sha256:ebdf129ec2e6eef91a640cd676f29c6e3bebb5973e3ecdb8caee991b74137b5e"
     },
     {
       "name": "strategy-source-pine-reference",

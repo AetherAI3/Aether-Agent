@@ -9,6 +9,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,16 +80,81 @@ test("every Spec 2 golden vector still canonicalizes to its frozen digest", () =
   }
 });
 
-// RFC 8785 serializes non-control Unicode literally as UTF-8; the older
-// encoder escaped everything non-ASCII. Pinning a vector that actually
-// contains non-ASCII is what makes a silent regression to \u-escaping fail
-// here rather than at the Python mirror.
-test("non-ASCII survives canonicalization literally, not as an escape", () => {
-  const entry = vector("trade-journal-multiline-non-ascii");
-  const notes = (entry.document["reflection"] as { notes: string }).notes;
-  assert.match(notes, /café/);
-  assert.match(notes, /日本語/);
-  assert.equal(digestOf(entry.document), entry.canonical_digest);
+/**
+ * The OLD encoding rule these contracts were briefly frozen under: sorted
+ * keys, compact separators, and every non-ASCII code point escaped as \uXXXX
+ * (Python's `ensure_ascii=True`). RFC 8785 instead emits non-control Unicode
+ * literally as UTF-8.
+ *
+ * Reimplemented here rather than imported, deliberately: this is the thing the
+ * test is trying to detect a regression TO, so it must not share code with the
+ * encoder under test.
+ */
+function ensureAsciiDigest(value: unknown): string {
+  const escape = (encoded: string): string => {
+    let out = "";
+    for (const ch of encoded) {
+      const code = ch.codePointAt(0) ?? 0;
+      if (code <= 0x7f) { out += ch; continue; }
+      if (code > 0xffff) {
+        const v = code - 0x10000;
+        out += "\\u" + (0xd800 + (v >> 10)).toString(16).padStart(4, "0")
+          + "\\u" + (0xdc00 + (v & 0x3ff)).toString(16).padStart(4, "0");
+        continue;
+      }
+      out += "\\u" + code.toString(16).padStart(4, "0");
+    }
+    return out;
+  };
+  const encode = (v: unknown): string => {
+    if (v === null || typeof v === "boolean" || typeof v === "number") return JSON.stringify(v);
+    if (typeof v === "string") return escape(JSON.stringify(v));
+    if (Array.isArray(v)) return "[" + v.map(encode).join(",") + "]";
+    const record = v as Record<string, unknown>;
+    const keys = Object.keys(record).filter(k => record[k] !== undefined).sort();
+    return "{" + keys.map(k => escape(JSON.stringify(k)) + ":" + encode(record[k])).join(",") + "}";
+  };
+  return "sha256:" + createHash("sha256").update(encode(value), "utf8").digest("hex");
+}
+
+/**
+ * Coverage has to be PROVEN, not assumed.
+ *
+ * Asserting "this document contains an é" would still pass if the encoder
+ * stopped caring about encoding entirely. What actually matters is whether a
+ * vector's recorded digest DISAGREES with the same document encoded under the
+ * old rule — a vector whose digest is identical either way cannot detect the
+ * regression no matter what characters it holds.
+ *
+ * Every one of the original fifteen vectors was pure ASCII, so the whole
+ * fixture was blind to the encoder rewrite: old and new agree byte for byte on
+ * ASCII. These named vectors now carry non-ASCII in fields that would
+ * realistically hold it, and this test fails if anyone tidies it back out.
+ */
+test("the fixture can actually detect a regression to ensure_ascii encoding", () => {
+  const covered = [
+    "runtime-capabilities-healthy-observe",
+    "data-probe-stale",
+    "strategy-source-nano",
+    "trade-journal-multiline-non-ascii",
+  ];
+  for (const name of covered) {
+    const entry = vector(name);
+    // Still correct under the real encoder...
+    assert.equal(digestOf(entry.document), entry.canonical_digest, `${name} no longer matches its digest`);
+    // ...and genuinely load-bearing: the old rule must produce a DIFFERENT digest.
+    assert.notEqual(
+      ensureAsciiDigest(entry.document),
+      entry.canonical_digest,
+      `${name} carries no digest-affecting non-ASCII, so it cannot catch an encoder regression`,
+    );
+  }
+
+  const catching = golden.vectors.filter(e => ensureAsciiDigest(e.document) !== e.canonical_digest);
+  assert.ok(
+    catching.length >= covered.length,
+    `only ${catching.length} vectors can detect an ensure_ascii regression`,
+  );
 });
 
 // The base moved float rejection out of canonicalJson into the validators, so
