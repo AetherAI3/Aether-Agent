@@ -130,6 +130,88 @@ History:
 
 ---
 
+## 2. ATS trading contracts (Spec 1, Gate 1.0)  ·  frozen
+
+The cross-repository shapes for local broker connectors, account onboarding and
+the approval bridge. Mirrors: `src/core/ats_contracts/` (this repo, TypeScript)
+and the ATSv2 Python connector core. Source spec: *Aether Agent trading
+integrations finale — Spec 1*, sections 11.1–11.8.
+
+**Conformance fixture (the drift detector):** `test/fixtures/ats_contracts_golden.json`
+holds one validated example per schema plus its canonical digest. The ATSv2
+Python suite keeps an identical copy. Each side validates every document and
+asserts the recorded digest byte-for-byte; a mismatch is canonicalization drift,
+not a test to relax.
+
+### Frozen schema tags
+
+| Tag | Shape | Spec |
+|---|---|---|
+| `aether.ats.execution-state/1` | requested-vs-effective mode | 1 §11.8, 2 §7.2 |
+| `aether.ats.connector-capability/1` | `BrokerConnectorCapabilityV1` | 1 §11.1 |
+| `aether.ats.account-binding/1` | `BrokerAccountBindingV1` | 1 §11.2 |
+| `aether.ats.delegated-trading-grant/1` | `DelegatedTradingGrantV1` | 1 §11.3 |
+| `aether.ats.equity-order-intent/1` | `NormalizedEquityOrderIntentV1` | 1 §11.4 |
+| `aether.ats.order-review-receipt/1` | `BrokerOrderReviewReceiptV1` | 1 §11.5 |
+| `aether.ats.operator-approval/1` | `OperatorApprovalReceiptV1` | 1 §11.6 |
+| `aether.ats.execution-receipt/1` | `ExecutionReceiptV1` | 1 §11.7 |
+
+### Canonicalization  ·  `jcs-integer-subset/1`
+
+The specs say "RFC 8785". What is implemented is a **stricter subset**, and the
+difference is deliberate — stated here because this doc wins over the code:
+
+- RFC 8785 serializes numbers with the ECMAScript Number-to-String algorithm and
+  therefore admits floats. This profile **refuses any non-integer or non-finite
+  number**.
+- On the values these contracts carry (integers only) the two agree byte for
+  byte, and both agree with Python's
+  `json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`.
+
+Every monetary field is an integer count of **minor units** (`58012` = $580.12)
+and every quantity is a **whole share**. Floats are how a preview and a commit
+come to disagree about a number that looked equal; the encoder throws instead.
+
+Both mirrors assert the profile string, so adopting a full RFC 8785 encoder is a
+deliberate, versioned act rather than a silent digest change.
+
+### Invariants the shapes enforce (not merely document)
+
+1. **Implementation support is not permission.** A capability snapshot pins
+   `grants_execution_authority: false`; any other value fails to parse.
+2. **Effective mode never exceeds requested mode**, on the ladder
+   `offline < observe < review_only < paper < approve < auto`. The halt states
+   `orders_paused` / `emergency_locked` may follow any request. A differing
+   effective mode must carry a reason.
+3. **An empty symbol allowlist permits nothing.** There is no wildcard token.
+4. **`confirmation` is pinned to `per_order`.** Standing or session approval is
+   not expressible, even though the provider may offer it.
+5. **Raw account numbers cannot leave the connector core.** Opaque refs require a
+   namespace prefix (`acct_…`); a masked label with 5+ consecutive digits is
+   refused; `redactBindingForExport()` is the only exported projection.
+6. **Preview, approval and commit must name the same** adapter, endpoint/schema
+   digest, execution environment and account binding generation.
+   `verifyApprovalChain()` returns a verdict and there is deliberately **no
+   re-preview or reroute path** — a mismatch is terminal.
+7. **Fill facts exist only when broker-confirmed.** A receipt cannot express a
+   fill for a refused, cancelled or ambiguous outcome, nor fill more than it
+   ordered.
+8. **An ambiguous commit is never retried.** `ambiguous` is a first-class outcome
+   requiring a reconciliation state and a reason.
+
+### Scope boundary
+
+Gate 1.0 lands **no connector write path**. `src/core/ats_contracts/` performs no
+I/O, holds no credential and places no order — a test asserts the modules
+reference no `node:fs` / `node:net` / `node:http` / `node:child_process` /
+`fetch(` / `process.env`. Broker sessions, the operator gateway and the
+submission coordinator arrive in later gates and consume these shapes.
+
+Related Spec 2 contracts (runtime, data profile, strategy lifecycle, journal)
+land in a separate lane under the same directory and import this base.
+
+---
+
 ## Other contracts
 
 - **Aether Code private host protocol** (`aether.code.host/1`): canonical
