@@ -382,7 +382,13 @@ test("100 mixed terminal/Voice/settings/MCP lifecycles have zero measurable reso
   const listenersAfter = processListenerCounts();
   const resourcesAfter = activeResourceCounts();
   assert.deepEqual(listenersAfter, listenersBefore);
-  assert.deepEqual(resourcesAfter, resourcesBefore);
+  // The suite can release an unrelated TCP socket during these 100 cycles.
+  // This is a no-growth check: fewer live resources are safe, while any
+  // increase still fails with the exact resource named.
+  for (const name of TRACKED_ACTIVE_RESOURCES) {
+    assert.ok(resourcesAfter[name] <= resourcesBefore[name],
+      `${name} grew from ${resourcesBefore[name]} to ${resourcesAfter[name]}`);
+  }
   t.diagnostic(JSON.stringify({
     cycles: CYCLES,
     terminalOutcomes,
