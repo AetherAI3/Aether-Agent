@@ -130,6 +130,142 @@ History:
 
 ---
 
+## 2. ATS trading contracts (Spec 1, Gate 1.0)  ·  frozen
+
+The cross-repository shapes for local broker connectors, account onboarding and
+the approval bridge. Mirrors: `src/core/ats_contracts/` (this repo, TypeScript)
+and the ATSv2 Python connector core. Source spec: *Aether Agent trading
+integrations finale — Spec 1*, sections 11.1–11.8.
+
+**Conformance fixture (the drift detector):** `test/fixtures/ats_contracts_golden.json`
+holds one validated example per schema plus its canonical digest. The ATSv2
+Python suite keeps an identical copy. Each side validates every document and
+asserts the recorded digest byte-for-byte; a mismatch is canonicalization drift,
+not a test to relax.
+
+### Frozen schema tags
+
+| Tag | Shape | Spec |
+|---|---|---|
+| `aether.ats.execution-state/1` | requested-vs-effective mode | 1 §11.8, 2 §7.2 |
+| `aether.ats.connector-capability/1` | `BrokerConnectorCapabilityV1` | 1 §11.1 |
+| `aether.ats.account-binding/1` | `BrokerAccountBindingV1` | 1 §11.2 |
+| `aether.ats.delegated-trading-grant/1` | `DelegatedTradingGrantV1` | 1 §11.3 |
+| `aether.ats.equity-order-intent/1` | `NormalizedEquityOrderIntentV1` | 1 §11.4 |
+| `aether.ats.order-review-receipt/1` | `BrokerOrderReviewReceiptV1` | 1 §11.5 |
+| `aether.ats.operator-approval/1` | `OperatorApprovalReceiptV1` | 1 §11.6 |
+| `aether.ats.execution-receipt/1` | `ExecutionReceiptV1` | 1 §11.7 |
+
+### Canonicalization  ·  `rfc8785/1`
+
+A real RFC 8785 (JCS) implementation, in `src/core/ats_contracts/canonical.ts`.
+
+**It is not shared with `device_runtime/canonical_json.ts`, and must not be.**
+That encoder is pinned to the Cloud's Python `json.dumps(..., ensure_ascii=True)`
+and changing it would invalidate device signatures. Two encoders exist here
+deliberately, each pinned to a different counterpart.
+
+An earlier revision of this section described a profile called
+`jcs-integer-subset/1` and claimed it was 8785 minus floats. **That was wrong.**
+It escaped every non-ASCII character (`ensure_ascii=True`), while JCS requires
+non-control Unicode emitted literally and encoded as UTF-8 — a different byte
+string, and therefore a different digest, for any document containing a
+non-ASCII character. The name implied a narrowing when the difference was the
+string encoding.
+
+What the profile actually guarantees:
+
+- Non-control Unicode is emitted **literally**; only `"` `\` `\b` `\f` `\n` `\r`
+  `\t` and lowercase `\u00xx` for remaining C0 controls are escaped.
+- Object keys sort by **UTF-16 code unit** (§3.2.3).
+- Numbers use ECMAScript Number-to-String; `-0` normalizes to `0`.
+- **Lone surrogates are refused** — they have no UTF-8 encoding, so runtimes
+  substitute or throw differently and the digest stops being reproducible.
+
+**Floats are legal in JCS and this encoder accepts them.** Integer-only money is
+an *ATS contract rule*, enforced one layer up by the schema validators
+(`integer()`, `minorUnits()`): every monetary field is an integer count of minor
+units (`58012` = $580.12) and every quantity is a whole share. Keeping the split
+means the encoder stays a faithful 8785 implementation instead of quietly being
+something else again.
+
+#### Python mirrors: read this before implementing
+
+`sorted(keys)` **is wrong.** Python compares code points; RFC 8785 requires
+UTF-16 code units. They disagree whenever an astral character (U+10000+) meets a
+BMP character at or above U+E000, because the astral character's UTF-16 form
+begins with high surrogate `0xD800`, which is numerically *below* `U+FFFF`:
+
+```
+UTF-16 (correct):  {"\U00010000":1,"￿":2}
+sorted()  (wrong): {"￿":2,"\U00010000":1}
+```
+
+Sort on `key.encode("utf-16-be", errors="surrogatepass")`, and serialize with
+`ensure_ascii=False`. `test/fixtures/ats_contracts_golden_verify.py` is a
+complete reference implementation plus a fixture checker; ATSv2 should lift its
+functions. It is not wired into `npm test` because CI has no guaranteed Python —
+a conditional skip would give false assurance. Verified at freeze time:
+
+```
+OK: 18 checks reproduced byte-for-byte by an independent Python implementation.
+```
+
+Both mirrors assert the profile string, so changing the encoder is a deliberate,
+versioned act rather than a silent digest change.
+
+### Invariants the shapes enforce (not merely document)
+
+1. **Implementation support is not permission.** A capability snapshot pins
+   `grants_execution_authority: false`; any other value fails to parse.
+2. **Effective mode never exceeds requested mode**, on the ladder
+   `offline < observe < review_only < paper < approve < auto`. The halt states
+   `orders_paused` / `emergency_locked` may follow any request. A differing
+   effective mode must carry a reason.
+3. **An empty symbol allowlist permits nothing.** There is no wildcard token.
+4. **`confirmation` is pinned to `per_order`.** Standing or session approval is
+   not expressible, even though the provider may offer it.
+5. **A bare account number cannot be passed where a reference belongs.** Opaque
+   refs require a namespace prefix (`acct_…`); a masked label with 5+
+   consecutive digits is refused; `redactBindingForExport()` is the only
+   exported projection. **Scope limit, stated plainly:** a prefix cannot prove
+   an account number is absent from the body — `acct_000123456789` satisfies the
+   shape. Non-reversibility must be produced upstream, by the connector core
+   *minting* these as random or keyed-digest identifiers. The validator cannot
+   see the difference, so that half of the invariant belongs to whoever
+   generates them.
+6. **Preview, approval and commit must name the same** provider, account binding
+   id, binding generation, adapter, endpoint/schema digest and execution
+   environment. `verifyApprovalChain()` **computes both digests itself** from
+   the intent and review — an earlier revision accepted the intent digest as an
+   argument, which proved only that three documents agreed about a number the
+   caller supplied. It also refuses a refused or expired review and a spent or
+   expired approval. There is deliberately **no re-preview or reroute path**; a
+   mismatch is terminal.
+   `verifyCommitAuthority()` is the gate immediately before a broker commit: it
+   additionally proves the order is aimed at the account the local binding
+   names, under a grant that still permits it, in a mode that still allows
+   submission. Kill and pause are re-checked **there**, not inherited from
+   whatever the review said minutes earlier.
+7. **Fill facts exist only when broker-confirmed.** A receipt cannot express a
+   fill for a refused, cancelled or ambiguous outcome, nor fill more than it
+   ordered.
+8. **An ambiguous commit is never retried.** `ambiguous` is a first-class outcome
+   requiring a reconciliation state and a reason.
+
+### Scope boundary
+
+Gate 1.0 lands **no connector write path**. `src/core/ats_contracts/` performs no
+I/O, holds no credential and places no order — a test asserts the modules
+reference no `node:fs` / `node:net` / `node:http` / `node:child_process` /
+`fetch(` / `process.env`. Broker sessions, the operator gateway and the
+submission coordinator arrive in later gates and consume these shapes.
+
+Related Spec 2 contracts (runtime, data profile, strategy lifecycle, journal)
+land in a separate lane under the same directory and import this base.
+
+---
+
 ## Other contracts
 
 - **Aether Code private host protocol** (`aether.code.host/1`): canonical

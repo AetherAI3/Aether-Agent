@@ -1,0 +1,372 @@
+{
+  "schema_version": "aether.ats.contract-golden-vectors/2",
+  "canonical_profile": "rfc8785/1",
+  "note": "Mirror of this file lives in the ATSv2 Python test suite. Both sides must reproduce every canonical_vectors[].canonical byte-for-byte, refuse every canonical_rejects[] input, and reproduce every vectors[].canonical_digest. PYTHON MIRRORS: sort object keys by UTF-16 code unit, NOT by code point — plain sorted() fails the astral key-ordering vector. Serialize with ensure_ascii=False and encode UTF-8.",
+  "canonical_vectors": [
+    {
+      "name": "ascii object, keys sorted",
+      "value": {
+        "b": 1,
+        "a": "x"
+      },
+      "canonical": "{\"a\":\"x\",\"b\":1}",
+      "digest": "sha256:cdab067e9f3beb32d1252cfd63e492592fecbf591b0d08cadb24bb17f3864246"
+    },
+    {
+      "name": "non-ASCII is emitted literally, never \\u-escaped",
+      "value": {
+        "a": "café"
+      },
+      "canonical": "{\"a\":\"café\"}",
+      "digest": "sha256:e3c598cda7afb08d1ddede0a770feb8db4312dece093d15449a1856192c34a2f"
+    },
+    {
+      "name": "astral character survives as a surrogate pair",
+      "value": {
+        "a": "𝄞"
+      },
+      "canonical": "{\"a\":\"𝄞\"}",
+      "digest": "sha256:fb30136d50ba755c7574e1d90e74e844235fe9c57080ec5df85b37f79d8c4641"
+    },
+    {
+      "name": "key ordering is UTF-16 code units, not code points",
+      "value": {
+        "𐀀": 1,
+        "￿": 2
+      },
+      "canonical": "{\"𐀀\":1,\"￿\":2}",
+      "digest": "sha256:0fb1ca74b1cef468cf02400d7482be699443487cdd7439c2fb4ad356839b82af"
+    },
+    {
+      "name": "negative zero normalizes to zero",
+      "value": {
+        "a": 0
+      },
+      "canonical": "{\"a\":0}",
+      "digest": "sha256:45b619e97b5d9b029af4522e9ffb02fa99ff2bf226c82ee22a7cc10269a557e8"
+    },
+    {
+      "name": "control characters use the short escapes, then lowercase \\u00xx",
+      "value": {
+        "a": "\b\t\n\f\r\u0001"
+      },
+      "canonical": "{\"a\":\"\\b\\t\\n\\f\\r\\u0001\"}",
+      "digest": "sha256:c984a2dc66dd0cf76b99d5293c9b9730f4bdba8ed008fd66733087448264186a"
+    },
+    {
+      "name": "nested structures and empty containers",
+      "value": {
+        "z": [],
+        "a": {},
+        "m": [
+          1,
+          [
+            2,
+            {
+              "k": null
+            }
+          ],
+          true
+        ]
+      },
+      "canonical": "{\"a\":{},\"m\":[1,[2,{\"k\":null}],true],\"z\":[]}",
+      "digest": "sha256:2359c6bfe6876d89035bdf380158c4eeefb42244e3899abe34d87aed588e55f1"
+    },
+    {
+      "name": "large integers keep ECMAScript number-to-string form",
+      "value": {
+        "a": 1e+21,
+        "b": -1234567890123,
+        "c": 0
+      },
+      "canonical": "{\"a\":1e+21,\"b\":-1234567890123,\"c\":0}",
+      "digest": "sha256:e4f8f8e24ab9b690c2db7decb4377ab083cad63e5283ffd61d2ed45e690e3041"
+    }
+  ],
+  "canonical_rejects": [
+    {
+      "name": "unpaired high surrogate",
+      "value": {
+        "a": "\ud800"
+      }
+    },
+    {
+      "name": "unpaired low surrogate",
+      "value": {
+        "a": "\udc00"
+      }
+    }
+  ],
+  "vectors": [
+    {
+      "schema_version": "aether.ats.execution-state/1",
+      "document": {
+        "schema_version": "aether.ats.execution-state/1",
+        "requested_mode": "approve",
+        "effective_mode": "review_only",
+        "effective_reason": "live-capital qualification incomplete — limits shown in €"
+      },
+      "canonical_digest": "sha256:3e98bbc40285a84e59b45579c81b8e2b07831c111cc39a6dd728307fb9287d5e",
+      "canonical_bytes_sha256": "3e98bbc40285a84e59b45579c81b8e2b07831c111cc39a6dd728307fb9287d5e"
+    },
+    {
+      "schema_version": "aether.ats.connector-capability/1",
+      "document": {
+        "schema_version": "aether.ats.connector-capability/1",
+        "provider_id": "robinhood",
+        "adapter_id": "robinhood_trading_mcp",
+        "adapter_version": "1.0.0",
+        "endpoint_identity_digest": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "tool_catalog_digest": "sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+        "supported_operations": [
+          "capabilities",
+          "quote",
+          "positions",
+          "balances",
+          "orders_history",
+          "prepare_order"
+        ],
+        "supported_asset_classes": [
+          "equity"
+        ],
+        "authentication_mode": "oauth2_dcr_pkce",
+        "implementation_support": {
+          "read": true,
+          "review": true,
+          "paper": false,
+          "live": false
+        },
+        "execution_state": {
+          "schema_version": "aether.ats.execution-state/1",
+          "requested_mode": "approve",
+          "effective_mode": "review_only",
+          "effective_reason": "live-capital qualification incomplete — limits shown in €"
+        },
+        "observed_at": "2026-09-22T14:30:00Z",
+        "expires_at": "2026-09-22T14:35:00Z",
+        "grants_execution_authority": false
+      },
+      "canonical_digest": "sha256:161662cb2eabd4ab80de4ba200cfc8b8f698b6a8d6eebe6a426a30c6f495bef6",
+      "canonical_bytes_sha256": "161662cb2eabd4ab80de4ba200cfc8b8f698b6a8d6eebe6a426a30c6f495bef6"
+    },
+    {
+      "schema_version": "aether.ats.account-binding/1",
+      "document": {
+        "schema_version": "aether.ats.account-binding/1",
+        "account_binding_id": "bind_rh_agentic01",
+        "provider_id": "robinhood",
+        "credential_ref": "vault_rh_primary01",
+        "encrypted_account_ref": "enc_rh_acct_0001",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "masked_label": "Agentic · ••••41",
+        "asset_capabilities": [
+          "equity"
+        ],
+        "connector_snapshot_digest": "sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+        "selected_at": "2026-09-22T14:20:00Z",
+        "binding_generation": 1
+      },
+      "canonical_digest": "sha256:8de3a398129629cba639c60491ede8ca16d275253d8354027706173ce39377ff",
+      "canonical_bytes_sha256": "8de3a398129629cba639c60491ede8ca16d275253d8354027706173ce39377ff"
+    },
+    {
+      "schema_version": "aether.ats.delegated-trading-grant/1",
+      "document": {
+        "schema_version": "aether.ats.delegated-trading-grant/1",
+        "grant_id": "grant_rh_paper01",
+        "grant_version": 1,
+        "client_principal": "agent_atlas",
+        "provider_id": "robinhood",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "execution_environment": "ats_paper",
+        "capabilities": [
+          "read_account",
+          "review_order",
+          "commit_order"
+        ],
+        "symbol_allowlist": [
+          "SPY",
+          "QQQ"
+        ],
+        "limits": {
+          "max_notional_per_order_minor": 250000,
+          "max_notional_per_day_minor": 1000000,
+          "max_position_notional_per_symbol_minor": 500000,
+          "max_orders_per_day": 10,
+          "max_open_orders": 2
+        },
+        "allowed_sides": [
+          "buy",
+          "sell"
+        ],
+        "allowed_order_types": [
+          "market",
+          "limit"
+        ],
+        "confirmation": "per_order",
+        "state": "active",
+        "abuse_flagged": false,
+        "issued_at": "2026-09-22T14:00:00Z",
+        "expires_at": "2026-09-22T18:00:00Z"
+      },
+      "canonical_digest": "sha256:515cc45ce8c0f61ae8c707f41078d0a2769b76ed1fac2db4e3b042bcc3a440ea",
+      "canonical_bytes_sha256": "515cc45ce8c0f61ae8c707f41078d0a2769b76ed1fac2db4e3b042bcc3a440ea"
+    },
+    {
+      "schema_version": "aether.ats.equity-order-intent/1",
+      "document": {
+        "schema_version": "aether.ats.equity-order-intent/1",
+        "intent_id": "intent_7c1a4f20",
+        "request_id": "req_7c1a4f20",
+        "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
+          "adapter_id": "robinhood_trading_mcp",
+          "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "execution_environment": "ats_paper",
+          "binding_generation": 1
+        },
+        "activation_id": "activation_ema01",
+        "artifact_id": "artifact_ema_pullback_v3",
+        "symbol": "SPY",
+        "side": "buy",
+        "quantity": 4,
+        "order_type": "limit",
+        "limit_price_minor": 58012,
+        "evidence": {
+          "market_snapshot_ref": "snap_20260922_1430",
+          "broker_quote_ref": "quote_spy_20260922",
+          "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "observed_at": "2026-09-22T14:29:55Z"
+        },
+        "created_at": "2026-09-22T14:30:00Z",
+        "expires_at": "2026-09-22T14:33:00Z"
+      },
+      "canonical_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
+      "canonical_bytes_sha256": "6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130"
+    },
+    {
+      "schema_version": "aether.ats.order-review-receipt/1",
+      "document": {
+        "schema_version": "aether.ats.order-review-receipt/1",
+        "review_id": "review_3d91b7",
+        "request_id": "req_7c1a4f20",
+        "intent_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
+        "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
+          "adapter_id": "robinhood_trading_mcp",
+          "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "execution_environment": "ats_paper",
+          "binding_generation": 1
+        },
+        "grant_id": "grant_rh_paper01",
+        "grant_version": 1,
+        "usage": {
+          "notional_today_minor": 0,
+          "orders_today": 0,
+          "open_orders": 0
+        },
+        "reservation_ref": "resv_88ac10",
+        "reservation_expires_at": "2026-09-22T14:33:00Z",
+        "risk_verdict": "pass",
+        "risk_reason": null,
+        "broker_preview_id": "preview_5f7b21",
+        "broker_preview_digest": "sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+        "evidence": {
+          "market_snapshot_ref": "snap_20260922_1430",
+          "broker_quote_ref": "quote_spy_20260922",
+          "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "observed_at": "2026-09-22T14:29:55Z"
+        },
+        "evidence_age_ms": 5000,
+        "worst_case_notional_minor": 232048,
+        "approval_deadline": "2026-09-22T14:32:00Z",
+        "execution_state": {
+          "schema_version": "aether.ats.execution-state/1",
+          "requested_mode": "paper",
+          "effective_mode": "paper",
+          "effective_reason": null
+        },
+        "recorded_at": "2026-09-22T14:30:05Z"
+      },
+      "canonical_digest": "sha256:5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c",
+      "canonical_bytes_sha256": "5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c"
+    },
+    {
+      "schema_version": "aether.ats.operator-approval/1",
+      "document": {
+        "schema_version": "aether.ats.operator-approval/1",
+        "approval_id": "appr_3d91b7c2",
+        "request_id": "req_7c1a4f20",
+        "intent_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
+        "review_id": "review_3d91b7",
+        "review_digest": "sha256:5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c",
+        "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
+          "adapter_id": "robinhood_trading_mcp",
+          "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "execution_environment": "ats_paper",
+          "binding_generation": 1
+        },
+        "provider_id": "robinhood",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "grant_id": "grant_rh_paper01",
+        "grant_version": 1,
+        "policy_version": "ats-aup-2026-09",
+        "symbol": "SPY",
+        "side": "buy",
+        "quantity": 4,
+        "order_type": "limit",
+        "limit_price_minor": 58012,
+        "worst_case_notional_minor": 232048,
+        "reservation_ref": "resv_88ac10",
+        "broker_preview_id": "preview_5f7b21",
+        "activation_id": "activation_ema01",
+        "artifact_id": "artifact_ema_pullback_v3",
+        "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "operator_id": "operator_local",
+        "local_device_id": "local_a1b2c3d4",
+        "operator_session_id": "opsess_5e6f7a8b",
+        "approved_at": "2026-09-22T14:30:30Z",
+        "expires_at": "2026-09-22T14:32:00Z",
+        "consumed_at": null
+      },
+      "canonical_digest": "sha256:8085ceffcd9c59c1b2f9624d87efff5bf061f5642ad25554030548833a09e2be",
+      "canonical_bytes_sha256": "8085ceffcd9c59c1b2f9624d87efff5bf061f5642ad25554030548833a09e2be"
+    },
+    {
+      "schema_version": "aether.ats.execution-receipt/1",
+      "document": {
+        "schema_version": "aether.ats.execution-receipt/1",
+        "request_id": "req_7c1a4f20",
+        "intent_id": "intent_7c1a4f20",
+        "approval_id": "appr_3d91b7c2",
+        "outcome": "filled",
+        "opaque_order_ref": "ord_44bd10c2",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "symbol": "SPY",
+        "side": "buy",
+        "quantity": 4,
+        "order_type": "limit",
+        "activation_id": "activation_ema01",
+        "artifact_id": "artifact_ema_pullback_v3",
+        "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "client_principal": "agent_atlas",
+        "grant_id": "grant_rh_paper01",
+        "submitted_at": "2026-09-22T14:30:31Z",
+        "settled_at": "2026-09-22T14:30:33Z",
+        "fill": {
+          "filled_quantity": 4,
+          "average_fill_price_minor": 58005,
+          "confirmed_at": "2026-09-22T14:30:33Z"
+        },
+        "reconciliation_state": "not_required",
+        "reason": null
+      },
+      "canonical_digest": "sha256:e03677d7f49811a2490daeb801e703c531e51d85e00d94b4f6ef82997ac74d80",
+      "canonical_bytes_sha256": "e03677d7f49811a2490daeb801e703c531e51d85e00d94b4f6ef82997ac74d80"
+    }
+  ]
+}
