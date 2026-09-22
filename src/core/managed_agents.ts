@@ -7,8 +7,22 @@ import { HttpError } from "./errors.js";
 export const MANAGED_AGENTS_PATH = "/agent/managed";
 export const MANAGED_AGENT_ID = /^mag_[0-9a-f]{16}$/;
 
+export interface BrowserObserveGrantV1 {
+  enabled: boolean;
+  max_observations_per_run: number;
+  max_text_chars: number;
+  max_png_bytes: number;
+  max_capture_age_seconds: number;
+}
+
+export interface ManagedAgentProfileV1 {
+  schema_version: "aether.managed-agent.profile/1";
+  kind: "ats";
+  browser_observe?: BrowserObserveGrantV1 | null;
+}
+
 export interface ManagedAgentConfig {
-  profile?: { schema_version: "aether.managed-agent.profile/1"; kind: "ats" } | null;
+  profile?: ManagedAgentProfileV1 | null;
   identity: { display_name: string; purpose?: string; avatar_id?: string };
   behavior?: { system_prompt?: string; tone?: string; response_length?: string; output_format?: string };
   model_policy?: { routing: string; models: string[]; fallback?: string };
@@ -55,6 +69,20 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function browserObserveGrant(value: unknown): value is BrowserObserveGrantV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const grant = value as Record<string, unknown>;
+  const fields = ["enabled", "max_observations_per_run", "max_text_chars", "max_png_bytes", "max_capture_age_seconds"];
+  const boundedInteger = (field: string, minimum: number, maximum: number): boolean =>
+    Number.isSafeInteger(grant[field]) && Number(grant[field]) >= minimum && Number(grant[field]) <= maximum;
+  return Object.keys(grant).length === fields.length && fields.every(field => Object.hasOwn(grant, field))
+    && typeof grant["enabled"] === "boolean"
+    && boundedInteger("max_observations_per_run", 1, 8)
+    && boundedInteger("max_text_chars", 1, 65_536)
+    && boundedInteger("max_png_bytes", 1_024, 4_194_304)
+    && boundedInteger("max_capture_age_seconds", 1, 60);
+}
+
 function readAgent(value: unknown): ManagedAgent {
   const a = record(value);
   const config = record(a["config"]);
@@ -68,7 +96,10 @@ function readAgent(value: unknown): ManagedAgent {
   }
   if (config["profile"] != null) {
     const profile = record(config["profile"]);
-    if (profile["schema_version"] !== "aether.managed-agent.profile/1" || profile["kind"] !== "ats" || Object.keys(profile).some(key => !["schema_version", "kind"].includes(key))) {
+    const supportedFields = ["schema_version", "kind", "browser_observe"];
+    if (profile["schema_version"] !== "aether.managed-agent.profile/1" || profile["kind"] !== "ats"
+        || Object.keys(profile).some(key => !supportedFields.includes(key))
+        || (profile["browser_observe"] != null && !browserObserveGrant(profile["browser_observe"]))) {
       throw new Error("Cloud returned an unsupported managed-agent profile. Update the terminal before opening local tools.");
     }
   }

@@ -220,14 +220,34 @@ test("identity contract validates canonical subjects and is fetched on every cal
   }
 });
 
-test("inventory accepts both additive contracts and rejects unknown typed profiles", async () => {
+test("inventory accepts bounded browser observation profiles and rejects unknown authority", async () => {
   for (const version of ["aether.managed-agents/1", "aether.managed-agents/1.1"]) {
     await stubFetch(() => json({ ...envelope({ agents: [agent] }), schema_version: version }), async () => { assert.equal((await new ManagedAgentsClient(api()).list()).length, 1); });
   }
-  const profile = { schema_version: "aether.managed-agent.profile/1", kind: "ats" } as const;
+  const browserObserve = {
+    enabled: true,
+    max_observations_per_run: 3,
+    max_text_chars: 16_384,
+    max_png_bytes: 4_194_304,
+    max_capture_age_seconds: 15,
+  };
+  const profile = { schema_version: "aether.managed-agent.profile/1", kind: "ats", browser_observe: browserObserve } as const;
   const typed = { ...agent, config: { ...agent.config, profile } };
+  await stubFetch(() => json(envelope({ agents: [typed] })), async () => {
+    assert.deepEqual((await new ManagedAgentsClient(api()).list())[0]?.config.profile, profile);
+  });
   assert.deepEqual(configureManagedAgent(typed.config, "prompt", "New prompt").profile, profile);
-  for (const invalid of [{ ...profile, kind: "root" }, { ...profile, permission: "trade" }, { ...profile, schema_version: "unknown" }]) {
+  for (const invalid of [
+    { ...profile, kind: "root" },
+    { ...profile, permission: "trade" },
+    { ...profile, schema_version: "unknown" },
+    { ...profile, browser_observe: { ...browserObserve, enabled: "true" } },
+    { ...profile, browser_observe: { ...browserObserve, max_observations_per_run: 0 } },
+    { ...profile, browser_observe: { ...browserObserve, max_text_chars: 65_537 } },
+    { ...profile, browser_observe: { ...browserObserve, max_png_bytes: 1_023 } },
+    { ...profile, browser_observe: { ...browserObserve, max_capture_age_seconds: 61 } },
+    { ...profile, browser_observe: { ...browserObserve, controller_token: "forbidden" } },
+  ]) {
     await stubFetch(() => json(envelope({ agents: [{ ...agent, config: { ...agent.config, profile: invalid } }] })), async () => { await assert.rejects(new ManagedAgentsClient(api()).list(), /unsupported managed-agent profile/); });
   }
 });
