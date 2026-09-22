@@ -1,0 +1,29 @@
+// Stochastic oversold entry (Pine: ta.stoch(close, high, low, 14) < 20).
+// STOCH_K = %K line of the 14-period stochastic oscillator, provided by
+// the host data feed.
+// REGIME: range. Do NOT fire in a trend - %K pins under 20 for the length of a
+// downtrend, and this is the fastest of the oscillators, so it pins first.
+// CONDITIONS: a defined support level, and a range wide enough that the low of
+// the lookback window is meaningful.
+// INVALIDATION: %K flat under 20 across several bars rather than turning up.
+// SHAPE: 30m; price probing the bottom of an established range.
+// NOT rsi_oversold_reversal: RSI measures average gain against average loss,
+// %K measures position within the recent high-low range. %K fires earlier and
+// more often, so it is the noisier of the pair.
+// NOT williams_r_reversal: that is the same construction inverted. Firing both
+// is one idea counted twice.
+// CALIBRATED ON: crypto, 30m. The 0-100 bound travels; the dwell time below 20
+// is a property of the instrument.
+strategy StochasticOversold {
+
+    every 30m {
+
+        if STOCH_K(14) < 20 {
+
+            buy(ETHUSD, 0.8)
+
+        }
+
+    }
+
+}

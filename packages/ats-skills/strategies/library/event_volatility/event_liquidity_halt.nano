@@ -1,0 +1,33 @@
+// Event liquidity circuit breaker. SPREAD_STRESS = current executable spread
+// relative to its pre-event baseline, 0 = normal, 1+ = severely stressed,
+// computed by the host from the existing futures feature fabric (BBO
+// evidence), never rederived here.
+// REGIME: any armed macro event window. This is a control, not a directional
+// hypothesis - it emits PAUSE and must never be promoted into the execution
+// slot or counted as a setup. The host enforces the same liquidity gate
+// directly; this published rule is the auditable explanation.
+// CONDITIONS: none beyond the stress reading. It is armed whenever the event
+// window is live.
+// INVALIDATION: none - a breaker is not a trade. It releases when
+// SPREAD_STRESS falls back under the threshold.
+// SHAPE: 1s, because spread blowouts around a release happen and clear inside
+// single seconds; a 5s control would react after the damage.
+// NOT event_whipsaw_halt: that halts on direction churn of the tape; this
+// halts on the cost of trading it. Both should be armed during every event.
+// CALIBRATED ON: MES/MNQ around US red-folder releases. 0.8 means the spread
+// is near its stressed ceiling relative to the pre-event baseline; the
+// baseline normalization travels across instruments, the ceiling does not -
+// re-verify per instrument class.
+strategy EventLiquidityHalt {
+
+    every 1s {
+
+        if SPREAD_STRESS > 0.8 {
+
+            pause()
+
+        }
+
+    }
+
+}

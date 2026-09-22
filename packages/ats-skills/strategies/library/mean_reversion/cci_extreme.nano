@@ -1,0 +1,28 @@
+// CCI oversold extreme. Pine's ta.cci goes deeply negative when oversold;
+// the feed provides the negated series: CCI_NEG = -CCI.
+// CCI_NEG >= 100 is the classic CCI < -100 oversold zone.
+// REGIME: range, or a pullback inside a standing uptrend. Do NOT fire in a
+// sustained downtrend - CCI pins beyond -100 and stays there for many bars.
+// CONDITIONS: a definable range floor, and the higher timeframe not printing
+// new lows.
+// INVALIDATION: CCI_NEG continuing past roughly 200 (the move is accelerating,
+// not exhausting), or a close beneath the range floor.
+// SHAPE: 1h; a sharp excursion below recent congestion that snaps back.
+// NOT zscore_reversion: both measure distance from a mean, but CCI normalises
+// by mean absolute deviation rather than standard deviation, so it reacts
+// sooner and fires considerably more often in chop.
+// CALIBRATED ON: US tech equity ETF, 1h. The +/-100 convention is standard;
+// how often it is actually reached is entirely instrument-dependent.
+strategy CciExtreme {
+
+    every 1h {
+
+        if CCI_NEG(20) >= 100 {
+
+            buy(QQQ, 0.65)
+
+        }
+
+    }
+
+}

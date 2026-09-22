@@ -149,3 +149,15 @@ test("confirmSwitch: locked-item message matches the 403 tier-restriction wordin
   // warning two lines down already uses" — see the ANSI-wrapping assertions
   // in test/theme_factory.test.ts for that half of the behavior.
 });
+
+test("managed browser and ATS commands give a scoped handoff in the coding REPL without touching account or browser APIs", async () => {
+  const inaccessible = new Proxy({}, { get() { throw new Error("coding REPL must not execute a managed-chat browser/ATS command"); } });
+  for (const input of ["/browser open", "/browser setup https://example.invalid?token=must-not-reflect", "/ats mode danger"]) {
+    const output: string[] = [];
+    const result = await handleSlash(inaccessible as AppContext, input, { write: (s: string) => output.push(s) } as never);
+    assert.deepEqual(result, { exit: false });
+    assert.match(output.join(""), /managed agent chat/i);
+    assert.match(output.join(""), /aether agent chat/);
+    assert.doesNotMatch(output.join(""), /must-not-reflect|Unknown command/);
+  }
+});

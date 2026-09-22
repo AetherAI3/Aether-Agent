@@ -1,0 +1,44 @@
+// Release-batch accounting guard: hold release-note publication while the host
+// still counts merges nobody has written up. UNACCOUNTED_MERGE_COUNT is the
+// number of merged pull requests in the canonical repository that no release
+// candidate covers, counted by the host from a scan it has already declared
+// complete.
+// One is enough. A batch published with a single merge missing is a record
+// that reads as complete and is not, and the next batch has no way to notice
+// the gap because the merge is no longer recent.
+// This rule gates release-note publication and nothing else. It must never be
+// wired to a branch, a deploy, or an engineering merge: an unwritten changelog
+// entry is a documentation debt, not a production risk.
+// REGIME: all of them, but only over a completed scan. The count is only
+// meaningful when aether_release_notes_coverage is satisfied; the two rules
+// are deployed together and the coverage guard is what makes this one's zero
+// mean something.
+// CONDITIONS: the host counts from the scan result, and publishes no count at
+// all when it has no scan - absence is the honest answer, and the evaluator
+// turns an absent count into INPUT_UNAVAILABLE rather than into a calm zero.
+// INVALIDATION: the outstanding merges being written up. The count falls back
+// to zero and the rule stops proposing a hold, with no memory of having fired.
+// SHAPE: 5m, matching the merge scan. The count cannot change faster than the
+// scan that produces it.
+// NOT aether_release_notes_uncovered_merge: that one observes a single merge
+// landing without a candidate, one pull request at a time, and proposes no
+// hold. This one is the batch-scope arithmetic and holds publication.
+// CALIBRATED ON: a ceiling of one, which is policy rather than measurement and
+// travels to any host that publishes release notes as batches. What does not
+// travel is the definition of "covered" - which merges a release note is
+// expected to mention is the publishing host's editorial rule.
+strategy AetherReleaseNotesBatchUnaccounted {
+
+    agent ReleaseDesk
+
+    every 5m {
+
+        if UNACCOUNTED_MERGE_COUNT >= 1 {
+
+            pause()
+
+        }
+
+    }
+
+}

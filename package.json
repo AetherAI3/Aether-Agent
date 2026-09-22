@@ -1,6 +1,6 @@
 {
   "name": "aether-agents",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Open-source terminal coding agent for hosted models or local Ollama, with repository-aware tools, operator-controlled execution, and verified results.",
   "type": "module",
   "bin": {
@@ -26,7 +26,13 @@
     "docs/model-catalogue/catalogue.json",
     "docs/model-catalogue/index.html",
     "LICENSE",
-    "NOTICE.md"
+    "NOTICE.md",
+    "ATS_ACCEPTABLE_USE_POLICY.md",
+    "packages/ats-skills",
+    "packages/ats-skills-source.json"
+  ],
+  "workspaces": [
+    "packages/ats-skills"
   ],
   "engines": {
     "node": ">=24"
@@ -46,7 +52,8 @@
     "release:candidate": "npm run build && node dist/scripts/release-candidate.js",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prepack": "npm run build",
-    "demo:handoff": "npm run build && node dist/scripts/handoff-demo.js"
+    "demo:handoff": "npm run build && node dist/scripts/handoff-demo.js",
+    "ats:check": "node scripts/sync-ats-skills.mjs --check"
   },
   "keywords": [
     "coding-agent",
@@ -75,5 +82,11 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "7.0.2"
-  }
+  },
+  "dependencies": {
+    "aether-ats-skills": "0.2.0"
+  },
+  "bundledDependencies": [
+    "aether-ats-skills"
+  ]
 }

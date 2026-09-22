@@ -1,4 +1,35 @@
-# Unreleased — terminal convergence (landed on main)
+# Aether Agent v0.4.0 — shared agents and ATS setup
+
+**Release candidate — September 17, 2026. No tag or registry publication is established by these notes.**
+
+- **Your account's agents in the terminal.** `aether agent list`, `aether agent create`,
+  `aether agent configure` and `aether agent chat` use Cloud's canonical managed
+  agents and Online DM threads. The single-column picker shows real runtime
+  state; a saved message is never presented as proof that an agent is running.
+- **An ATS profile with guided local setup.** `aether agent create ATS Atlas`
+  creates an account agent with trading-assistant behavior, asks for a memory
+  size and location, and scans a strategy folder. Local settings stay bound to
+  the selected agent and Cloud origin. A local memory receipt does not satisfy
+  Cloud's separate APR activation requirements.
+- **Packaged ATS adapters.** The reviewed `aether-ats-skills` 0.1.0 source is
+  bundled with the CLI, with exact `aether-browser` 0.2.2 and `aether-context`
+  0.3.1 dependencies. Installation hooks remain forbidden. The existing Python
+  launcher remains free of Python runtime dependencies.
+- **Honest browser and strategy state.** The browser observer uses an owned,
+  bounded session, shows stale or unavailable observations and closes on exit.
+  It does not expose a remote server's loopback viewer as a local working link.
+  Strategy preparation uses the native Nano compiler's diagnostics; unsupported
+  PineScript or Python translation is reported rather than executed as Nano.
+- **ATS chat controls.** Shift-Tab cycles the existing local ATS mode preference;
+  Its /ats commands inspect strategies, data configuration and runtime status.
+  A mode preference is not live-order authority. Browser observation is not a
+  model-controlled broker execution path, and this candidate does not claim
+  autonomous trading, deployed Cloud compatibility, or an active paid entitlement.
+
+The [v0.4.0 operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md) records the
+remaining exact-commit CI, packed-install, platform and live-service qualification.
+
+## Terminal convergence carried into this candidate
 
 **Merged September 4, 2026 in PR #134; not part of v0.3.2.**
 

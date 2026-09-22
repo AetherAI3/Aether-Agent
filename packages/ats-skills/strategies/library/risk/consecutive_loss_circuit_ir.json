@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "ConsecutiveLossCircuit",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "CONSECUTIVE_LOSSES", "operator": ">=", "value": 4 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Agent", "name": "RiskDesk" }
+  ]
+}

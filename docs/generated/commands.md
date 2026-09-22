@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:f6f7f724a5341a6c3e9ee82a3fca45145f95013bc80f0a1fedf8621ae64acb50 -->
+<!-- manifest-digest: sha256:3c905f43bdae6f04aa78c07bcc15ea28815c85b8931784ce3c032a50579f4cdb -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -18,9 +18,9 @@ show grouped help or command detail
 
 Permission: `read-only` · Availability: `runtime-dependent` · Telemetry: `shell.help`
 
-#### `aether agent [task]`
+#### `aether agent [task | list | create | show | configure | chat | activate | pause | resume]`
 
-run the coding agent or open its REPL
+run the coding agent or manage account agents and shared conversations
 
 Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.agent` · Aliases: `aether code` · Requires: `aether.hosted-or-local`
 
@@ -323,9 +323,9 @@ switch orchestrator \(or picker\)
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.agent` · Requires: `aether.catalogue`
 
-#### `/agents`
+#### `/agents [presets]`
 
-active agent sessions \+ UVT
+list account agents synced with Online; presets lists orchestrators
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.agents` · Requires: `aether.catalogue`
 
@@ -388,6 +388,12 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 manage and diagnose MCP servers
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.mcp`
+
+#### `/agent-create [ATS] <name>`
+
+create an account agent synced with Online
+
+Permission: `account` · Availability: `runtime-dependent` · Telemetry: `slash.agent-create`
 
 ### Agent Modes
 
@@ -748,3 +754,17 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 manage HUD overlay elements
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.hud`
+
+### Managed agent chat
+
+#### `/browser status|setup [URL]|open|refresh|stop|retry`
+
+manage the visual browser in a managed agent chat
+
+Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.browser` · Requires: `aether.hosted`
+
+#### `/ats status|mode|strategies|library|data|journal|browser`
+
+configure ATS setup inside a managed agent chat
+
+Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `slash.ats` · Requires: `aether.hosted`

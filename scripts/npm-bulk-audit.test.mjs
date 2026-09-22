@@ -29,6 +29,24 @@ function lockfile(packages) {
   return { lockfileVersion: 3, packages };
 }
 
+function bundledAtsLockfile() {
+  return lockfile({
+    "": {
+      dependencies: { "aether-ats-skills": "0.2.0" },
+      workspaces: ["packages/ats-skills"],
+      bundleDependencies: ["aether-ats-skills"],
+    },
+    "node_modules/aether-ats-skills": { resolved: "packages/ats-skills", link: true },
+    "packages/ats-skills": {
+      name: "aether-ats-skills",
+      version: "0.2.0",
+      dependencies: { "aether-browser": "0.2.2", "aether-context": "0.3.1" },
+    },
+    "node_modules/aether-browser": locked("aether-browser", "0.2.2"),
+    "node_modules/aether-context": locked("aether-context", "0.3.1"),
+  });
+}
+
 function auditReport(vulnerabilities = {}) {
   const counts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 };
   for (const vulnerability of Object.values(vulnerabilities)) {
@@ -63,7 +81,7 @@ test("fails closed on unsupported locks, malformed entries, inexact versions, na
   assert.throws(() => collectNpmBulkPayload(lockfile({ "": { version: "1.0.0" } })), /no auditable/u);
   assert.throws(
     () => collectNpmBulkPayload(lockfile({ "node_modules/link": { link: true } })),
-    /exact semantic version/u,
+    /unsupported local package link/u,
   );
   assert.throws(
     () => collectNpmBulkPayload(lockfile({ "node_modules/a": locked("a", "^1.2.3") })),
@@ -114,6 +132,96 @@ test("fails closed on unsupported locks, malformed entries, inexact versions, na
       ),
     /not backed by registry\.npmjs\.org/u,
   );
+});
+
+test("allows only the bundled ATS source link while auditing both pinned registry dependencies", () => {
+  const collected = collectNpmBulkPayload(bundledAtsLockfile());
+  assert.deepEqual(collected.payload, {
+    "aether-browser": ["0.2.2"],
+    "aether-context": ["0.3.1"],
+  });
+  assert.equal(collected.nodeModulesEntries, 3);
+  assert.equal(collected.exactPackageVersions, 2);
+
+  const nested = bundledAtsLockfile();
+  nested.packages["packages/ats-skills/node_modules/aether-context"] =
+    nested.packages["node_modules/aether-context"];
+  delete nested.packages["node_modules/aether-context"];
+  assert.deepEqual(collectNpmBulkPayload(nested).payload, collected.payload);
+});
+
+test("rejects changed ATS link paths, bundle declarations, names, versions or dependency pins", () => {
+  const mutations = [
+    (p) => { p["node_modules/aether-ats-skills"].resolved = "../ats-skills"; },
+    (p) => { p["node_modules/aether-ats-skills"].resolved = "packages/./ats-skills"; },
+    (p) => { p["node_modules/aether-ats-skills"].link = false; },
+    (p) => { p["node_modules/aether-ats-skills"].version = "0.2.0"; },
+    (p) => { delete p[""]; },
+    (p) => { delete p[""].dependencies; },
+    (p) => { p[""].dependencies["aether-ats-skills"] = "file:packages/ats-skills"; },
+    (p) => { p[""].dependencies["aether-ats-skills"] = "^0.1.0"; },
+    (p) => { delete p[""].workspaces; },
+    (p) => { p[""].workspaces = ["packages/other"]; },
+    (p) => { delete p[""].bundleDependencies; },
+    (p) => { p[""].bundleDependencies = true; },
+    (p) => { p[""].bundleDependencies = ["another-package"]; },
+    (p) => { p[""].bundleDependencies.push("another-package"); },
+    (p) => { delete p["packages/ats-skills"]; },
+    (p) => { p["packages/ats-skills"].name = "another-package"; },
+    (p) => { p["packages/ats-skills"].version = "9.9.9"; },
+    (p) => { p["packages/ats-skills"].link = true; },
+    (p) => { p["packages/ats-skills"].resolved = "../other-source"; },
+    (p) => { p["packages/ats-skills"].dependencies["aether-browser"] = "^0.2.2"; },
+    (p) => { p["packages/ats-skills"].dependencies["aether-context"] = "0.3.2"; },
+    (p) => { delete p["packages/ats-skills"].dependencies["aether-context"]; },
+    (p) => { p["packages/ats-skills"].dependencies.extra = "1.0.0"; },
+    (p) => { p["packages/ats-skills"].optionalDependencies = { extra: "1.0.0" }; },
+    (p) => { p["packages/ats-skills"].peerDependencies = { extra: "1.0.0" }; },
+    (p) => { p["packages/ats-skills"].bundleDependencies = ["aether-context"]; },
+  ];
+  for (const mutate of mutations) {
+    const fixture = bundledAtsLockfile();
+    mutate(fixture.packages);
+    assert.throws(() => collectNpmBulkPayload(fixture), /bundled ATS link must match/u, mutate.toString());
+  }
+});
+
+test("the ATS exception cannot hide absent, replaced, unaudited or symlinked runtime dependencies", () => {
+  for (const dependencyName of ["aether-browser", "aether-context"]) {
+    for (const mutate of [
+      (p, key) => { delete p[key]; },
+      (p, key) => { p[key].version = "9.9.9"; },
+      (p, key) => { p[key].name = "other-package"; },
+      (p, key) => { p[key].link = true; },
+      (p, key) => { delete p[key].integrity; },
+      (p, key) => { p[key].integrity = "sha1-no-sha512"; },
+      (p, key) => { p[key].resolved = "file:../replacement"; },
+      (p, key) => { p[key].resolved = p[key].resolved.replace("registry.npmjs.org", "registry.example"); },
+    ]) {
+      const fixture = bundledAtsLockfile();
+      mutate(fixture.packages, `node_modules/${dependencyName}`);
+      assert.throws(() => collectNpmBulkPayload(fixture), undefined, `${dependencyName}: ${mutate}`);
+    }
+  }
+
+  const shadowed = bundledAtsLockfile();
+  shadowed.packages["packages/ats-skills/node_modules/aether-browser"] = locked("aether-browser", "9.9.9");
+  assert.throws(() => collectNpmBulkPayload(shadowed), /bundled ATS link must match/u);
+
+  const missing = bundledAtsLockfile();
+  missing.packages.undefined = missing.packages["node_modules/aether-browser"];
+  delete missing.packages["node_modules/aether-browser"];
+  assert.throws(() => collectNpmBulkPayload(missing), /bundled ATS link must match/u);
+
+  for (const location of ["node_modules/other", "node_modules/parent/node_modules/aether-ats-skills"]) {
+    const fixture = bundledAtsLockfile();
+    fixture.packages[location] = { resolved: "packages/ats-skills", link: true };
+    assert.throws(() => collectNpmBulkPayload(fixture), /unsupported local package link/u);
+  }
+
+  const disguised = bundledAtsLockfile();
+  disguised.packages["node_modules/other"] = locked("other", "1.0.0", { link: true });
+  assert.throws(() => collectNpmBulkPayload(disguised), /unsupported local package link/u);
 });
 
 test("passes only a consistent zero-exit npm v2 report below the high threshold", () => {

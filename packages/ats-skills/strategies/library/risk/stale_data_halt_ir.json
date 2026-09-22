@@ -1,0 +1,13 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "StaleDataHalt",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1m" },
+    { "type": "Condition", "signal": "FEED_AGE_SEC", "operator": ">=", "value": 30 },
+    { "type": "Intent", "action": "PAUSE" },
+    { "type": "Intent", "action": "OBSERVE" },
+    { "type": "Agent", "name": "RiskDesk" }
+  ]
+}

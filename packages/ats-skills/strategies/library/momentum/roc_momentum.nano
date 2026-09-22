@@ -1,0 +1,26 @@
+// Rate-of-change momentum (Pine: ta.roc(close, 10) > 5).
+// ROC = percent change of close over the lookback window.
+// REGIME: trend or expansion. Do NOT fire in chop - in a range a 5 percent
+// 10-bar move marks the top of the range, so this becomes buy-the-high.
+// CONDITIONS: range expanding, higher highs on the timeframe above.
+// INVALIDATION: ROC decaying back under the threshold while price stalls
+// (momentum exhaustion), or the whole move coming from one spike bar.
+// SHAPE: 1h; a sustained directional push, not a single candle.
+// NOT macd_histogram_flip: that signals a change of trend, this one signals
+// continuation of a trend already running.
+// CALIBRATED ON: crypto, 1h. The threshold is the danger here - a 5 percent
+// move over 10 bars is an ordinary afternoon for BTC and a limit-move event
+// for an index future. Do not carry the number across instrument classes.
+strategy RocMomentum {
+
+    every 1h {
+
+        if ROC(10) > 5 {
+
+            buy(BTCUSD, 0.7)
+
+        }
+
+    }
+
+}

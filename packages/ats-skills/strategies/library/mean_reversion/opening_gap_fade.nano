@@ -1,0 +1,60 @@
+// Opening gap fade. The gap is this bar's open against the prior close, sized
+// in units of the prior bar's ATR so the threshold means the same thing on a
+// quiet instrument and a violent one. The fade is taken only when the bar has
+// already closed back through its own open - the gap being large is not the
+// signal, the gap failing is.
+// REGIME: a session-bound instrument in a range, where an overnight gap is an
+// imbalance rather than news. Do NOT fire on a breakaway gap: a gap that opens
+// a new trend is the same shape on the open and the opposite trade, and no
+// bar-level rule can tell the two apart. That is this rule's central risk and
+// it is not solved here.
+// INPUTS: open, high, low, close (series<float>). Requires a genuine session
+// open, so it is meaningless on a continuously traded instrument where the
+// open is just the previous close.
+// CONDITIONS: gap at least 1.5 prior-bar ATRs, and a close on the wrong side
+// of the open. Symmetric: the else arm is the down-gap mirror, and the two can
+// never both be true because a gap cannot be up and down at once.
+// INVALIDATION: a close beyond the gap extreme, which says the gap is being
+// extended rather than filled. The host owns the stop; this rule proposes only.
+// SHAPE: 1d; an outsized open that gives the whole move back by the close.
+// NOT event_impulse_pullback_short: that is a macro-event rule on a five-second
+// cadence, gated by a host event engine that has verified a scheduled release.
+// This is a daily-bar rule with no event knowledge at all - if a red-folder
+// release caused the gap, that rule should own it and this one should not fire.
+// CALIBRATED ON: session-bound US equities, daily bars. 1.5 ATRs is a
+// convention; because it is ATR-relative it travels across instruments, but it
+// does not travel across cadences - on a 5m bar the "gap" is a single tick of
+// slippage. The rule also assumes the open is executable, which is false in the
+// first seconds of an auction.
+strategy OpeningGapFade {
+
+    param atr_window: int = 14
+    param gap_atr: float = 1.5
+
+    input open: series<float>
+    input high: series<float>
+    input low: series<float>
+    input close: series<float>
+
+    let gap = open - close[1]
+    let threshold = ATR(high, low, close, atr_window)[1] * gap_atr
+
+    every 1d {
+
+        if gap >= threshold and close < open {
+
+            sell(SPY, 0.55)
+
+        } else {
+
+            if gap <= -threshold and close > open {
+
+                buy(SPY, 0.55)
+
+            }
+
+        }
+
+    }
+
+}

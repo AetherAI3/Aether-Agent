@@ -1,0 +1,38 @@
+// Second-leg acceleration, long side. Waits out the first impulse and its
+// compression instead of paying the worst post-release spread.
+// SECOND_LEG_SCORE = post-retracement extension beyond the first impulse
+// extreme after a 30-90s compression, 0..1 - the host only raises it when
+// impulse, controlled retrace, compression, and the fresh break have all
+// occurred in order. UPSIDE_IMPULSE_ATR = first-impulse magnitude in
+// pre-event 1m ATRs. BULL_FLOW_CONFIRM = futures order-flow confirmation,
+// 0..1.
+// REGIME: CPI, NFP, and FOMC statement legs where the real move develops
+// after the first shakeout. Do NOT fire on the first impulse itself -
+// SECOND_LEG_SCORE stays 0 until the compression-then-break sequence is
+// complete.
+// CONDITIONS: armed event, open entry window, decisive first impulse up,
+// completed second-leg sequence, bullish flow, normalized liquidity.
+// INVALIDATION: host event risk model owns stop, hard flat, and re-entry
+// lock. Falling back inside the compression is the natural stop reference.
+// SHAPE: 5s cadence; impulse up, 30-90s of compression holding most of the
+// move, then a break of the first impulse high.
+// NOT event_impulse_pullback_long: that rule enters on the first held
+// pullback; this one requires the later break of the first-move extreme and
+// therefore enters deeper into the entry window at a better-proven price.
+// CALIBRATED ON: MES/MNQ around US red-folder releases, 5s cadence.
+// Sequence-based score travels across event types; re-verify thresholds.
+strategy EventSecondLegLong {
+
+    agent MacroEvent
+
+    every 5s {
+
+        if EVENT_READY > 0.5 and ENTRY_WINDOW_OPEN > 0.5 and UPSIDE_IMPULSE_ATR > 0.8 and SECOND_LEG_SCORE > 0.7 and BULL_FLOW_CONFIRM > 0.55 and LIQUIDITY_OK > 0.5 {
+
+            buy(MES, 0.7)
+
+        }
+
+    }
+
+}

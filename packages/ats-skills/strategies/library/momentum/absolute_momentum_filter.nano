@@ -1,0 +1,50 @@
+// Absolute (time-series) momentum filter. Two rates of change on one price
+// series: a six-month lookback for the regime and a one-month lookback for
+// agreement. Both positive is risk-on, anything else is risk-off, and the rule
+// reports its state every period rather than only when it turns.
+// REGIME: a periodic allocation decision, not a trade entry. Do NOT fire it
+// intrabar or expect it to catch a turn - a six-month lookback is by design
+// late, and a rule that reads it every five minutes is reading noise around a
+// number that moves once a month.
+// INPUTS: close (series<float>). No other host signal.
+// CONDITIONS: both windows positive. The short window exists to veto the case
+// where the long return is still positive purely because of a base effect from
+// six months ago while the last month has been falling.
+// INVALIDATION: either window turning negative, at which point the else arm
+// emits OBSERVE. This rule never proposes a sell - going flat is the host's
+// decision, and OBSERVE is the honest way to say "the filter is off".
+// SHAPE: 1d; a slow, mostly-on switch that flips a handful of times a year.
+// NOT roc_momentum: that is a single host-supplied ROC compared with a
+// threshold, sized as an entry signal. This is two computed windows used as a
+// portfolio-level gate, and its output is a state, not a setup.
+// CALIBRATED ON: liquid, long-only equity index proxies, daily bars, no
+// dividends adjustment assumed. 126 and 21 are trading-day approximations of
+// six months and one month; they are conventions from the published academic
+// time-series-momentum literature, not a fit. Zero is the only threshold, so
+// nothing here needs re-scaling per instrument - but the rule does assume an
+// instrument with a positive long-run drift, and inverts badly on one without.
+strategy AbsoluteMomentumFilter {
+
+    param long_window: int = 126
+    param short_window: int = 21
+
+    input close: series<float>
+
+    let long_return = ROC(close, long_window)
+    let short_return = ROC(close, short_window)
+
+    every 1d {
+
+        if long_return > 0 and short_return > 0 {
+
+            buy(SPY, 0.55)
+
+        } else {
+
+            observe()
+
+        }
+
+    }
+
+}

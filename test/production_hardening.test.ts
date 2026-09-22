@@ -19,11 +19,14 @@ const manifest = {
   types: "dist/src/index.d.ts",
   bin: { aether: "dist/src/main.js" },
   files: [
-    "dist/src", "README.md", "assets/aether-agent-hero.png", "COMMANDS.md", "LICENSE", "NOTICE.md",
+    "dist/src", "ATS_ACCEPTABLE_USE_POLICY.md", "README.md", "assets/aether-agent-hero.png", "COMMANDS.md", "LICENSE", "NOTICE.md",
     "docs/generated/commands.md", "docs/generated/model-catalogue.md",
     "docs/model-catalogue/catalogue.json", "docs/model-catalogue/index.html",
+    "packages/ats-skills", "packages/ats-skills-source.json",
   ],
   engines: { node: ">=24" },
+  dependencies: { "aether-ats-skills": "0.2.0" },
+  bundledDependencies: ["aether-ats-skills"],
   repository: { type: "git", url: "https://github.com/AetherAI3/aether-agent" },
   scripts: { prepack: "npm run build" },
 };
@@ -37,6 +40,7 @@ const pack: PackReport = {
   entryCount: 8,
   files: [
     "COMMANDS.md",
+    "ATS_ACCEPTABLE_USE_POLICY.md",
     "LICENSE",
     "NOTICE.md",
     "README.md",
@@ -49,17 +53,53 @@ const pack: PackReport = {
     "dist/src/index.js",
     "dist/src/index.d.ts",
     "dist/src/main.js",
+    "node_modules/aether-ats-skills/package.json",
+    "node_modules/aether-ats-skills/src/index.js",
+    "node_modules/aether-ats-skills/src/browser.js",
+    "node_modules/aether-ats-skills/src/browser_recovery.js",
+    "node_modules/aether-ats-skills/src/browser_transport.js",
+    "node_modules/aether-ats-skills/src/vision_skill.js",
+    "node_modules/aether-ats-skills/src/settings.js",
+    "node_modules/aether-ats-skills/src/strategy_library.js",
+    "node_modules/aether-ats-skills/src/journal.js",
+    "node_modules/aether-ats-skills/src/memory_lease.js",
+    "node_modules/aether-ats-skills/python/memory_lease.py",
+    "node_modules/aether-ats-skills/strategies/manifest.json",
+    "node_modules/aether-ats-skills/strategies/catalog.json",
+    "node_modules/aether-ats-skills/python/bridge.py",
+    "node_modules/aether-ats-skills/bin/aether-ats-skills.js",
+    "node_modules/aether-browser/package.json",
+    "node_modules/aether-browser/src/index.js",
+    "node_modules/aether-context/package.json",
+    "node_modules/aether-context/bin/aether-context.js",
+    "packages/ats-skills-source.json",
+    ...["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"].map((path) => `packages/ats-skills/${path}`),
   ].map((path) => ({ path, size: 1 })),
 };
 
-test("release manifest binds the tag and preserves the zero-runtime-dependency contract", () => {
+test("release manifest binds the tag and exact bundled runtime dependency contract", () => {
   assert.deepEqual(validateManifest(manifest, "v1.2.3"), []);
   assert.match(validateManifest({ ...manifest, dependencies: { unsafe: "1.0.0" } }, "v1.2.4").join("\n"), /runtime dependencies/);
   assert.match(validateManifest(manifest, "v1.2.4").join("\n"), /does not match/);
+  assert.match(validateManifest({ ...manifest, bundledDependencies: [] }).join("\n"), /bundledDependencies/);
+  assert.match(validateManifest({ ...manifest, optionalDependencies: { unsafe: "1.0.0" } }).join("\n"), /optionalDependencies/);
+  assert.match(validateManifest({ ...manifest, peerDependencies: { unsafe: "1.0.0" } }).join("\n"), /peerDependencies/);
+  assert.match(validateManifest({ ...manifest, scripts: { ...manifest.scripts, postinstall: "node unreviewed.js" } }).join("\n"), /lifecycle hook/);
   assert.match(
     validateManifest({ ...manifest, repository: { url: "https://github.com/example/fork" } }, "v1.2.3").join("\n"),
     /trusted publisher repository/,
   );
+});
+
+test("package must contain the reviewed ATS/browser/context runtime and no other bundled package", () => {
+  const missing = { ...pack, files: pack.files.filter((file) => file.path !== "node_modules/aether-browser/src/index.js") };
+  assert.match(validatePack(missing, manifest).join("\n"), /missing bundled runtime entry/);
+  const withoutRecovery = { ...pack, files: pack.files.filter((file) => file.path !== "node_modules/aether-ats-skills/src/browser_recovery.js") };
+  assert.match(validatePack(withoutRecovery, manifest).join("\n"), /missing ATS runtime file src\/browser_recovery.js/);
+  const extra = { ...pack, files: [...pack.files, { path: "node_modules/unreviewed/index.js", size: 1 }] };
+  assert.match(validatePack(extra, manifest).join("\n"), /unexpected package content/);
+  const secret = { ...pack, files: [...pack.files, { path: "node_modules/aether-ats-skills/.env", size: 1 }] };
+  assert.match(validatePack(secret, manifest).join("\n"), /sensitive or non-runtime/);
 });
 
 test("package allowlist rejects compiled tests and environment files", () => {

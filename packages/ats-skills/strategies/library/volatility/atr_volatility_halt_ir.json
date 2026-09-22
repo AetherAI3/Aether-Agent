@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "AtrVolatilityHalt",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5m" },
+    { "type": "Condition", "signal": "ATR_PCT", "operator": ">", "value": 5 },
+    { "type": "Intent", "action": "PAUSE" }
+  ]
+}

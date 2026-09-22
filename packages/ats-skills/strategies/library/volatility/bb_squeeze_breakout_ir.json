@@ -1,0 +1,12 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "BbSqueezeBreakout",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "1h" },
+    { "type": "Condition", "signal": "BB_WIDTH", "operator": "<", "value": 4 },
+    { "type": "Condition", "signal": "MOM", "operator": ">", "value": 0 },
+    { "type": "Intent", "action": "BUY", "asset": "BTCUSD", "confidence": 0.7 }
+  ]
+}

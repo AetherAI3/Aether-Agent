@@ -27,6 +27,13 @@ import {
   type SettingValueType,
   type WritableSettingScope,
 } from "../core/settings_registry.js";
+import { AetherSettingsError } from "../core/settings_canonical.js";
+import { CloudSettingsClient, type EffectiveSettingsResponse } from "../core/settings_cloud.js";
+import {
+  buildSettingsStatus,
+  renderSettingsStatus,
+  type SettingsStatusReport,
+} from "../core/settings_status.js";
 import { VersionedSettingsStore, type SettingsStorePaths } from "../core/settings_store.js";
 import {
   detectTerminalCapabilities,
@@ -59,6 +66,7 @@ const MAX_IMPORT_BYTES = 1_048_576;
 const MAX_IMPORT_SETTINGS = 1_000;
 const USAGE = [
   "usage: aether settings [list [section] | show <id|section> | get <id>]",
+  "       aether settings status",
   "       aether settings set <id> <value> [--scope global|project]",
   "       aether settings unset <id> [--scope global|project]",
   "       aether settings reset <section> [--scope global|project] [--preview]",
@@ -83,6 +91,11 @@ export interface SettingsCommandOptions {
   readonly sessionId?: string;
   readonly confirmPhrase?: (confirmation: RequiredConfirmation) => Promise<string | null>;
   readonly interactiveRuntime?: SettingsInteractiveRuntime;
+  /** Test seam for `settings status`; production leaves this absent. */
+  readonly statusDeps?: {
+    readonly readEffective?: () => Promise<EffectiveSettingsResponse>;
+    readonly store?: Pick<VersionedSettingsStore, "inspect">;
+  };
 }
 
 /** Convert the settings command's owned flags without reparsing argv. Scope is
@@ -130,6 +143,54 @@ export function createSettingsCommandRegistry(
     terminalCapabilities: capabilities,
   });
 }
+
+/**
+ * Build `aether settings status` without printing anything the user owns.
+ *
+ * Cloud is read live because a cached account revision is exactly the thing a
+ * status command must not report as current. When the read fails the report
+ * says so — offline, unauthorized or disabled — rather than showing a stale
+ * number as if it were fresh.
+ *
+ * `statusDeps` is a test seam; production passes nothing and gets the real
+ * Cloud client and the real local store.
+ */
+async function settingsStatusReport(
+  ctx: AppContext,
+  options: SettingsCommandOptions,
+): Promise<SettingsStatusReport> {
+  const deps = options.statusDeps;
+  let effective: EffectiveSettingsResponse | undefined;
+  let cloudError: SettingsStatusInputError;
+  try {
+    effective = deps?.readEffective
+      ? await deps.readEffective()
+      : await new CloudSettingsClient({ api: ctx.api }).effective();
+  } catch (error) {
+    cloudError =
+      error instanceof AetherSettingsError ? error.code : "AETHER_SETTINGS_BACKEND_ERROR";
+  }
+
+  let device: { status: string; digest?: string | undefined } | undefined;
+  try {
+    const store =
+      deps?.store ?? new VersionedSettingsStore(settingsStorePaths(ctx, options));
+    const inspection = store.inspect("global");
+    device = { status: inspection.status, digest: inspection.digest };
+  } catch {
+    // A store that cannot even be inspected is reported, not thrown: the whole
+    // point of `status` is to still answer when something is broken.
+    device = { status: "unreadable" };
+  }
+
+  return buildSettingsStatus({
+    ...(effective ? { effective } : {}),
+    ...(cloudError ? { cloudError } : {}),
+    ...(device ? { device } : {}),
+  });
+}
+
+type SettingsStatusInputError = Parameters<typeof buildSettingsStatus>[0]["cloudError"];
 
 interface PresentedSetting {
   readonly id: string;
@@ -1074,6 +1135,14 @@ export async function cmdSettings(
       }
       if (ctx.flags.json) writeJson(out, subcommand, true, { settings: found });
       else out.write(renderRows(found, subcommand === "show"));
+      return SETTINGS_EXIT.ok;
+    }
+
+    if (subcommand === "status") {
+      if (argv.length > 1) return usageProblem(ctx, out, err);
+      const report = await settingsStatusReport(ctx, options);
+      if (ctx.flags.json) writeJson(out, "status", true, { status: report });
+      else out.write(renderSettingsStatus(report));
       return SETTINGS_EXIT.ok;
     }
 

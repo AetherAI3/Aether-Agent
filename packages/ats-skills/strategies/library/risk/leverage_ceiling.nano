@@ -1,0 +1,28 @@
+// Leverage ceiling: pause when gross exposure reaches 3x equity.
+// REGIME: all of them. Leverage is a constraint, not a forecast.
+// CONDITIONS: none. Armed whenever the book is open.
+// INVALIDATION: none. It is reset by reducing size, deliberately, outside this
+// rule.
+// SHAPE: 5m; gross exposure moves on fills and on marks, and 5m is fast enough
+// to catch both without re-checking a number that has not changed.
+// NOT position_concentration_cap: that measures how the book is distributed,
+// this measures how large it is in total. A perfectly diversified book at 5x
+// gross passes the concentration cap and belongs to this rule.
+// CALIBRATED ON: nothing instrument-specific, but 3x is a house figure rather
+// than a universal one - a futures book and a cash equity book do not mean the
+// same thing by "gross".
+strategy LeverageCeiling {
+
+    agent RiskDesk
+
+    every 5m {
+
+        if GROSS_LEVERAGE >= 3 {
+
+            pause()
+
+        }
+
+    }
+
+}

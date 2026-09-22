@@ -1,0 +1,32 @@
+// Volume-confirmed capitulation buy. VOL_RATIO = volume / SMA(volume, 20),
+// provided by the host data feed. A 3x volume spike while RSI is oversold
+// marks a high-conviction reversal candidate.
+// REGIME: capitulation or climax, inside a larger range or an uptrend
+// pullback. Do NOT fire in an orderly downtrend - steady selling produces
+// oversold RSI without the volume climax, and the volume gate is the only
+// thing separating this from catching a falling knife.
+// CONDITIONS: both halves must hold in the same bar. The volume spike is the
+// evidence of exhaustion; the RSI reading alone is not.
+// INVALIDATION: the next bar making a new low on equal or greater volume.
+// That is continuation on participation, which is the opposite of exhaustion.
+// SHAPE: 15m; a high-volume flush candle with a long lower wick.
+// NOT rsi_oversold_reversal: this is that exact condition plus a volume gate,
+// so it is a strict subset of it. When both fire it is one setup with two
+// names, and treating them as two independent confirmations double-counts the
+// same evidence.
+// CALIBRATED ON: crypto, 15m. RSI 30 travels; the 3x volume ratio does not -
+// it depends entirely on the venue's volume profile and on how much of the
+// instrument's real volume the feed actually sees.
+strategy VolumeSpikeConfirmation {
+
+    every 15m {
+
+        if VOL_RATIO(20) > 3 and RSI(14) < 30 {
+
+            buy(BTCUSD, 0.85)
+
+        }
+
+    }
+
+}

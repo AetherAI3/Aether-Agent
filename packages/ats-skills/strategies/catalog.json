@@ -1,0 +1,1655 @@
+{
+
+  "type": "NanoStrategyCatalog",
+  "schemaVersion": 1,
+  "metadataVersion": "StrategyMetadataV1",
+  "strategyCount": 55,
+  "categoryCounts": {
+    "event_volatility": 11,
+    "mean_reversion": 7,
+    "momentum": 6,
+    "risk": 7,
+    "trend": 8,
+    "volatility": 4,
+    "volume": 4,
+    "watchdog": 8
+  },
+  "irMaturityCounts": {
+    "baseline": 41,
+    "v1": 14
+  },
+  "strategies": [
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/cpi_impulse_pullback_long",
+      "slug": "cpi_impulse_pullback_long",
+      "name": "CpiImpulsePullbackLong",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "CPI releases where the print is genuinely cool AND the tape agrees. Do NOT fire on a cool print alone - the impulse and retrace terms must confirm - and do NOT fire when the release packet is missing, provisional, or conflicted: RELEASE_CONFIRMED stays 0 and this branch honestly abstains.",
+      "conditions": "armed event, open entry window, confirmed release, cool CPI, upward impulse at least 0.8 pre-event ATRs, held retracement, cross-market agreement, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat, and the one-position-per-event lock.",
+      "shape": "5s cadence after the observe-only impulse window; cool print, leg up, shallow pullback that holds, continuation.",
+      "calibratedOn": "MES around US CPI, 5s cadence. The 0.72 release threshold is a versioned fixed scale until enough forecast-error history exists; never silently retune it between events.",
+      "nearestConfused": [
+        {
+          "slug": "event_impulse_pullback_long",
+          "id": "event_volatility/event_impulse_pullback_long",
+          "distinction": "same tape shape, but this variant demands execution-grade release provenance and the fundamental sign to match the move. When both qualify, the proposal board still selects only one."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BULL_CROSS_CONFIRM",
+        "CPI_COOL_SCORE",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "RELEASE_CONFIRMED",
+        "RETRACE_HOLD_SCORE",
+        "UPSIDE_IMPULSE_ATR"
+      ],
+      "sourcePath": "library/event_volatility/cpi_impulse_pullback_long.nano",
+      "irPath": "library/event_volatility/cpi_impulse_pullback_long_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/cpi_impulse_pullback_short",
+      "slug": "cpi_impulse_pullback_short",
+      "name": "CpiImpulsePullbackShort",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "CPI releases where the print is genuinely hot AND the tape agrees. Do NOT fire on a hot print alone, and do NOT fire when the release packet is missing, provisional, or conflicted - this branch abstains.",
+      "conditions": "armed event, open entry window, confirmed release, hot CPI, downward impulse at least 0.8 pre-event ATRs, held retracement, cross-market agreement, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat, and the one-position-per-event lock.",
+      "shape": "5s cadence after the observe-only impulse window; hot print, leg down, weak bounce that fails, continuation.",
+      "calibratedOn": "MES around US CPI, 5s cadence. The 0.72 release threshold is a versioned fixed scale until enough forecast-error history exists; never silently retune it between events.",
+      "nearestConfused": [
+        {
+          "slug": "event_impulse_pullback_short",
+          "id": "event_volatility/event_impulse_pullback_short",
+          "distinction": "same tape shape, but this variant demands execution-grade release provenance and the fundamental sign to match."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BEAR_CROSS_CONFIRM",
+        "CPI_HOT_SCORE",
+        "DOWNSIDE_IMPULSE_ATR",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "RELEASE_CONFIRMED",
+        "RETRACE_HOLD_SCORE"
+      ],
+      "sourcePath": "library/event_volatility/cpi_impulse_pullback_short.nano",
+      "irPath": "library/event_volatility/cpi_impulse_pullback_short_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_false_first_move_long",
+      "slug": "event_false_first_move_long",
+      "name": "EventFalseFirstMoveLong",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "red-folder releases where the first move traps breakout sellers - common on headline/core disagreement. Do NOT fire on a clean downside continuation; BREAK_FAILURE_SCORE and EVENT_ANCHOR_RECLAIM must both prove the failure first.",
+      "conditions": "armed event, open entry window, downside range break, proven break failure, anchor reclaim, bullish flow, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat, and re-entry lock. Losing the reclaimed anchor is the natural stop reference.",
+      "shape": "5s cadence; spike down through the pre-event low, sharp rejection, reclaim of anchor, then reversal higher.",
+      "calibratedOn": "MES/MNQ around US red-folder releases, 5s cadence. Break/reclaim scores are range-relative and travel across index futures; re-verify before promotion.",
+      "nearestConfused": [
+        {
+          "slug": "event_impulse_pullback_long",
+          "id": "event_volatility/event_impulse_pullback_long",
+          "distinction": "that rule needs an upward first impulse; this one requires the first impulse to have been DOWN and to have failed. They cannot both qualify on the same event path."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BREAK_FAILURE_SCORE",
+        "BULL_FLOW_CONFIRM",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_ANCHOR_RECLAIM",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "PRE_EVENT_RANGE_BREAK_DOWN"
+      ],
+      "sourcePath": "library/event_volatility/event_false_first_move_long.nano",
+      "irPath": "library/event_volatility/event_false_first_move_long_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_false_first_move_short",
+      "slug": "event_false_first_move_short",
+      "name": "EventFalseFirstMoveShort",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "red-folder releases where the first move traps breakout buyers. Do NOT fire on a clean upside continuation; BREAK_FAILURE_SCORE and EVENT_ANCHOR_REJECT must both prove the failure first.",
+      "conditions": "armed event, open entry window, upside range break, proven break failure, anchor rejection, bearish flow, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat, and re-entry lock. Reclaiming the rejected anchor is the natural stop reference.",
+      "shape": "5s cadence; spike up through the pre-event high, sharp rejection, loss of anchor, then reversal lower.",
+      "calibratedOn": "MES/MNQ around US red-folder releases, 5s cadence. Break/reclaim scores are range-relative; re-verify before promotion.",
+      "nearestConfused": [
+        {
+          "slug": "event_impulse_pullback_short",
+          "id": "event_volatility/event_impulse_pullback_short",
+          "distinction": "that rule needs a downward first impulse; this one requires the first impulse to have been UP and to have failed."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BEAR_FLOW_CONFIRM",
+        "BREAK_FAILURE_SCORE",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_ANCHOR_REJECT",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "PRE_EVENT_RANGE_BREAK_UP"
+      ],
+      "sourcePath": "library/event_volatility/event_false_first_move_short.nano",
+      "irPath": "library/event_volatility/event_false_first_move_short_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_impulse_pullback_long",
+      "slug": "event_impulse_pullback_long",
+      "name": "EventImpulsePullbackLong",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "scheduled macro releases (CPI, PPI, NFP, FOMC stage A) with a decisive first impulse that holds its retracement. Do NOT fire outside an armed event window - EVENT_READY and ENTRY_WINDOW_OPEN are host gates, not suggestions.",
+      "conditions": "armed event, open entry window, upward impulse at least 0.8 pre-event ATRs, at least 60 percent of the impulse held through the first pullback, cross-market agreement, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat at T+10m, and the one-position-per-event lock. This rule only proposes.",
+      "shape": "5s decision cadence after the observe-only impulse window; a strong leg up, a shallow pullback that holds, then continuation.",
+      "calibratedOn": "MES/MNQ around US red-folder releases, 5s cadence. Impulse and retrace thresholds are event-scaled (ATR-relative) and travel better than absolute points, but re-verify per event type before promotion.",
+      "nearestConfused": [
+        {
+          "slug": "cpi_impulse_pullback_long",
+          "id": "event_volatility/cpi_impulse_pullback_long",
+          "distinction": "that variant additionally requires a CONFIRMED release packet and a cool CPI print. This one trades the tape reaction alone so it can run while the release adapter is unavailable."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BULL_CROSS_CONFIRM",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "RETRACE_HOLD_SCORE",
+        "UPSIDE_IMPULSE_ATR"
+      ],
+      "sourcePath": "library/event_volatility/event_impulse_pullback_long.nano",
+      "irPath": "library/event_volatility/event_impulse_pullback_long_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_impulse_pullback_short",
+      "slug": "event_impulse_pullback_short",
+      "name": "EventImpulsePullbackShort",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "scheduled macro releases with a decisive first impulse lower that holds its retracement. Do NOT fire outside an armed event window.",
+      "conditions": "armed event, open entry window, downward impulse at least 0.8 pre-event ATRs, at least 60 percent of the impulse held through the first pullback, bearish cross-market agreement, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat at T+10m, and the one-position-per-event lock.",
+      "shape": "5s decision cadence after the observe-only impulse window; a strong leg down, a shallow bounce that fails, then continuation.",
+      "calibratedOn": "MES/MNQ around US red-folder releases, 5s cadence. ATR-relative thresholds; re-verify per event type before promotion.",
+      "nearestConfused": [
+        {
+          "slug": "event_false_first_move_short",
+          "id": "event_volatility/event_false_first_move_short",
+          "distinction": "that rule sells a FAILED upside breakout; this one sells confirmed downside continuation. The host's mutually exclusive impulse terms prevent both arming on the same tape."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BEAR_CROSS_CONFIRM",
+        "DOWNSIDE_IMPULSE_ATR",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "RETRACE_HOLD_SCORE"
+      ],
+      "sourcePath": "library/event_volatility/event_impulse_pullback_short.nano",
+      "irPath": "library/event_volatility/event_impulse_pullback_short_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_liquidity_halt",
+      "slug": "event_liquidity_halt",
+      "name": "EventLiquidityHalt",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "any armed macro event window. This is a control, not a directional hypothesis - it emits PAUSE and must never be promoted into the execution slot or counted as a setup. The host enforces the same liquidity gate directly; this published rule is the auditable explanation.",
+      "conditions": "none beyond the stress reading. It is armed whenever the event window is live.",
+      "invalidation": "none - a breaker is not a trade. It releases when SPREAD_STRESS falls back under the threshold.",
+      "shape": "1s, because spread blowouts around a release happen and clear inside single seconds; a 5s control would react after the damage.",
+      "calibratedOn": "MES/MNQ around US red-folder releases. 0.8 means the spread is near its stressed ceiling relative to the pre-event baseline; the baseline normalization travels across instruments, the ceiling does not - re-verify per instrument class.",
+      "nearestConfused": [
+        {
+          "slug": "event_whipsaw_halt",
+          "id": "event_volatility/event_whipsaw_halt",
+          "distinction": "that halts on direction churn of the tape; this halts on the cost of trading it. Both should be armed during every event."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "SPREAD_STRESS"
+      ],
+      "sourcePath": "library/event_volatility/event_liquidity_halt.nano",
+      "irPath": "library/event_volatility/event_liquidity_halt_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_release_integrity_halt",
+      "slug": "event_release_integrity_halt",
+      "name": "EventReleaseIntegrityHalt",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "any armed macro event window. Control only - emits PAUSE, never promoted, never counted as a setup. The host's fail-closed gates enforce the same rule directly; this published rule is the auditable explanation.",
+      "conditions": "none beyond the conflict flag.",
+      "invalidation": "none - releases only if the host downgrades the conflict, which in v1 it does not do during the event window.",
+      "shape": "1s, so a conflicted release halts proposals before the first 5s qualify tick can act on poisoned numbers.",
+      "calibratedOn": "not calibrated - the flag is binary by contract and travels unchanged across all event types and instruments.",
+      "nearestConfused": [
+        {
+          "slug": "event_liquidity_halt",
+          "id": "event_volatility/event_liquidity_halt",
+          "distinction": "that halts on market conditions; this halts on data trust. A perfectly liquid tape with a conflicted release must still halt every release-aware branch."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "RELEASE_CONFLICT"
+      ],
+      "sourcePath": "library/event_volatility/event_release_integrity_halt.nano",
+      "irPath": "library/event_volatility/event_release_integrity_halt_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_second_leg_long",
+      "slug": "event_second_leg_long",
+      "name": "EventSecondLegLong",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "CPI, NFP, and FOMC statement legs where the real move develops after the first shakeout. Do NOT fire on the first impulse itself - SECOND_LEG_SCORE stays 0 until the compression-then-break sequence is complete.",
+      "conditions": "armed event, open entry window, decisive first impulse up, completed second-leg sequence, bullish flow, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat, and re-entry lock. Falling back inside the compression is the natural stop reference.",
+      "shape": "5s cadence; impulse up, 30-90s of compression holding most of the move, then a break of the first impulse high.",
+      "calibratedOn": "MES/MNQ around US red-folder releases, 5s cadence. Sequence-based score travels across event types; re-verify thresholds.",
+      "nearestConfused": [
+        {
+          "slug": "event_impulse_pullback_long",
+          "id": "event_volatility/event_impulse_pullback_long",
+          "distinction": "that rule enters on the first held pullback; this one requires the later break of the first-move extreme and therefore enters deeper into the entry window at a better-proven price."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BULL_FLOW_CONFIRM",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "SECOND_LEG_SCORE",
+        "UPSIDE_IMPULSE_ATR"
+      ],
+      "sourcePath": "library/event_volatility/event_second_leg_long.nano",
+      "irPath": "library/event_volatility/event_second_leg_long_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_second_leg_short",
+      "slug": "event_second_leg_short",
+      "name": "EventSecondLegShort",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "CPI, NFP, and FOMC statement legs where the real move lower develops after the first shakeout. Do NOT fire on the first impulse itself.",
+      "conditions": "armed event, open entry window, decisive first impulse down, completed second-leg sequence, bearish flow, normalized liquidity.",
+      "invalidation": "host event risk model owns stop, hard flat, and re-entry lock. Reclaiming the compression is the natural stop reference.",
+      "shape": "5s cadence; impulse down, 30-90s compression holding most of the move, then a break of the first impulse low.",
+      "calibratedOn": "MES/MNQ around US red-folder releases, 5s cadence. Sequence-based score travels across event types; re-verify thresholds.",
+      "nearestConfused": [
+        {
+          "slug": "event_false_first_move_short",
+          "id": "event_volatility/event_false_first_move_short",
+          "distinction": "that rule sells a failed UPSIDE breakout; this one sells continuation of a proven DOWNSIDE impulse after compression."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BEAR_FLOW_CONFIRM",
+        "DOWNSIDE_IMPULSE_ATR",
+        "ENTRY_WINDOW_OPEN",
+        "EVENT_READY",
+        "LIQUIDITY_OK",
+        "SECOND_LEG_SCORE"
+      ],
+      "sourcePath": "library/event_volatility/event_second_leg_short.nano",
+      "irPath": "library/event_volatility/event_second_leg_short_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "event_volatility/event_whipsaw_halt",
+      "slug": "event_whipsaw_halt",
+      "name": "EventWhipsawHalt",
+      "category": "event_volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "any armed macro event window. Control only - emits PAUSE, never promoted, never counted as a setup. The host enforces the same churn gate directly; this published rule is the auditable explanation.",
+      "conditions": "none beyond the churn reading.",
+      "invalidation": "none - releases when the tape picks a side and WHIPSAW_SCORE decays under the threshold.",
+      "shape": "5s, matching the qualify cadence - whipsaw is a property of the window, not of a single second.",
+      "calibratedOn": "MES/MNQ around US red-folder releases, 5s cadence. 0.7 tolerates the ordinary post-release shakeout but halts sustained chop; the anchor-crossing normalization travels across index futures.",
+      "nearestConfused": [
+        {
+          "slug": "event_liquidity_halt",
+          "id": "event_volatility/event_liquidity_halt",
+          "distinction": "spreads can be perfectly normal while the tape chops; churn and cost are independent reasons to stand down. Both armed."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "WHIPSAW_SCORE"
+      ],
+      "sourcePath": "library/event_volatility/event_whipsaw_halt.nano",
+      "irPath": "library/event_volatility/event_whipsaw_halt_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "mean_reversion/bollinger_band_touch",
+      "slug": "bollinger_band_touch",
+      "name": "BollingerBandTouch",
+      "category": "mean_reversion",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "range-bound with stable band width. Do NOT fire in a downtrend or a volatility expansion - %B sits below 0 for long runs in a trend, and every touch there is a knife-catch.",
+      "conditions": "band width flat or contracting, and the prior swing low still holding on the timeframe above.",
+      "invalidation": "a second consecutive close below the lower band, or band width expanding while price falls. Both mean continuation, not reversion.",
+      "shape": "1h; a wick piercing the lower band that closes back inside it.",
+      "calibratedOn": "US large-cap equity ETF, 1h. %B itself is scale-free, but \"band width is stable\" is not - re-derive it for a new instrument class.",
+      "nearestConfused": [
+        {
+          "slug": "bb_squeeze_breakout",
+          "id": "volatility/bb_squeeze_breakout",
+          "distinction": "same indicator family, opposite intent. That one enters on expansion out of compression; this one needs the range to hold."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BB_PCT_B"
+      ],
+      "sourcePath": "library/mean_reversion/bollinger_band_touch.nano",
+      "irPath": "library/mean_reversion/bollinger_band_touch_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "mean_reversion/bollinger_lower_reclaim",
+      "slug": "bollinger_lower_reclaim",
+      "name": "BollingerLowerReclaim",
+      "category": "mean_reversion",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "a range, or a well-behaved uptrend that overshoots. Do NOT fire in a volatility expansion: the bands widen to track the move, so price can close outside and reclaim repeatedly on the way down while every reclaim fails. INPUTS: close (series<float>). No other host signal.",
+      "conditions": "prior close at or below the prior lower band, current close above the current lower band. Nothing about trend - this rule deliberately carries no regime filter, which is why it belongs beside one that does.",
+      "invalidation": "a second close back under the band. The reclaim thesis is that the excursion is finished; a repeat says it was not.",
+      "shape": "1d; a spike through the band that closes back inside the next bar.",
+      "calibratedOn": "liquid US equity index proxies, daily. 20 bars and 2.0 standard deviations are Bollinger's published convention. The multiplier is scale-free so it travels; what does not travel is the assumption that returns are symmetric enough for a two-sigma excursion to be rare, which is false on instruments with a fat left tail.",
+      "nearestConfused": [
+        {
+          "slug": "bollinger_band_touch",
+          "id": "mean_reversion/bollinger_band_touch",
+          "distinction": "that is the level test on baseline IR - it fires while price is outside the band, so it enters into the excursion. This waits for the excursion to end, which trades earliness for confirmation and fires far less often."
+        },
+        {
+          "slug": "zscore_fade_trend_filtered",
+          "id": "mean_reversion/zscore_fade_trend_filtered",
+          "distinction": "same statistical idea (distance from a rolling mean in units of rolling dispersion) with a trend gate attached; that one abstains in a downtrend, this one does not."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close"
+      ],
+      "sourcePath": "library/mean_reversion/bollinger_lower_reclaim.nano",
+      "irPath": "library/mean_reversion/bollinger_lower_reclaim_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "mean_reversion/cci_extreme",
+      "slug": "cci_extreme",
+      "name": "CciExtreme",
+      "category": "mean_reversion",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "range, or a pullback inside a standing uptrend. Do NOT fire in a sustained downtrend - CCI pins beyond -100 and stays there for many bars.",
+      "conditions": "a definable range floor, and the higher timeframe not printing new lows.",
+      "invalidation": "CCI_NEG continuing past roughly 200 (the move is accelerating, not exhausting), or a close beneath the range floor.",
+      "shape": "1h; a sharp excursion below recent congestion that snaps back.",
+      "calibratedOn": "US tech equity ETF, 1h. The +/-100 convention is standard; how often it is actually reached is entirely instrument-dependent.",
+      "nearestConfused": [
+        {
+          "slug": "zscore_reversion",
+          "id": "mean_reversion/zscore_reversion",
+          "distinction": "both measure distance from a mean, but CCI normalises by mean absolute deviation rather than standard deviation, so it reacts sooner and fires considerably more often in chop."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "CCI_NEG"
+      ],
+      "sourcePath": "library/mean_reversion/cci_extreme.nano",
+      "irPath": "library/mean_reversion/cci_extreme_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "mean_reversion/opening_gap_fade",
+      "slug": "opening_gap_fade",
+      "name": "OpeningGapFade",
+      "category": "mean_reversion",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "a session-bound instrument in a range, where an overnight gap is an imbalance rather than news. Do NOT fire on a breakaway gap: a gap that opens a new trend is the same shape on the open and the opposite trade, and no bar-level rule can tell the two apart. That is this rule's central risk and it is not solved here. INPUTS: open, high, low, close (series<float>). Requires a genuine session open, so it is meaningless on a continuously traded instrument where the open is just the previous close.",
+      "conditions": "gap at least 1.5 prior-bar ATRs, and a close on the wrong side of the open. Symmetric: the else arm is the down-gap mirror, and the two can never both be true because a gap cannot be up and down at once.",
+      "invalidation": "a close beyond the gap extreme, which says the gap is being extended rather than filled. The host owns the stop; this rule proposes only.",
+      "shape": "1d; an outsized open that gives the whole move back by the close.",
+      "calibratedOn": "session-bound US equities, daily bars. 1.5 ATRs is a convention; because it is ATR-relative it travels across instruments, but it does not travel across cadences - on a 5m bar the \"gap\" is a single tick of slippage. The rule also assumes the open is executable, which is false in the first seconds of an auction.",
+      "nearestConfused": [
+        {
+          "slug": "event_impulse_pullback_short",
+          "id": "event_volatility/event_impulse_pullback_short",
+          "distinction": "that is a macro-event rule on a five-second cadence, gated by a host event engine that has verified a scheduled release. This is a daily-bar rule with no event knowledge at all - if a red-folder release caused the gap, that rule should own it and this one should not fire."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close",
+        "high",
+        "low",
+        "open"
+      ],
+      "sourcePath": "library/mean_reversion/opening_gap_fade.nano",
+      "irPath": "library/mean_reversion/opening_gap_fade_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "mean_reversion/volatility_percentile_reclaim",
+      "slug": "volatility_percentile_reclaim",
+      "name": "VolatilityPercentileReclaim",
+      "category": "mean_reversion",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "range-like or orderly pullback behavior outside an exceptional volatility state. Do NOT use the gate as a claim that low volatility causes reversal; it only separates a familiar reclaim from a distributional shock. INPUTS: high, low, close (series<float>). Bars must be contiguous: ATR resets across gaps, and PERCENTRANK stays absent until a full new history is present.",
+      "conditions": "prior close at or below its prior lower band, current close above its current lower band, and ATR rank below 0.9 against exactly the preceding hundred ATR values. All three terms have independent mutation controls.",
+      "invalidation": "another close below the band, or ATR entering the excluded top decile. Either says the excursion is continuing or the volatility regime has changed; the host, not this rule, decides what to do with an existing position.",
+      "shape": "1d; a two-bar downside excursion and reclaim after enough contiguous history to compare today's range state with the preceding hundred ATR cells.",
+      "calibratedOn": "liquid US equity index proxies, daily. Bollinger 20/2 and ATR 14 are published conventions; 100 observations and 0.9 define the research regime split. None is a profitability claim, and cadence changes need review.",
+      "nearestConfused": [
+        {
+          "slug": "bollinger_lower_reclaim",
+          "id": "mean_reversion/bollinger_lower_reclaim",
+          "distinction": "that rule takes every strict lower-band reclaim. This one abstains when the same price shape occurs at an extreme ATR rank; the percentile gate, not a different band threshold, is the structural hypothesis."
+        },
+        {
+          "slug": "zscore_fade_trend_filtered",
+          "id": "mean_reversion/zscore_fade_trend_filtered",
+          "distinction": "that enters while z-score remains deeply negative and uses a long price trend as its regime gate. This waits for a full band reclaim and gates on the instrument's own volatility distribution."
+        }
+      ],
+      "provenance": "Bollinger-band conventions and Engle (1982) conditional-volatility research; the regime gate is an original hypothesis, with no source code copied.",
+      "requiredHostSignals": [
+        "close",
+        "high",
+        "low"
+      ],
+      "sourcePath": "library/mean_reversion/volatility_percentile_reclaim.nano",
+      "irPath": "library/mean_reversion/volatility_percentile_reclaim_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "mean_reversion/zscore_fade_trend_filtered",
+      "slug": "zscore_fade_trend_filtered",
+      "name": "ZscoreFadeTrendFiltered",
+      "category": "mean_reversion",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "a pullback inside an uptrend. Do NOT fire in a downtrend - that is exactly what the two-hundred-bar filter exists to prevent, because an unfiltered z-score fade in a bear leg buys every step down and each one is cheaper than the last. INPUTS: close (series<float>). No other host signal.",
+      "conditions": "close above the long average, the z-score at or beyond two standard deviations below the short mean, and the z-score higher than one bar ago. The final term waits for the flush to start reclaiming instead of buying each deeper reading.",
+      "invalidation": "a close below the two-hundred-bar average, which disarms the rule outright, or a z-score that keeps falling - dispersion-relative cheapness that gets cheaper is a regime change, not an opportunity.",
+      "shape": "1d; a sharp two-sigma flush that starts reclaiming inside an intact uptrend.",
+      "calibratedOn": "liquid US equity index proxies, daily. 20/200 and 2.0 sigma are conventions. The z-score is unit-free so the threshold travels; the 200-bar filter does not travel to intraday cadences, where 200 bars can be a single session and the \"trend\" it measures is noise.",
+      "nearestConfused": [
+        {
+          "slug": "zscore_reversion",
+          "id": "mean_reversion/zscore_reversion",
+          "distinction": "that is the same statistic on baseline IR, using a host-negated ZSCORE_NEG signal and no regime filter. The whole difference is the filter, and it is the difference between a mean-reversion rule and a falling-knife rule."
+        },
+        {
+          "slug": "bollinger_lower_reclaim",
+          "id": "mean_reversion/bollinger_lower_reclaim",
+          "distinction": "same distance-from-mean idea, but that one waits for the excursion to end and this one enters into it. If both fire, this one fired first."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close"
+      ],
+      "sourcePath": "library/mean_reversion/zscore_fade_trend_filtered.nano",
+      "irPath": "library/mean_reversion/zscore_fade_trend_filtered_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "mean_reversion/zscore_reversion",
+      "slug": "zscore_reversion",
+      "name": "ZscoreReversion",
+      "category": "mean_reversion",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "statistically stationary - a range whose mean is flat. Do NOT fire during a trend or a repricing event: once the mean itself moves, distance from it stops being information.",
+      "conditions": "the 20-period mean roughly flat, and stdev not expanding.",
+      "invalidation": "ZSCORE_NEG holding at or above 2 across several bars, or the mean turning down. Both say the distribution moved rather than the price.",
+      "shape": "4h; a visible stretch away from a horizontal mean.",
+      "calibratedOn": "crypto, 4h - continuous trading, no session boundaries, and a higher baseline volatility than an index future. On a session-bound instrument the 20-period window straddles the overnight gap.",
+      "nearestConfused": [
+        {
+          "slug": "cci_extreme",
+          "id": "mean_reversion/cci_extreme",
+          "distinction": "the same idea measured more strictly and more slowly, so it produces far fewer signals. If both fire, that is one setup, not two."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "ZSCORE_NEG"
+      ],
+      "sourcePath": "library/mean_reversion/zscore_reversion.nano",
+      "irPath": "library/mean_reversion/zscore_reversion_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "momentum/absolute_momentum_filter",
+      "slug": "absolute_momentum_filter",
+      "name": "AbsoluteMomentumFilter",
+      "category": "momentum",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "a periodic allocation decision, not a trade entry. Do NOT fire it intrabar or expect it to catch a turn - a six-month lookback is by design late, and a rule that reads it every five minutes is reading noise around a number that moves once a month. INPUTS: close (series<float>). No other host signal.",
+      "conditions": "both windows positive. The short window exists to veto the case where the long return is still positive purely because of a base effect from six months ago while the last month has been falling.",
+      "invalidation": "either window turning negative, at which point the else arm emits OBSERVE. This rule never proposes a sell - going flat is the host's decision, and OBSERVE is the honest way to say \"the filter is off\".",
+      "shape": "1d; a slow, mostly-on switch that flips a handful of times a year.",
+      "calibratedOn": "liquid, long-only equity index proxies, daily bars, no dividends adjustment assumed. 126 and 21 are trading-day approximations of six months and one month; they are conventions from the published academic time-series-momentum literature, not a fit. Zero is the only threshold, so nothing here needs re-scaling per instrument - but the rule does assume an instrument with a positive long-run drift, and inverts badly on one without.",
+      "nearestConfused": [
+        {
+          "slug": "roc_momentum",
+          "id": "momentum/roc_momentum",
+          "distinction": "that is a single host-supplied ROC compared with a threshold, sized as an entry signal. This is two computed windows used as a portfolio-level gate, and its output is a state, not a setup."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close"
+      ],
+      "sourcePath": "library/momentum/absolute_momentum_filter.nano",
+      "irPath": "library/momentum/absolute_momentum_filter_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "momentum/roc_momentum",
+      "slug": "roc_momentum",
+      "name": "RocMomentum",
+      "category": "momentum",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "trend or expansion. Do NOT fire in chop - in a range a 5 percent 10-bar move marks the top of the range, so this becomes buy-the-high.",
+      "conditions": "range expanding, higher highs on the timeframe above.",
+      "invalidation": "ROC decaying back under the threshold while price stalls (momentum exhaustion), or the whole move coming from one spike bar.",
+      "shape": "1h; a sustained directional push, not a single candle.",
+      "calibratedOn": "crypto, 1h. The threshold is the danger here - a 5 percent move over 10 bars is an ordinary afternoon for BTC and a limit-move event for an index future. Do not carry the number across instrument classes.",
+      "nearestConfused": [
+        {
+          "slug": "macd_histogram_flip",
+          "id": "trend/macd_histogram_flip",
+          "distinction": "that signals a change of trend, this one signals continuation of a trend already running."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "ROC"
+      ],
+      "sourcePath": "library/momentum/roc_momentum.nano",
+      "irPath": "library/momentum/roc_momentum_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "momentum/rsi_oversold_reversal",
+      "slug": "rsi_oversold_reversal",
+      "name": "RsiOversoldReversal",
+      "category": "momentum",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "a pullback inside an uptrend, or a range. Do NOT fire in a sustained downtrend - RSI can hold under 30 for dozens of bars while price keeps falling, and this is the single most common way the strategy loses.",
+      "conditions": "the higher timeframe trending up or neutral, and a prior support level within reach.",
+      "invalidation": "RSI making a lower low together with price. Oversold that gets more oversold is trend, not exhaustion.",
+      "shape": "15m; a flush into support that turns within a few bars.",
+      "calibratedOn": "crypto, 15m. RSI is bounded 0-100 so the threshold travels, but how long an instrument stays sub-30 does not.",
+      "nearestConfused": [
+        {
+          "slug": "stochastic_oversold",
+          "id": "momentum/stochastic_oversold",
+          "distinction": "that measures position inside the recent range and fires earlier and far more often."
+        },
+        {
+          "slug": "volume_spike_confirmation",
+          "id": "volume/volume_spike_confirmation",
+          "distinction": "that is this exact RSI condition plus a volume gate, so it is a strict subset - when both fire it is one setup, not two."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "RSI"
+      ],
+      "sourcePath": "library/momentum/rsi_oversold_reversal.nano",
+      "irPath": "library/momentum/rsi_oversold_reversal_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "momentum/stochastic_oversold",
+      "slug": "stochastic_oversold",
+      "name": "StochasticOversold",
+      "category": "momentum",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "range. Do NOT fire in a trend - %K pins under 20 for the length of a downtrend, and this is the fastest of the oscillators, so it pins first.",
+      "conditions": "a defined support level, and a range wide enough that the low of the lookback window is meaningful.",
+      "invalidation": "%K flat under 20 across several bars rather than turning up.",
+      "shape": "30m; price probing the bottom of an established range.",
+      "calibratedOn": "crypto, 30m. The 0-100 bound travels; the dwell time below 20 is a property of the instrument.",
+      "nearestConfused": [
+        {
+          "slug": "rsi_oversold_reversal",
+          "id": "momentum/rsi_oversold_reversal",
+          "distinction": "RSI measures average gain against average loss, %K measures position within the recent high-low range. %K fires earlier and more often, so it is the noisier of the pair."
+        },
+        {
+          "slug": "williams_r_reversal",
+          "id": "momentum/williams_r_reversal",
+          "distinction": "that is the same construction inverted. Firing both is one idea counted twice."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "STOCH_K"
+      ],
+      "sourcePath": "library/momentum/stochastic_oversold.nano",
+      "irPath": "library/momentum/stochastic_oversold_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "momentum/stochastic_reclaim",
+      "slug": "stochastic_reclaim",
+      "name": "StochasticReclaim",
+      "category": "momentum",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "a range, or a pullback inside an uptrend. Do NOT fire in a sustained downtrend: %K pins near zero there and every small bounce produces a reclaim, so the rule turns into a metronome that buys each leg down. INPUTS: high, low, close (series<float>). No other host signal.",
+      "conditions": "%K at or above 20 this bar and below 20 last bar. One bar, one signal, then silence until it goes back under.",
+      "invalidation": "%K falling back under 20 within a bar or two, or a new low in price while %K makes a higher low - the second is the classic setup that looks like this one and is not.",
+      "shape": "1h; a flush to the bottom of the recent range that turns.",
+      "calibratedOn": "crypto, 1h. %K is bounded 0..100, so 20 travels across instruments in a way an absolute price threshold does not; what does not travel is how long an instrument sits pinned at the bottom of its range, which is what decides whether \"reclaim\" means anything.",
+      "nearestConfused": [
+        {
+          "slug": "stochastic_oversold",
+          "id": "momentum/stochastic_oversold",
+          "distinction": "that is the level test on baseline IR - it fires on every bar %K spends under 20, which in a downtrend is most of them. This fires once per excursion. If you are comparing fire counts between the two, the ratio is the point, not a bug."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close",
+        "high",
+        "low"
+      ],
+      "sourcePath": "library/momentum/stochastic_reclaim.nano",
+      "irPath": "library/momentum/stochastic_reclaim_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "momentum/williams_r_reversal",
+      "slug": "williams_r_reversal",
+      "name": "WilliamsRReversal",
+      "category": "momentum",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "range, or a pullback within an uptrend. Do NOT fire in a sustained downtrend - like every position-in-range oscillator it pins at the bottom and stays there.",
+      "conditions": "a defined range with a floor that has held at least once.",
+      "invalidation": "WILLR_POS remaining under 20 while the range floor gives way.",
+      "shape": "1h; a probe of the low of the 14-period range that recovers.",
+      "calibratedOn": "high-beta crypto, 1h. The 0-100 bound travels; on a slower instrument the oscillator reaches 20 far less often, so this will simply go quiet rather than misfire.",
+      "nearestConfused": [
+        {
+          "slug": "stochastic_oversold",
+          "id": "momentum/stochastic_oversold",
+          "distinction": "Williams %R is the inverted stochastic - the same measurement of position within the recent range. These two agreeing is a single idea counted twice, not confirmation."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "WILLR_POS"
+      ],
+      "sourcePath": "library/momentum/williams_r_reversal.nano",
+      "irPath": "library/momentum/williams_r_reversal_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "risk/consecutive_loss_circuit",
+      "slug": "consecutive_loss_circuit",
+      "name": "ConsecutiveLossCircuit",
+      "category": "risk",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them, though it is most informative in a regime the strategy was not built for - which is precisely when a run of losses appears.",
+      "conditions": "none. The host decides what closes a decision and what counts as a loss; Nano only reads the count.",
+      "invalidation": "none. The counter is reset by the host, deliberately, after review.",
+      "shape": "5m; the count only changes when a decision closes, so a faster cadence re-reads an unchanged number.",
+      "calibratedOn": "strategies that close decisions discretely. A continuously rebalanced book has no natural notion of a consecutive loss and should not arm this.",
+      "nearestConfused": [
+        {
+          "slug": "daily_loss_limit",
+          "id": "risk/daily_loss_limit",
+          "distinction": "that measures magnitude, this measures sequence. Four small losses in a row can cost almost nothing and still be the clearest evidence available that the regime has changed. A book can trip this while nowhere near any loss limit, which is the point."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "CONSECUTIVE_LOSSES"
+      ],
+      "sourcePath": "library/risk/consecutive_loss_circuit.nano",
+      "irPath": "library/risk/consecutive_loss_circuit_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "risk/correlation_cluster_guard",
+      "slug": "correlation_cluster_guard",
+      "name": "CorrelationClusterGuard",
+      "category": "risk",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "matters most in a stress regime, when correlations converge and a book that looked diversified stops being diversified.",
+      "conditions": "the host must publish a cluster assignment. Nano does not compute correlation - CLUSTER_EXPOSURE_PCT is the host's answer to \"how much of the book is really one bet\".",
+      "invalidation": "the cluster breaking up, which is a host measurement and not something this rule can observe.",
+      "shape": "15m; cluster membership is a rolling estimate and re-checking it faster than it updates only adds noise.",
+      "calibratedOn": "multi-asset books. A single-sector mandate is one cluster by construction and should not arm this without raising the threshold.",
+      "nearestConfused": [
+        {
+          "slug": "position_concentration_cap",
+          "id": "risk/position_concentration_cap",
+          "distinction": "that one counts a single instrument. This one counts many instruments that happen to be the same trade. A book can pass the concentration cap on every line and fail this badly."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "CLUSTER_EXPOSURE_PCT"
+      ],
+      "sourcePath": "library/risk/correlation_cluster_guard.nano",
+      "irPath": "library/risk/correlation_cluster_guard_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "risk/daily_loss_limit",
+      "slug": "daily_loss_limit",
+      "name": "DailyLossLimit",
+      "category": "risk",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. This is a control, not a directional hypothesis.",
+      "conditions": "none. It is armed from the session open.",
+      "invalidation": "none. A limit is not a trade. It resets on the next session boundary, which the host owns - Nano has no clock of its own.",
+      "shape": "1m, so a fast tape cannot run through the limit between checks.",
+      "calibratedOn": "nothing instrument-specific. 2 percent is a session-level figure and travels unchanged.",
+      "nearestConfused": [
+        {
+          "slug": "max_drawdown_breaker",
+          "id": "risk/max_drawdown_breaker",
+          "distinction": "that measures peak-to-trough over the life of the book and can sit quiet through a catastrophic single day if the book was up beforehand. This one resets daily and catches exactly that case. Both should be armed; neither subsumes the other."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "DAY_LOSS_PCT"
+      ],
+      "sourcePath": "library/risk/daily_loss_limit.nano",
+      "irPath": "library/risk/daily_loss_limit_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "risk/leverage_ceiling",
+      "slug": "leverage_ceiling",
+      "name": "LeverageCeiling",
+      "category": "risk",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. Leverage is a constraint, not a forecast.",
+      "conditions": "none. Armed whenever the book is open.",
+      "invalidation": "none. It is reset by reducing size, deliberately, outside this rule.",
+      "shape": "5m; gross exposure moves on fills and on marks, and 5m is fast enough to catch both without re-checking a number that has not changed.",
+      "calibratedOn": "nothing instrument-specific, but 3x is a house figure rather than a universal one - a futures book and a cash equity book do not mean the same thing by \"gross\".",
+      "nearestConfused": [
+        {
+          "slug": "position_concentration_cap",
+          "id": "risk/position_concentration_cap",
+          "distinction": "that measures how the book is distributed, this measures how large it is in total. A perfectly diversified book at 5x gross passes the concentration cap and belongs to this rule."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "GROSS_LEVERAGE"
+      ],
+      "sourcePath": "library/risk/leverage_ceiling.nano",
+      "irPath": "library/risk/leverage_ceiling_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "risk/max_drawdown_breaker",
+      "slug": "max_drawdown_breaker",
+      "name": "MaxDrawdownBreaker",
+      "category": "risk",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. This is a control, not a directional hypothesis, and it is always applicable. It must never be promoted into an execution slot or counted as a setup - it emits PAUSE, never BUY or SELL.",
+      "conditions": "none. It is armed whenever the book is open.",
+      "invalidation": "none. A breaker is not a trade and does not get invalidated; it is reset by the risk agent, deliberately and outside this strategy.",
+      "shape": "1m, so it reacts within a bar rather than after one.",
+      "calibratedOn": "nothing instrument-specific. 5 percent is a portfolio-level figure and is the one threshold in this library that travels unchanged.",
+      "nearestConfused": [
+        {
+          "slug": "atr_volatility_halt",
+          "id": "volatility/atr_volatility_halt",
+          "distinction": "that one halts on market volatility, this one halts on realised portfolio loss. They are not redundant - the tape can be calm while the book bleeds, and violent while the book is flat. Both should be armed, and neither substitutes for the other."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "DRAWDOWN"
+      ],
+      "sourcePath": "library/risk/max_drawdown_breaker.nano",
+      "irPath": "library/risk/max_drawdown_breaker_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "risk/position_concentration_cap",
+      "slug": "position_concentration_cap",
+      "name": "PositionConcentrationCap",
+      "category": "risk",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. Concentration risk does not care about trend.",
+      "conditions": "none. Armed whenever the book is open.",
+      "invalidation": "none. It is reset by the book changing shape, not by a signal.",
+      "shape": "5m; position weights move on fills, not on ticks, so a faster cadence would add checks without adding information.",
+      "calibratedOn": "nothing instrument-specific. 25 percent is a book-level figure. A concentrated book by mandate should raise it deliberately rather than disarm the rule.",
+      "nearestConfused": [
+        {
+          "slug": "leverage_ceiling",
+          "id": "risk/leverage_ceiling",
+          "distinction": "that measures total size against equity, this measures distribution. A book at 1x gross with everything in one name is fully inside the leverage limit and is exactly the situation this rule exists for."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "MAX_POSITION_PCT"
+      ],
+      "sourcePath": "library/risk/position_concentration_cap.nano",
+      "irPath": "library/risk/position_concentration_cap_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "risk/stale_data_halt",
+      "slug": "stale_data_halt",
+      "name": "StaleDataHalt",
+      "category": "risk",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them, and it outranks every directional rule. A signal computed from a stale tape is not a weak signal, it is a fabricated one.",
+      "conditions": "none. Armed whenever anything downstream is consuming the feed.",
+      "invalidation": "none. Freshness is not a view.",
+      "shape": "1m. The cadence bounds how long a stale tape can go unnoticed, so it is set to the tightest interval the library uses.",
+      "calibratedOn": "liquid instruments on a continuous session. A thin or session-bound instrument has legitimate 30-second gaps and needs a wider bound, or the rule fires all day and gets disarmed - which is worse than never arming it.",
+      "nearestConfused": [
+        {
+          "slug": "event_liquidity_halt",
+          "id": "event_volatility/event_liquidity_halt",
+          "distinction": "that asks whether the book can be traded, this asks whether the numbers describing it are real at all. A liquid market with a dead feed passes that rule and fails this one."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "FEED_AGE_SEC"
+      ],
+      "sourcePath": "library/risk/stale_data_halt.nano",
+      "irPath": "library/risk/stale_data_halt_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/donchian_breakout",
+      "slug": "donchian_breakout",
+      "name": "DonchianBreakout",
+      "category": "trend",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "expansion. Do NOT fire in a range - inside a range the 20-period high IS the range ceiling, so every touch mean-reverts and this becomes a systematic top-buyer. Range versus expansion is the whole decision here.",
+      "conditions": "a prior contraction to break out of, and participation behind the break (rising volume or range).",
+      "invalidation": "a close back inside the channel. A breakout that does not hold is a failed breakout and usually resolves the other way.",
+      "shape": "1d; a clean push through a flat multi-week ceiling.",
+      "calibratedOn": "crypto, daily. DONCHIAN_POS is scale-free, so the threshold travels cleanly; what does not travel is the gap behaviour of a session-bound instrument, where the open can clear the channel outright.",
+      "nearestConfused": [
+        {
+          "slug": "bb_squeeze_breakout",
+          "id": "volatility/bb_squeeze_breakout",
+          "distinction": "that anticipates expansion while still compressed; this confirms expansion once it has begun. Sequence, not synonym - if both fire, the squeeze fired first and this is its confirmation."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "DONCHIAN_POS"
+      ],
+      "sourcePath": "library/trend/donchian_breakout.nano",
+      "irPath": "library/trend/donchian_breakout_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/donchian_high_breakout",
+      "slug": "donchian_high_breakout",
+      "name": "DonchianHighBreakout",
+      "category": "trend",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "expansion out of a contraction. Do NOT fire inside a range - the twenty-bar extreme IS the range boundary there, so both arms fire at the edges of a market that is going nowhere and each is faded immediately. INPUTS: high, low, close (series<float>). No other host signal.",
+      "conditions": "a close beyond the prior twenty-bar extreme. The else arm is the mirror, so this rule is symmetric by construction: one channel, two sides, and they can never both be true on one bar because the channel top is never below the channel floor.",
+      "invalidation": "a close back inside the channel on the following bar. A breakout that does not hold is a failed breakout, and this rule proposes entries only - the host owns the stop and the exit.",
+      "shape": "1d; a push through a flat multi-week ceiling or floor.",
+      "calibratedOn": "crypto and futures, daily. Twenty is Donchian's published convention. The rule assumes a continuously traded instrument: on a session-bound one the open can gap clear through the channel, which makes the breakout price unreachable and turns every signal into a chase.",
+      "nearestConfused": [
+        {
+          "slug": "donchian_breakout",
+          "id": "trend/donchian_breakout",
+          "distinction": "that is the same idea on baseline IR, reading a host-computed DONCHIAN_POS ratio and firing long only. This computes the channel from raw bars, so the host contract is just OHLC, and it carries the short arm the ratio form cannot express without a second signal."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close",
+        "high",
+        "low"
+      ],
+      "sourcePath": "library/trend/donchian_high_breakout.nano",
+      "irPath": "library/trend/donchian_high_breakout_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/ema_pullback_continuation",
+      "slug": "ema_pullback_continuation",
+      "name": "EmaPullbackContinuation",
+      "category": "trend",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "an established uptrend that breathes. Do NOT fire in a downtrend or in a range - in a range the two averages braid together, so the band between them narrows to nothing and \"pullback\" and \"breakdown\" become the same bar. INPUTS: close (series<float>). No other host signal.",
+      "conditions": "the close at or below the fast average and above the slow one. That pair IS the trend test: requiring slow < close <= fast forces the two averages into uptrend order, so a separate `fast_ma > slow_ma` condition is implied by the band and cannot change the outcome on any frame. One was written here first and removed - a conjunct no test can isolate is decoration, and this file would rather be short than look thorough.",
+      "invalidation": "a close below the slow average, which is also what disarms the rule - the second condition inverts, so the rule stops on its own.",
+      "shape": "1d; a stair-step advance that keeps returning to the 20-day line.",
+      "calibratedOn": "liquid US equity index proxies, daily. 20/50 is a convention, not a discovery - the pair only needs to be far enough apart that the band between them is wide enough to catch a normal pullback. Both periods are `param`s so a host can re-fit them without editing the rule.",
+      "nearestConfused": [
+        {
+          "slug": "golden_cross",
+          "id": "trend/golden_cross",
+          "distinction": "that fires once, on the crossing bar, and says the trend began. This fires repeatedly, inside a trend that already exists, and says nothing about when it started."
+        },
+        {
+          "slug": "rsi_oversold_reversal",
+          "id": "momentum/rsi_oversold_reversal",
+          "distinction": "that measures exhaustion in an oscillator; this measures location against two averages and can fire with RSI at 55."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close"
+      ],
+      "sourcePath": "library/trend/ema_pullback_continuation.nano",
+      "irPath": "library/trend/ema_pullback_continuation_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/golden_cross",
+      "slug": "golden_cross",
+      "name": "GoldenCross",
+      "category": "trend",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "established uptrend. Read this as a REGIME FILTER, not an entry. The distinction matters: a positive spread is a persistent state that stays true for months, so treating it as a trigger fires it on every single bar of a bull market. Use it to permit or veto other setups, not to open a trade.",
+      "conditions": "none beyond the spread itself - that is precisely the problem with using it alone.",
+      "invalidation": "the spread crossing back through zero, which is a death cross and a regime change rather than a stop on a position.",
+      "shape": "1d; the slow pair of averages fanned apart and holding.",
+      "calibratedOn": "US large-cap equity ETF, daily, where the 50/200 pair is the convention. On a 24/7 instrument \"200 days\" spans a different amount of price action than it does on a session-bound one.",
+      "nearestConfused": [
+        {
+          "slug": "macd_histogram_flip",
+          "id": "trend/macd_histogram_flip",
+          "distinction": "that is an event on a fast pair and marks a moment; this is a state on a slow pair and marks a season. If both are true, only the MACD flip carries timing information."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "SMA_SPREAD"
+      ],
+      "sourcePath": "library/trend/golden_cross.nano",
+      "irPath": "library/trend/golden_cross_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/macd_histogram_flip",
+      "slug": "macd_histogram_flip",
+      "name": "MacdHistogramFlip",
+      "category": "trend",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "trend initiation, or resumption after a pullback. Do NOT fire in chop - the histogram oscillates around zero in a range, so it flips constantly and produces a stream of one-bar signals that mean nothing.",
+      "conditions": "a directional context on the timeframe above; the flip is a timing input and needs a trend to be timing into.",
+      "invalidation": "the histogram dropping back below zero within a bar or two. A flip that does not persist was noise around the zero line.",
+      "shape": "4h; histogram bars crossing from below zero to above and staying.",
+      "calibratedOn": "crypto, 4h. The zero crossing is scale-free and travels, but flip frequency scales with noise, so a choppier instrument will produce many more of these for the same amount of real trend.",
+      "nearestConfused": [
+        {
+          "slug": "golden_cross",
+          "id": "trend/golden_cross",
+          "distinction": "that is a persistent state on a slow average pair, this is a discrete event on a fast one."
+        },
+        {
+          "slug": "roc_momentum",
+          "id": "momentum/roc_momentum",
+          "distinction": "that measures the size of a move already underway, this measures a change in its direction."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "MACD_HIST"
+      ],
+      "sourcePath": "library/trend/macd_histogram_flip.nano",
+      "irPath": "library/trend/macd_histogram_flip_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/macd_zero_line_reclaim",
+      "slug": "macd_zero_line_reclaim",
+      "name": "MacdZeroLineReclaim",
+      "category": "trend",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "the turn out of a downtrend or a long range into an advance. Do NOT fire inside an established trend - the line is already well above zero there and the crossing happened bars or months ago. INPUTS: close (series<float>). No other host signal.",
+      "conditions": "the line above zero this bar, at or below zero last bar, and the histogram positive so the line is above its own signal rather than merely above zero on a spike that is already fading. WHY THE HISTOGRAM TERM IS NOT REDUNDANT: it looks redundant, and an earlier revision of this file deleted it on the argument that a line crossing up through zero has its signal EMA below it by construction. That argument holds only for the FIRST cross out of a sustained negative stretch. After a rally and a retrace the signal EMA still carries the memory of the earlier high line values, so it sits ABOVE the line at the moment of a second crossing. The concrete case is pinned in tests as `test_macd_zero_reclaim_ignores_a_second_cross_under_its_own_signal`: a 45-bar decline, 19 bars up, 11 bars down, 4 bars up, where bar 78 has line = +0.3243, line[1] = -0.0980 and hist = -3.6859. Without this term the rule fires there. That is the fading-spike case, and it is the reason the term exists.",
+      "invalidation": "the line falling back under zero. A reclaim that does not hold is a failed turn; the rule cannot re-fire until the line goes negative again and comes back, which is the behaviour you want.",
+      "shape": "1d; one bar, at the crossing.",
+      "calibratedOn": "liquid US equity index proxies, daily. 12/26/9 is Appel's published default and is a convention rather than a fitted value; the zero crossing itself is scale-free, so the rule travels across instruments in a way that an absolute MACD threshold would not.",
+      "nearestConfused": [
+        {
+          "slug": "macd_histogram_flip",
+          "id": "trend/macd_histogram_flip",
+          "distinction": "that watches the line against its own signal, which happens several times inside a single trend. This watches the line against zero, which happens once per regime change. Same family, an order of magnitude apart in fire rate."
+        },
+        {
+          "slug": "golden_cross",
+          "id": "trend/golden_cross",
+          "distinction": "same idea in a different coordinate system - golden_cross reads a host-supplied SMA spread on a much slower pair, this computes an EMA spread on a fast one."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close"
+      ],
+      "sourcePath": "library/trend/macd_zero_line_reclaim.nano",
+      "irPath": "library/trend/macd_zero_line_reclaim_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/supertrend_flip_long",
+      "slug": "supertrend_flip_long",
+      "name": "SupertrendFlipLong",
+      "category": "trend",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "trend initiation after a bearish leg. Do NOT fire in a range - inside a range the band is broken in both directions repeatedly and the flip becomes a metronome. The ATR_PCT floor is the cheap version of that filter and not a substitute for knowing the regime.",
+      "conditions": "all four, AND-chained. Only the first is about what price did; the other three are the host asserting a tradeable plan exists.",
+      "invalidation": "a close back under the SuperTrend line. Note the line and the rule's stop are different levels - the indicator trails its own band while the stop sits under structure - so the two can disagree, and the host decides which one governs.",
+      "shape": "15m; a bearish band flipping to a bullish one under price, with enough range in the bar for a stop to sit clear of the noise.",
+      "calibratedOn": "MNQ futures, 15m. The three floors are scale-free ratios and travel across instruments; the 15m bar does not - on a slower chart the same flip carries a much larger stop in points for the same 0.5 ATR.",
+      "nearestConfused": [
+        {
+          "slug": "golden_cross",
+          "id": "trend/golden_cross",
+          "distinction": "that is a slow persistent state and reads as a regime filter; this is a discrete event on a single bar."
+        },
+        {
+          "slug": "donchian_breakout",
+          "id": "trend/donchian_breakout",
+          "distinction": "that requires price through a prior extreme, this requires only the band to flip, which can happen well inside one."
+        },
+        {
+          "slug": "atr_volatility_halt",
+          "id": "volatility/atr_volatility_halt",
+          "distinction": "that uses ATR_PCT as a ceiling to stand down, this uses the same series as a floor to stand up - not opposites, and both can be true of the same violent tape."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "ATR_PCT",
+        "STOP_DISTANCE_ATR",
+        "SUPERTREND_FLIP_BULL",
+        "TARGET_R"
+      ],
+      "sourcePath": "library/trend/supertrend_flip_long.nano",
+      "irPath": "library/trend/supertrend_flip_long_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "trend/volume_confirmed_channel_breakout",
+      "slug": "volume_confirmed_channel_breakout",
+      "name": "VolumeConfirmedChannelBreakout",
+      "category": "trend",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "liquid directional expansion after a range or consolidation. Do NOT fire in thin markets, opening auctions, or feeds where volume is synthetic: the participation term is only meaningful when bars measure comparable size. INPUTS: high, close, volume (series<float>). Volume must be real traded size from one consistently defined venue or consolidated feed.",
+      "conditions": "close above the preceding twenty-bar high and volume at least 1.5 times the preceding twenty-bar average. Price expansion without volume is explicitly a no-fire; high volume without a price break is also a no-fire.",
+      "invalidation": "a following close back inside the prior channel, especially on equal or greater volume. The rule proposes an entry only; the host owns exits.",
+      "shape": "1d; a close through a multi-week ceiling with visibly greater participation than the bars that built the ceiling.",
+      "calibratedOn": "liquid continuously traded instruments, daily. Twenty bars and 1.5 times prior average volume are public conventions, not performance claims. The volume multiple does not travel across venue or session changes.",
+      "nearestConfused": [
+        {
+          "slug": "donchian_high_breakout",
+          "id": "trend/donchian_high_breakout",
+          "distinction": "that price-only rule fires on every qualifying channel break and carries a short mirror. This long-only variant requires an independent participation confirmation and abstains on an ordinary-volume break, which is the essential condition pinned by its mutation control."
+        },
+        {
+          "slug": "volume_climax_reversal",
+          "id": "volume/volume_climax_reversal",
+          "distinction": "that is a one-bar exhaustion reversal below its trend with a high close-position requirement. This is continuation through a prior price boundary; volume confirms expansion rather than capitulation."
+        }
+      ],
+      "provenance": "Donchian channel concepts and Lee-Swaminathan (2000) volume/momentum research; original Nano expression, with no source code copied.",
+      "requiredHostSignals": [
+        "close",
+        "high",
+        "volume"
+      ],
+      "sourcePath": "library/trend/volume_confirmed_channel_breakout.nano",
+      "irPath": "library/trend/volume_confirmed_channel_breakout_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volatility/atr_regime_halt",
+      "slug": "atr_regime_halt",
+      "name": "AtrRegimeHalt",
+      "category": "volatility",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "all of them, and it outranks every directional rule beneath it. Do NOT expect it to fire during a slow grind higher in volatility - a baseline that drifts up with the market is a baseline the ratio never clears, and that is a deliberate limitation of any self-referential measure. INPUTS: high, low, close (series<float>). No other host signal.",
+      "conditions": "ATR at or above twice its own hundred-bar average. Nothing else. A control with a second condition is a control that can be argued with.",
+      "invalidation": "none. This is a circuit breaker, not a view. It emits PAUSE and OBSERVE and proposes no direction; the host decides what a pause means.",
+      "shape": "5m. The cadence bounds how long a volatility shock can go unnoticed.",
+      "calibratedOn": "liquid continuously traded instruments, 5m bars. The 2.0 multiple is a convention. The hundred-bar baseline assumes a session long enough to contain it; on a session-bound instrument the baseline straddles the overnight gap and the first bars of a session read as an expansion.",
+      "nearestConfused": [
+        {
+          "slug": "atr_volatility_halt",
+          "id": "volatility/atr_volatility_halt",
+          "distinction": "that reads a host-supplied ATR_PCT against an absolute 5 percent ceiling, so it is calibrated per instrument and silent on anything quieter than its threshold. This is relative to the instrument's own history, so it arms everywhere - and correspondingly it will not catch an instrument that is dangerously volatile all the time, which the absolute rule will. Ship both; they fail in opposite directions."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close",
+        "high",
+        "low"
+      ],
+      "sourcePath": "library/volatility/atr_regime_halt.nano",
+      "irPath": "library/volatility/atr_regime_halt_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volatility/atr_volatility_halt",
+      "slug": "atr_volatility_halt",
+      "name": "AtrVolatilityHalt",
+      "category": "volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. This is a control, not a directional hypothesis. It is always applicable, emits PAUSE rather than BUY or SELL, and must never be promoted into an execution slot or counted as a setup.",
+      "conditions": "none. It is armed whenever the feed is live.",
+      "invalidation": "none - a breaker is not a trade. It releases when ATR_PCT falls back under the threshold.",
+      "shape": "5m, so a volatility spike is caught inside the move rather than after it.",
+      "calibratedOn": "crypto, 5m - and this is the most dangerous threshold in the library to transplant. A 5 percent ATR is an ordinary volatile session in crypto and a once-in-years event on an index future, whose ATR_PCT normally sits well under 1 percent. Carried across unchanged this breaker does not misfire, it does something worse: it never fires at all, and the volatility brake silently disappears. Re-derive the threshold per instrument class.",
+      "nearestConfused": [
+        {
+          "slug": "max_drawdown_breaker",
+          "id": "risk/max_drawdown_breaker",
+          "distinction": "that halts on realised portfolio loss, this halts on market volatility. Both should be armed; neither substitutes for the other, because the tape can be violent while the book is flat."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "ATR_PCT"
+      ],
+      "sourcePath": "library/volatility/atr_volatility_halt.nano",
+      "irPath": "library/volatility/atr_volatility_halt_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volatility/bb_squeeze_breakout",
+      "slug": "bb_squeeze_breakout",
+      "name": "BbSqueezeBreakout",
+      "category": "volatility",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "contraction, on the edge of expansion. Do NOT fire once expansion is already underway - by then the bands are wide, the edge is gone, and the entry is late.",
+      "conditions": "band width at the low end of its own recent range, and momentum already leaning positive. The squeeze alone is directionless; MOM is what picks the side, and it is the weaker half of the pair.",
+      "invalidation": "width expanding while price resolves downward. A squeeze resolves in some direction, and being early is not the same as being right.",
+      "shape": "1h; bands pinched to a narrow ribbon, price coiled against the top.",
+      "calibratedOn": "crypto, 1h. BB_WIDTH < 4 is an absolute percentage and does NOT travel - band width percent scales with the instrument's own volatility, so on a quieter instrument 4 percent is permanently satisfied and the squeeze condition stops discriminating at all.",
+      "nearestConfused": [
+        {
+          "slug": "bollinger_band_touch",
+          "id": "mean_reversion/bollinger_band_touch",
+          "distinction": "same indicator, opposite regime - that one needs the range to hold, this one is betting it breaks."
+        },
+        {
+          "slug": "donchian_breakout",
+          "id": "trend/donchian_breakout",
+          "distinction": "this anticipates the expansion, that confirms it after the fact."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "BB_WIDTH",
+        "MOM"
+      ],
+      "sourcePath": "library/volatility/bb_squeeze_breakout.nano",
+      "irPath": "library/volatility/bb_squeeze_breakout_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volatility/squeeze_release_expansion",
+      "slug": "squeeze_release_expansion",
+      "name": "SqueezeReleaseExpansion",
+      "category": "volatility",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "the first bar out of a contraction. Do NOT fire once expansion is established - the squeeze test fails by construction there, which is the point of anchoring it to a rolling minimum rather than a fixed number. INPUTS: close (series<float>). No other host signal.",
+      "conditions": "prior width at its own fifty-bar low, width rising, and the close above the middle band so the release has a side. The direction test is the weakest of the three: a squeeze resolves somewhere, and picking the side from one bar's position is a guess dressed as a condition.",
+      "invalidation": "width expanding while the close falls back under the middle band. Being early to an expansion is not the same as being right about it.",
+      "shape": "1h; a narrow ribbon that starts to flare with price on the top side.",
+      "calibratedOn": "crypto, 1h. 20/2.0 is Bollinger's convention and 50 bars is the memory over which \"squeezed\" is defined. Because the squeeze is relative, this rule fires on any instrument - including one whose bands are always wide - so the fifty-bar window is doing the calibration and should be re-chosen when the cadence changes.",
+      "nearestConfused": [
+        {
+          "slug": "bb_squeeze_breakout",
+          "id": "volatility/bb_squeeze_breakout",
+          "distinction": "same family, and the difference is the whole reason this entry exists. That one tests BB_WIDTH < 4, an absolute percentage its own header admits does not travel - on a quiet instrument the condition is permanently satisfied and stops discriminating. This one asks whether width is low *for this instrument*, which is scale-free."
+        },
+        {
+          "slug": "donchian_high_breakout",
+          "id": "trend/donchian_high_breakout",
+          "distinction": "that confirms an expansion in price; this anticipates one from volatility."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close"
+      ],
+      "sourcePath": "library/volatility/squeeze_release_expansion.nano",
+      "irPath": "library/volatility/squeeze_release_expansion_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volume/obv_trend",
+      "slug": "obv_trend",
+      "name": "ObvTrend",
+      "category": "volume",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "any directional regime. This is a CONFIRMATION input and is weak on its own - a positive OBV slope is true through most of any advance, so firing it standalone is close to firing on \"the market went up\".",
+      "conditions": "compose it with a directional trigger and let this gate the trigger. It answers \"is there participation behind the move\", nothing else.",
+      "invalidation": "slope flattening or turning negative while price still rises - the classic distribution divergence, and the one case where this input is genuinely informative on its own.",
+      "shape": "4h; OBV grinding upward underneath a rising price.",
+      "calibratedOn": "crypto, 4h - and volume is the least portable series in this library. Crypto volume is per-venue and unaudited; futures volume is exchange-consolidated; equity volume fragments across lit and dark venues. An OBV slope computed on one is not comparable to the other.",
+      "nearestConfused": [
+        {
+          "slug": "volume_spike_confirmation",
+          "id": "volume/volume_spike_confirmation",
+          "distinction": "that is a single-bar capitulation event, this is sustained accumulation across a window. Opposite time scales."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "OBV_SLOPE"
+      ],
+      "sourcePath": "library/volume/obv_trend.nano",
+      "irPath": "library/volume/obv_trend_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volume/volume_climax_reversal",
+      "slug": "volume_climax_reversal",
+      "name": "VolumeClimaxReversal",
+      "category": "volume",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "capitulation at the end of a decline. Do NOT fire on the first heavy bar of a breakdown - the shape is identical for one bar, and only what happens afterwards distinguishes them. Requiring the close under the fifty-bar average is what keeps this a reversal rule and not a breakout rule. INPUTS: high, low, close, volume (series<float>). Volume must be a real traded quantity; a synthetic or tick-count proxy changes what the surge multiple means.",
+      "conditions": "volume at least three times its twenty-bar average, range at least twice ATR, close in the top 40 percent of the bar, and price below its fifty-bar average. A flat bar has zero range and yields no close position at all, so such a bar is absent rather than counted as satisfying the test.",
+      "invalidation": "a lower low on ordinary volume within a few bars. Climax volume that does not mark the low was distribution, not exhaustion.",
+      "shape": "1d; a wide, enormous-volume down bar that closes near its high.",
+      "calibratedOn": "liquid US equities, daily. The 3x surge and 2x range multiples are conventions and are the two numbers most in need of re-fitting per instrument - a thin name prints 3x volume routinely. The close-position threshold of 0.6 is scale-free and travels.",
+      "nearestConfused": [
+        {
+          "slug": "volume_spike_confirmation",
+          "id": "volume/volume_spike_confirmation",
+          "distinction": "that pairs a host VOL_RATIO with an RSI gate on baseline IR and is a confirmation filter for an entry that already exists. This is a standalone reversal pattern about the shape of one bar, and it says nothing about any oscillator."
+        },
+        {
+          "slug": "obv_trend",
+          "id": "volume/obv_trend",
+          "distinction": "that is a cumulative flow measure over many bars; this is a single-bar event."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close",
+        "high",
+        "low",
+        "volume"
+      ],
+      "sourcePath": "library/volume/volume_climax_reversal.nano",
+      "irPath": "library/volume/volume_climax_reversal_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volume/volume_spike_confirmation",
+      "slug": "volume_spike_confirmation",
+      "name": "VolumeSpikeConfirmation",
+      "category": "volume",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "capitulation or climax, inside a larger range or an uptrend pullback. Do NOT fire in an orderly downtrend - steady selling produces oversold RSI without the volume climax, and the volume gate is the only thing separating this from catching a falling knife.",
+      "conditions": "both halves must hold in the same bar. The volume spike is the evidence of exhaustion; the RSI reading alone is not.",
+      "invalidation": "the next bar making a new low on equal or greater volume. That is continuation on participation, which is the opposite of exhaustion.",
+      "shape": "15m; a high-volume flush candle with a long lower wick.",
+      "calibratedOn": "crypto, 15m. RSI 30 travels; the 3x volume ratio does not - it depends entirely on the venue's volume profile and on how much of the instrument's real volume the feed actually sees.",
+      "nearestConfused": [
+        {
+          "slug": "rsi_oversold_reversal",
+          "id": "momentum/rsi_oversold_reversal",
+          "distinction": "this is that exact condition plus a volume gate, so it is a strict subset of it. When both fire it is one setup with two names, and treating them as two independent confirmations double-counts the same evidence."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "RSI",
+        "VOL_RATIO"
+      ],
+      "sourcePath": "library/volume/volume_spike_confirmation.nano",
+      "irPath": "library/volume/volume_spike_confirmation_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "volume/vwap_band_reversion",
+      "slug": "vwap_band_reversion",
+      "name": "VwapBandReversion",
+      "category": "volume",
+      "irMaturity": "v1",
+      "irVersion": "1.0.0",
+      "regime": "intraday range trading around a well-populated volume profile. Do NOT fire in a trending session - in a one-way tape the close is below VWAP for hours and the discount is a description of the trend, not a deviation from it. This rule has no trend filter and that is its main weakness. INPUTS: close, volume (series<float>). Volume must be real traded size; the weighting is the entire point, and a constant-volume feed collapses VWAP to a simple moving average without any error being raised.",
+      "conditions": "at least a one-percent discount to rolling VWAP, that discount narrower than it was one bar ago, and RSI under 40. The narrowing term is the trigger; RSI is a brake that removes the fastest part of a decline.",
+      "invalidation": "a close that keeps making new lows while the discount widens. A widening discount is the rule being wrong, not the rule being early.",
+      "shape": "15m; a drift below the session's volume-weighted centre whose discount has started to reclaim.",
+      "calibratedOn": "crypto, 15m, continuous session. The one-percent discount is absolute and does NOT travel: on a low-volatility instrument it is never reached, and on a fast one it is reached every bar. It is a `param` for exactly that reason. The twenty-bar VWAP window is also a session-shape assumption - it is a rolling window, not an anchored session VWAP, so it carries no notion of where the session began.",
+      "nearestConfused": [
+        {
+          "slug": "bollinger_lower_reclaim",
+          "id": "mean_reversion/bollinger_lower_reclaim",
+          "distinction": "that measures distance in units of dispersion and waits for the excursion to end; this measures distance as a plain percentage of a volume-weighted centre and enters into it. NOT rsi_oversold_reversal: RSI here is a veto with a loose threshold of 40, not the trigger - this rule can fire with RSI at 39 and nothing oversold about it."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "close",
+        "volume"
+      ],
+      "sourcePath": "library/volume/vwap_band_reversion.nano",
+      "irPath": "library/volume/vwap_band_reversion_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/aether_release_notes_batch_unaccounted",
+      "slug": "aether_release_notes_batch_unaccounted",
+      "name": "AetherReleaseNotesBatchUnaccounted",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them, but only over a completed scan. The count is only meaningful when aether_release_notes_coverage is satisfied; the two rules are deployed together and the coverage guard is what makes this one's zero mean something.",
+      "conditions": "the host counts from the scan result, and publishes no count at all when it has no scan - absence is the honest answer, and the evaluator turns an absent count into INPUT_UNAVAILABLE rather than into a calm zero.",
+      "invalidation": "the outstanding merges being written up. The count falls back to zero and the rule stops proposing a hold, with no memory of having fired.",
+      "shape": "5m, matching the merge scan. The count cannot change faster than the scan that produces it.",
+      "calibratedOn": "a ceiling of one, which is policy rather than measurement and travels to any host that publishes release notes as batches. What does not travel is the definition of \"covered\" - which merges a release note is expected to mention is the publishing host's editorial rule.",
+      "nearestConfused": [
+        {
+          "slug": "aether_release_notes_uncovered_merge",
+          "id": "watchdog/aether_release_notes_uncovered_merge",
+          "distinction": "that one observes a single merge landing without a candidate, one pull request at a time, and proposes no hold. This one is the batch-scope arithmetic and holds publication."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "UNACCOUNTED_MERGE_COUNT"
+      ],
+      "sourcePath": "library/watchdog/aether_release_notes_batch_unaccounted.nano",
+      "irPath": "library/watchdog/aether_release_notes_batch_unaccounted_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/aether_release_notes_candidate_unattached",
+      "slug": "aether_release_notes_candidate_unattached",
+      "name": "AetherReleaseNotesCandidateUnattached",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. This is a property of the draft, not of the system it describes.",
+      "conditions": "the host resets PENDING_AGE_SECONDS when the candidate is revised, so the age measures the current state rather than the candidate's whole life.",
+      "invalidation": "the attachment arriving, or the candidate being withdrawn. Either takes the rule out of its trigger with no memory of having fired.",
+      "shape": "5m against an hour-long threshold, so the alert lands within a twelfth of the grace period it is measuring.",
+      "calibratedOn": "a one-hour grace period, which is a policy figure and does not travel - a programme that drafts notes in a batch at the end of the week should raise it, and one that generates them automatically should lower it until the threshold is longer than the generator's own latency.",
+      "nearestConfused": [
+        {
+          "slug": "aether_release_notes_uncovered_merge",
+          "id": "watchdog/aether_release_notes_uncovered_merge",
+          "distinction": "that one fires when no candidate exists at all. This one fires when a candidate exists and cannot be traced back to what it claims to describe."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "HAS_RELEASE_CANDIDATE",
+        "HAS_SOURCE_ATTACHMENT",
+        "PENDING_AGE_SECONDS"
+      ],
+      "sourcePath": "library/watchdog/aether_release_notes_candidate_unattached.nano",
+      "irPath": "library/watchdog/aether_release_notes_candidate_unattached_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/aether_release_notes_copy_unvalidated",
+      "slug": "aether_release_notes_copy_unvalidated",
+      "name": "AetherReleaseNotesCopyUnvalidated",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them, for public surfaces only. An internal candidate has PUBLIC_CANDIDATE 0 and this rule is silent on it by construction.",
+      "conditions": "the host publishes COPY_VALIDATED 0 until a validation has actually run. A default of 1 makes this rule vacuous and the vacuity is invisible from outside, because a rule that never fires and a rule with nothing to report look identical.",
+      "invalidation": "the validation completing. The rule proposes a hold; it does not latch and does not decide when the hold ends.",
+      "shape": "5m, matching the rest of the release-note family so one batch is evaluated by every rule on the same tick.",
+      "calibratedOn": "nothing numeric; both comparisons are against host booleans. What does not travel is what validation means - a one-person read and a formal claims review both publish the same 1, and the host owns which it is.",
+      "nearestConfused": [
+        {
+          "slug": "aether_release_notes_proof_missing",
+          "id": "watchdog/aether_release_notes_proof_missing",
+          "distinction": "that is the other half of the same disjunction and asks whether the evidence can be fetched. This one asks whether anybody read the words."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "COPY_VALIDATED",
+        "PUBLIC_CANDIDATE"
+      ],
+      "sourcePath": "library/watchdog/aether_release_notes_copy_unvalidated.nano",
+      "irPath": "library/watchdog/aether_release_notes_copy_unvalidated_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/aether_release_notes_coverage",
+      "slug": "aether_release_notes_coverage",
+      "name": "AetherReleaseNotesCoverage",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. Coverage is a property of the host's own scan, not of whatever the scan is looking at.",
+      "conditions": "the host publishes exactly one coverage fact as 1 on every bar, and derives it from the API response rather than from the parsed result. An error path that returns an empty list must publish MERGE_COVERAGE_ERROR and never MERGE_COVERAGE_EMPTY - that substitution is the outage this rule exists to catch.",
+      "invalidation": "the scan completing. The rule does not latch and does not decide when the hold ends; the host does.",
+      "shape": "5m, the cadence the merge scan itself runs on. Reading coverage faster than the scan that produces it only re-reads the same answer.",
+      "calibratedOn": "nothing numeric; both comparisons are against the host's own booleans. What does not travel is the vocabulary itself. A host with a different set of coverage states publishes its own and re-derives which of them are complete scans before reusing this rule.",
+      "nearestConfused": [
+        {
+          "slug": "aether_release_notes_batch_unaccounted",
+          "id": "watchdog/aether_release_notes_batch_unaccounted",
+          "distinction": "that rule reads the count and fires when the scan worked and found merges nobody wrote up. This one fires when there is no trustworthy count to read, and it deliberately does not read the count - an outage must never arrive at the batch rule as a zero."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "MERGE_COVERAGE_AVAILABLE",
+        "MERGE_COVERAGE_EMPTY"
+      ],
+      "sourcePath": "library/watchdog/aether_release_notes_coverage.nano",
+      "irPath": "library/watchdog/aether_release_notes_coverage_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/aether_release_notes_proof_missing",
+      "slug": "aether_release_notes_proof_missing",
+      "name": "AetherReleaseNotesProofMissing",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them, for public surfaces only. An internal candidate has PUBLIC_CANDIDATE 0 and this rule is silent on it by construction.",
+      "conditions": "the host decides what counts as required proof for a given surface before publishing the boolean, and publishes 0 when it does not know rather than assuming the proof exists.",
+      "invalidation": "the proof becoming retrievable. The rule proposes a hold; it does not latch and does not decide when the hold ends.",
+      "shape": "5m, matching the rest of the release-note family so one batch is evaluated by every rule on the same tick.",
+      "calibratedOn": "nothing numeric; both comparisons are against host booleans. What does not travel is the proof policy - which claims need evidence on which surface is the publishing organisation's decision.",
+      "nearestConfused": [
+        {
+          "slug": "aether_release_notes_copy_unvalidated",
+          "id": "watchdog/aether_release_notes_copy_unvalidated",
+          "distinction": "that is the other half of the same disjunction and asks whether the words were checked. This one asks whether the evidence behind the words can be fetched at all."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "PUBLIC_CANDIDATE",
+        "REQUIRED_PROOF_AVAILABLE"
+      ],
+      "sourcePath": "library/watchdog/aether_release_notes_proof_missing.nano",
+      "irPath": "library/watchdog/aether_release_notes_proof_missing_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/aether_release_notes_uncovered_merge",
+      "slug": "aether_release_notes_uncovered_merge",
+      "name": "AetherReleaseNotesUncoveredMerge",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. This is bookkeeping about a merge that already happened, not a forecast about anything.",
+      "conditions": "the host has decided which repository and which base branch are canonical before publishing these facts. Both are policy, and a host that publishes 1 for every repository turns this rule into noise.",
+      "invalidation": "a release candidate picking the merge up. HAS_RELEASE_CANDIDATE goes to 1 and the rule stops firing, with no memory of having fired - the host owns the follow-up, not this rule.",
+      "shape": "5m; merges arrive when they arrive, and five minutes is fast enough that the author is still around to answer.",
+      "calibratedOn": "nothing numeric; every comparison is against a host boolean. What does not travel is the canonical repository and base, which are per-programme decisions and belong to whoever runs the release.",
+      "nearestConfused": [
+        {
+          "slug": "aether_release_notes_batch_unaccounted",
+          "id": "watchdog/aether_release_notes_batch_unaccounted",
+          "distinction": "that one reads the batch-scope count and proposes a hold on publication. This one looks at a single merge and deliberately only observes - a missing changelog line is a thing to notice, not a thing to stop the world over."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "CANONICAL_BASE",
+        "CANONICAL_REPOSITORY",
+        "HAS_RELEASE_CANDIDATE",
+        "IS_RELEASE_NOTES_PR",
+        "MERGED"
+      ],
+      "sourcePath": "library/watchdog/aether_release_notes_uncovered_merge.nano",
+      "irPath": "library/watchdog/aether_release_notes_uncovered_merge_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/credential_age_alert",
+      "slug": "credential_age_alert",
+      "name": "CredentialAgeAlert",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. Key age is a clock, not a market state.",
+      "conditions": "none, beyond the host knowing which credentials are in scope and what its own rotation limit is.",
+      "invalidation": "rotation. Age returns to zero and the rule stops firing, with no memory of having fired - the host owns the ticket, not this rule.",
+      "shape": "1d; age changes once a day, and checking it faster only produces the same answer more often.",
+      "calibratedOn": "a 90-day rotation policy, firing at 80 to leave ten days of warning. Neither number travels - both are policy figures, and a site with a 30-day policy should carry the same ten-day margin at 20.",
+      "nearestConfused": [
+        {
+          "slug": "trusted_route_guard",
+          "id": "watchdog/trusted_route_guard",
+          "distinction": "that reports something already broken and proposes a pause. This one reports something that will break, so it proposes review and deliberately does not halt anything."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "CREDENTIAL_AGE_DAYS"
+      ],
+      "sourcePath": "library/watchdog/credential_age_alert.nano",
+      "irPath": "library/watchdog/credential_age_alert_ir.json"
+    },
+    {
+      "metadataVersion": "StrategyMetadataV1",
+      "id": "watchdog/trusted_route_guard",
+      "slug": "trusted_route_guard",
+      "name": "TrustedRouteGuard",
+      "category": "watchdog",
+      "irMaturity": "baseline",
+      "irVersion": "0.1.0",
+      "regime": "all of them. Route availability is a precondition, not a forecast, so this rule is armed whenever the system is running.",
+      "conditions": "none. The host is responsible for deciding what \"the trusted route\" is and for not publishing a 1 on a single dropped probe.",
+      "invalidation": "the route coming back. This rule proposes a pause; it does not latch, and it does not decide when the pause ends - the host does.",
+      "shape": "1m; fast enough to notice a real outage, slow enough that a transient blip has already been smoothed away by the host's own measurement window.",
+      "calibratedOn": "nothing numeric to calibrate - the threshold is the host's own binary. What does not travel is the definition of \"trusted\", which is site-specific and belongs to whoever operates the network.",
+      "nearestConfused": [
+        {
+          "slug": "endpoint_posture_ceiling",
+          "id": null,
+          "distinction": "that counts how many endpoints are out of policy while the system still works. This one says the path itself is gone."
+        }
+      ],
+      "provenance": null,
+      "requiredHostSignals": [
+        "TRUSTED_ROUTE_DOWN"
+      ],
+      "sourcePath": "library/watchdog/trusted_route_guard.nano",
+      "irPath": "library/watchdog/trusted_route_guard_ir.json"
+    }
+  ]
+}

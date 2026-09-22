@@ -1,0 +1,51 @@
+// Bollinger squeeze release, measured against the instrument's own history.
+// BB_WIDTH is band width as a percentage of the middle band; the squeeze test
+// is that last bar's width equalled its own fifty-bar minimum, and the release
+// is this bar's width being larger. Both readings are offset consistently so
+// "was squeezed, is now expanding" describes two adjacent bars rather than one
+// bar compared with itself.
+// REGIME: the first bar out of a contraction. Do NOT fire once expansion is
+// established - the squeeze test fails by construction there, which is the
+// point of anchoring it to a rolling minimum rather than a fixed number.
+// INPUTS: close (series<float>). No other host signal.
+// CONDITIONS: prior width at its own fifty-bar low, width rising, and the
+// close above the middle band so the release has a side. The direction test is
+// the weakest of the three: a squeeze resolves somewhere, and picking the side
+// from one bar's position is a guess dressed as a condition.
+// INVALIDATION: width expanding while the close falls back under the middle
+// band. Being early to an expansion is not the same as being right about it.
+// SHAPE: 1h; a narrow ribbon that starts to flare with price on the top side.
+// NOT bb_squeeze_breakout: same family, and the difference is the whole reason
+// this entry exists. That one tests BB_WIDTH < 4, an absolute percentage its
+// own header admits does not travel - on a quiet instrument the condition is
+// permanently satisfied and stops discriminating. This one asks whether width
+// is low *for this instrument*, which is scale-free. NOT donchian_high_breakout:
+// that confirms an expansion in price; this anticipates one from volatility.
+// CALIBRATED ON: crypto, 1h. 20/2.0 is Bollinger's convention and 50 bars is
+// the memory over which "squeezed" is defined. Because the squeeze is relative,
+// this rule fires on any instrument - including one whose bands are always wide
+// - so the fifty-bar window is doing the calibration and should be re-chosen
+// when the cadence changes.
+strategy SqueezeReleaseExpansion {
+
+    param window: int = 20
+    param mult: float = 2.0
+    param squeeze_window: int = 50
+
+    input close: series<float>
+
+    let width = BB_WIDTH(close, window, mult)
+    let was_squeezed = width[1] <= LOWEST(width, squeeze_window)[1]
+    let expanding = width > width[1]
+
+    every 1h {
+
+        if was_squeezed and expanding and close > BB_MIDDLE(close, window) {
+
+            buy(BTCUSD, 0.6)
+
+        }
+
+    }
+
+}

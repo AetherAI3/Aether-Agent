@@ -2,3 +2,7 @@ docs/generated/** text eol=lf
 docs/model-catalogue/** text eol=lf
 contracts/aether-code/host-v1/*.json text eol=lf
 contracts/aether-code/host-v1/*.jsonl text eol=lf
+
+# Source custody hashes canonical ATS bytes on every checkout platform.
+packages/ats-skills/** text eol=lf
+packages/ats-skills-source.json text eol=lf

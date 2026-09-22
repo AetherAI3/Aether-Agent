@@ -1,0 +1,31 @@
+// Trusted-route guard: pause when the host reports its trusted network route
+// unavailable. TRUSTED_ROUTE_DOWN is 0 while the route is verified reachable
+// and 1 while it is not, published by the host's own connectivity check.
+// REGIME: all of them. Route availability is a precondition, not a forecast,
+// so this rule is armed whenever the system is running.
+// CONDITIONS: none. The host is responsible for deciding what "the trusted
+// route" is and for not publishing a 1 on a single dropped probe.
+// INVALIDATION: the route coming back. This rule proposes a pause; it does not
+// latch, and it does not decide when the pause ends - the host does.
+// SHAPE: 1m; fast enough to notice a real outage, slow enough that a transient
+// blip has already been smoothed away by the host's own measurement window.
+// NOT endpoint_posture_ceiling: that counts how many endpoints are out of
+// policy while the system still works. This one says the path itself is gone.
+// CALIBRATED ON: nothing numeric to calibrate - the threshold is the host's
+// own binary. What does not travel is the definition of "trusted", which is
+// site-specific and belongs to whoever operates the network.
+strategy TrustedRouteGuard {
+
+    agent SecurityDesk
+
+    every 1m {
+
+        if TRUSTED_ROUTE_DOWN >= 1 {
+
+            pause()
+
+        }
+
+    }
+
+}

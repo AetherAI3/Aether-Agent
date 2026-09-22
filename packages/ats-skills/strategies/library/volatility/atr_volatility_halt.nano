@@ -1,0 +1,33 @@
+// ATR circuit breaker. ATR_PCT = ATR(14) / close * 100, provided by the
+// host data feed. When volatility exceeds 5 percent of price, stop
+// proposing entries until the regime calms down.
+// REGIME: all of them. This is a control, not a directional hypothesis. It is
+// always applicable, emits PAUSE rather than BUY or SELL, and must never be
+// promoted into an execution slot or counted as a setup.
+// CONDITIONS: none. It is armed whenever the feed is live.
+// INVALIDATION: none - a breaker is not a trade. It releases when ATR_PCT
+// falls back under the threshold.
+// SHAPE: 5m, so a volatility spike is caught inside the move rather than after
+// it.
+// NOT max_drawdown_breaker: that halts on realised portfolio loss, this halts
+// on market volatility. Both should be armed; neither substitutes for the
+// other, because the tape can be violent while the book is flat.
+// CALIBRATED ON: crypto, 5m - and this is the most dangerous threshold in the
+// library to transplant. A 5 percent ATR is an ordinary volatile session in
+// crypto and a once-in-years event on an index future, whose ATR_PCT normally
+// sits well under 1 percent. Carried across unchanged this breaker does not
+// misfire, it does something worse: it never fires at all, and the volatility
+// brake silently disappears. Re-derive the threshold per instrument class.
+strategy AtrVolatilityHalt {
+
+    every 5m {
+
+        if ATR_PCT(14) > 5 {
+
+            pause()
+
+        }
+
+    }
+
+}

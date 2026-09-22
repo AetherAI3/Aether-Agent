@@ -12,6 +12,14 @@ const NPM_PACKAGE_NAME = /^(?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*$
 const BASE64_DIGEST = /^[A-Za-z0-9+/]+={0,2}$/u;
 const NPM_SEVERITIES = Object.freeze(["info", "low", "moderate", "high", "critical"]);
 const MAX_REQUEST_BYTES = 1_000_000;
+// This source package is bundled with the CLI, not fetched from a registry.
+// Keep the exception pinned; its runtime dependencies still require registry
+// tarballs, sha512 integrity and inclusion in the advisory request below.
+const ATS_NAME = "aether-ats-skills";
+const ATS_LOCATION = `node_modules/${ATS_NAME}`;
+const ATS_TARGET = "packages/ats-skills";
+const ATS_VERSION = "0.2.0";
+const ATS_DEPENDENCIES = Object.freeze({ "aether-browser": "0.2.2", "aether-context": "0.3.1" });
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -48,6 +56,60 @@ function hasValidSha512Integrity(value) {
   });
 }
 
+function validateBundledAtsLink(packages, metadata) {
+  const reject = () => {
+    throw new Error("bundled ATS link must match the pinned root dependency, bundle and target metadata");
+  };
+  const root = packages[""];
+  const target = packages[ATS_TARGET];
+  if (
+    !hasExactKeys(metadata, ["resolved", "link"]) ||
+    metadata.link !== true ||
+    metadata.resolved !== ATS_TARGET ||
+    !isRecord(root) ||
+    !isRecord(root.dependencies) ||
+    root.dependencies[ATS_NAME] !== ATS_VERSION ||
+    !Array.isArray(root.workspaces) ||
+    root.workspaces.length !== 1 ||
+    root.workspaces[0] !== ATS_TARGET ||
+    !Array.isArray(root.bundleDependencies) ||
+    root.bundleDependencies.length !== 1 ||
+    root.bundleDependencies[0] !== ATS_NAME ||
+    !isRecord(target) ||
+    target.name !== ATS_NAME ||
+    target.version !== ATS_VERSION ||
+    Object.hasOwn(target, "link") ||
+    Object.hasOwn(target, "resolved") ||
+    !hasExactKeys(target.dependencies, Object.keys(ATS_DEPENDENCIES)) ||
+    Object.entries(ATS_DEPENDENCIES).some(([name, version]) => target.dependencies[name] !== version) ||
+    ["optionalDependencies", "peerDependencies", "devDependencies", "bundleDependencies", "bundledDependencies"].some(
+      (key) => Object.hasOwn(target, key),
+    )
+  ) {
+    reject();
+  }
+
+  for (const [name, version] of Object.entries(ATS_DEPENDENCIES)) {
+    // Resolve from the real link target, nearest installation first. Reject
+    // absent or mismatched pins even if some other copy is registry-backed.
+    const location = [
+      `${ATS_TARGET}/node_modules/${name}`,
+      `packages/node_modules/${name}`,
+      `node_modules/${name}`,
+    ].find((candidate) => Object.hasOwn(packages, candidate));
+    if (location === undefined) reject();
+    const dependency = packages[location];
+    if (
+      !isRecord(dependency) ||
+      dependency.version !== version ||
+      (Object.hasOwn(dependency, "name") && dependency.name !== name) ||
+      Object.hasOwn(dependency, "link")
+    ) {
+      reject();
+    }
+  }
+}
+
 export function collectNpmBulkPayload(lockfile) {
   assertRecord(lockfile, "package-lock.json");
   if (lockfile.lockfileVersion !== 2 && lockfile.lockfileVersion !== 3) {
@@ -62,6 +124,12 @@ export function collectNpmBulkPayload(lockfile) {
     if (markerIndex < 0) continue;
     nodeModulesEntries += 1;
     assertRecord(metadata, `locked package entry ${location}`);
+
+    if (Object.hasOwn(metadata, "link")) {
+      if (location !== ATS_LOCATION) throw new Error(`unsupported local package link: ${location}`);
+      validateBundledAtsLink(lockfile.packages, metadata);
+      continue;
+    }
 
     const installedName = validatePackageName(
       location.slice(markerIndex + "node_modules/".length),

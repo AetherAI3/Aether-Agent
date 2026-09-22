@@ -1,0 +1,11 @@
+{
+  "type": "Strategy",
+  "nanoIrVersion": "0.1.0",
+  "name": "EventWhipsawHalt",
+  "effects": ["intent.emit", "log.append"],
+  "nodes": [
+    { "type": "Schedule", "interval": "5s" },
+    { "type": "Condition", "signal": "WHIPSAW_SCORE", "operator": ">", "value": 0.7 },
+    { "type": "Intent", "action": "PAUSE" }
+  ]
+}

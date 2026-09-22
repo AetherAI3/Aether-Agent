@@ -159,14 +159,14 @@ test("the lockfile names the same version as the manifest, in both places", () =
   assert.equal(lock.packages[""]?.version, VERSION, 'package-lock.json packages[""] version drifted');
 });
 
-test("RELEASE_NOTES.md leads with Unreleased and then the version the package declares", () => {
+test("RELEASE_NOTES.md leads with the declared version, optionally preceded by Unreleased", () => {
   const notes = read("RELEASE_NOTES.md");
   const headings = notes.split(/\r?\n/).filter((line) => /^#\s+\S/.test(line));
-  assert.match(headings[0] ?? "", /^# Unreleased\b/u);
-  const firstVersionedHeading = headings.find((line) => /^# Aether Agent v\d+\.\d+\.\d+\b/u.test(line));
+  const firstVersionedHeading = headings[/^# Unreleased\b/u.test(headings[0] ?? "") ? 1 : 0];
   assert.ok(firstVersionedHeading, "RELEASE_NOTES.md has no versioned heading");
-  assert.ok(
-    firstVersionedHeading.includes(`v${VERSION}`),
+  assert.match(
+    firstVersionedHeading,
+    new RegExp(`^# Aether Agent v${VERSION.replaceAll(".", "\\.")}\\b`, "u"),
     `RELEASE_NOTES.md leads with versioned heading ${JSON.stringify(firstVersionedHeading)}, which does not name v${VERSION}`,
   );
   assert.match(notes, /not part of v0\.3\.2/u);
@@ -206,18 +206,59 @@ test("the post-tag v0.3.2 documentation is not claimed by the published archive"
   assert.match(datedRelease, /documentation changes landed after the v0\.3\.2 tag and are not in its\s+published archive/u);
 });
 
-test("the current operator packet is frozen prerelease evidence and v0.3.0 retains historical provenance", () => {
+function assertCandidatePacket(packet: string): void {
+  const rows = parsePacketRows(packet);
+  assert.equal(onlyPacketRow(rows, "Package"), `\`${pkg.name}\``);
+  assert.equal(onlyPacketRow(rows, "Evidence state"), "`candidate`");
+  assert.equal(onlyPacketRow(rows, "Proposed tag"), `\`v${VERSION}\``);
+  assert.equal(
+    onlyPacketRow(rows, "Source identity"),
+    `Canonical ATS adapter commit \`${(JSON.parse(read("packages", "ats-skills-source.json")) as {revision: string}).revision}\`; per-file SHA-256 custody is recorded in \`packages/ats-skills-source.json\`. The Agent PR records its final candidate commit.`,
+  );
+  assert.equal(
+    onlyPacketRow(rows, "Archive evidence"),
+    "Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending.",
+  );
+  assert.equal(
+    onlyPacketRow(rows, "Hosted checks"),
+    "Required exact-commit CI, CodeQL, supply-chain audit, generated-documentation, production-package and release-truth checks pending.",
+  );
+  assert.equal(
+    onlyPacketRow(rows, "Live service evidence"),
+    "Deployment of the Cloud adapter, actual web/terminal DM sync, model/UVT execution and broker connectivity are not established by local tests.",
+  );
+  assert.equal(
+    onlyPacketRow(rows, "Publication evidence"),
+    "No npm/PyPI publish, tag, trusted-publishing provenance or registry dist-tag update is established by this packet.",
+  );
+}
+
+test("the current operator packet records a source candidate without publication or live-service evidence", () => {
   const path = join(root, "docs", "releases", `OPERATOR-PACKET-v${VERSION}.md`);
   assert.ok(existsSync(path), `no docs/releases/OPERATOR-PACKET-v${VERSION}.md`);
-  const current = readFileSync(path, "utf8");
-  assert.ok(current.includes(`v${VERSION}`), "the operator packet does not name the proposed tag");
-  const currentRows = parsePacketRows(current);
-  for (const [label, expected] of Object.entries(V032_PACKET)) {
-    assert.equal(onlyPacketRow(currentRows, label), expected, `the current packet has the wrong ${label}`);
+  assertCandidatePacket(readFileSync(path, "utf8"));
+});
+
+test("the candidate packet rejects contradictory or fabricated qualification evidence", () => {
+  const packet = read("docs", "releases", `OPERATOR-PACKET-v${VERSION}.md`);
+  for (const label of ["Evidence state", "Source identity", "Archive evidence", "Hosted checks", "Live service evidence", "Publication evidence"]) {
+    const rows = parsePacketRows(packet);
+    const existing = onlyPacketRow(rows, label);
+    const mutant = packet.replace(`| ${label} | ${existing} |`, `| ${label} | verified and published |`);
+    assert.notEqual(mutant, packet, `${label} mutation must alter the candidate`);
+    assert.throws(() => assertCandidatePacket(mutant), `${label} must not fabricate evidence`);
   }
-  assert.match(current, /Frozen historical prerelease evidence/u);
-  assert.match(current, /PR #134 and its terminal[\s>]+convergence work landed afterward/u);
-  assert.doesNotMatch(current, /aether-agents-0\.3\.0\.tgz|6176172deb15eea57519408d93f23b3fac8ab5e2b2e541adddc34b4e5fb4c33d/);
+});
+
+test("the v0.3.2 operator packet remains frozen and v0.3.0 retains historical provenance", () => {
+  const historical = read("docs", "releases", "OPERATOR-PACKET-v0.3.2.md");
+  const historicalRows = parsePacketRows(historical);
+  for (const [label, expected] of Object.entries(V032_PACKET)) {
+    assert.equal(onlyPacketRow(historicalRows, label), expected, `the historical v0.3.2 packet has the wrong ${label}`);
+  }
+  assert.match(historical, /Frozen historical prerelease evidence/u);
+  assert.match(historical, /PR #134 and its terminal[\s>]+convergence work landed afterward/u);
+  assert.doesNotMatch(historical, /aether-agents-0\.3\.0\.tgz|6176172deb15eea57519408d93f23b3fac8ab5e2b2e541adddc34b4e5fb4c33d/);
   const packet = read("docs", "releases", "OPERATOR-PACKET-v0.3.0.md");
   assertV030PacketProvenance(packet);
   assert.match(packet, /\| Qualified final-candidate archive \| `aether-agents-0\.3\.0\.tgz` — 835,957 bytes packed \/ 3,688,966 unpacked \/ 618 entries at `1271457\.\.\.`;/);
@@ -330,6 +371,22 @@ test("the v0.3.0 operator packet keeps an immutable publication-base inventory",
  * this gate cannot catch by itself; the row is the contract.
  */
 const FEATURE_MANIFEST: Array<{ claim: string; command?: string; packaged: string[] }> = [
+  {
+    claim: "shared account agent inventory, setup and Online DM chat — `aether agent`",
+    command: "agent",
+    packaged: ["dist/src/commands/managed_agents.js", "dist/src/core/managed_agents.js"],
+  },
+  {
+    claim: "guided ATS trading adapter setup and native Nano strategy preparation",
+    packaged: [
+      "dist/src/commands/ats_agent.js",
+      "node_modules/aether-ats-skills/src/index.js",
+      "node_modules/aether-ats-skills/src/browser.js",
+      "node_modules/aether-ats-skills/src/browser_transport.js",
+      "node_modules/aether-ats-skills/src/vision_skill.js",
+      "node_modules/aether-ats-skills/python/bridge.py",
+    ],
+  },
   {
     claim: "typed developer settings — `aether settings`",
     command: "settings",
@@ -473,7 +530,7 @@ test(
   { timeout: 120_000 },
   () => {
     // The source checkout's dist/ is NOT the package: the files allowlist is
-    // dist/src plus four docs, so dist/scripts and dist/test exist on disk and
+    // dist/src plus reviewed public docs, so dist/scripts and dist/test exist on disk and
     // ship to nobody. Ask npm what would actually be packed.
     const packed = currentPackReport();
     const paths = new Set(packed.files.map((file) => file.path.replaceAll("\\", "/")));

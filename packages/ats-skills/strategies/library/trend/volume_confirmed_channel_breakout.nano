@@ -1,0 +1,52 @@
+// Volume-confirmed channel breakout. Price must close above the prior
+// twenty-bar high while current volume reaches a multiple of the prior
+// twenty-bar volume average. Both reference series are read at [1], so the
+// breakout bar cannot raise the boundary or dilute its own participation test.
+// SOURCE: Donchian channel concepts and Lee-Swaminathan (2000) volume/momentum
+// research; original Nano expression, with no source code copied.
+// REGIME: liquid directional expansion after a range or consolidation. Do NOT
+// fire in thin markets, opening auctions, or feeds where volume is synthetic:
+// the participation term is only meaningful when bars measure comparable size.
+// INPUTS: high, close, volume (series<float>). Volume must be real traded size
+// from one consistently defined venue or consolidated feed.
+// CONDITIONS: close above the preceding twenty-bar high and volume at least
+// 1.5 times the preceding twenty-bar average. Price expansion without volume
+// is explicitly a no-fire; high volume without a price break is also a no-fire.
+// INVALIDATION: a following close back inside the prior channel, especially on
+// equal or greater volume. The rule proposes an entry only; the host owns exits.
+// SHAPE: 1d; a close through a multi-week ceiling with visibly greater
+// participation than the bars that built the ceiling.
+// NOT donchian_high_breakout: that price-only rule fires on every qualifying
+// channel break and carries a short mirror. This long-only variant requires an
+// independent participation confirmation and abstains on an ordinary-volume
+// break, which is the essential condition pinned by its mutation control.
+// NOT volume_climax_reversal: that is a one-bar exhaustion reversal below its
+// trend with a high close-position requirement. This is continuation through a
+// prior price boundary; volume confirms expansion rather than capitulation.
+// CALIBRATED ON: liquid continuously traded instruments, daily. Twenty bars
+// and 1.5 times prior average volume are public conventions, not performance
+// claims. The volume multiple does not travel across venue or session changes.
+strategy VolumeConfirmedChannelBreakout {
+
+    param channel: int = 20
+    param volume_window: int = 20
+    param volume_multiple: float = 1.5
+
+    input high: series<float>
+    input close: series<float>
+    input volume: series<float>
+
+    let prior_top = HIGHEST(high, channel)[1]
+    let prior_volume = SMA(volume, volume_window)[1]
+
+    every 1d {
+
+        if close > prior_top and volume >= prior_volume * volume_multiple {
+
+            buy(ETHUSD, 0.65)
+
+        }
+
+    }
+
+}

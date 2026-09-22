@@ -1,0 +1,44 @@
+// Stochastic %K reclaim. %K measures where the close sits inside its own
+// fourteen-bar range, 0..100. This rule fires on the bar %K crosses back up
+// through 20 - not while it is under 20 - which is the whole difference
+// between an edge and a level, and it needs `k[1]` to express it.
+// REGIME: a range, or a pullback inside an uptrend. Do NOT fire in a sustained
+// downtrend: %K pins near zero there and every small bounce produces a
+// reclaim, so the rule turns into a metronome that buys each leg down.
+// INPUTS: high, low, close (series<float>). No other host signal.
+// CONDITIONS: %K at or above 20 this bar and below 20 last bar. One bar, one
+// signal, then silence until it goes back under.
+// INVALIDATION: %K falling back under 20 within a bar or two, or a new low in
+// price while %K makes a higher low - the second is the classic setup that
+// looks like this one and is not.
+// SHAPE: 1h; a flush to the bottom of the recent range that turns.
+// NOT stochastic_oversold: that is the level test on baseline IR - it fires on
+// every bar %K spends under 20, which in a downtrend is most of them. This
+// fires once per excursion. If you are comparing fire counts between the two,
+// the ratio is the point, not a bug.
+// CALIBRATED ON: crypto, 1h. %K is bounded 0..100, so 20 travels across
+// instruments in a way an absolute price threshold does not; what does not
+// travel is how long an instrument sits pinned at the bottom of its range,
+// which is what decides whether "reclaim" means anything.
+strategy StochasticReclaim {
+
+    param window: int = 14
+    param oversold: float = 20.0
+
+    input high: series<float>
+    input low: series<float>
+    input close: series<float>
+
+    let k = STOCH_K(high, low, close, window)
+
+    every 1h {
+
+        if k >= oversold and k[1] < oversold {
+
+            buy(BTCUSD, 0.6)
+
+        }
+
+    }
+
+}

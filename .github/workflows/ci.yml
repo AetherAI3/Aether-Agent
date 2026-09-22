@@ -58,6 +58,11 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
+      - name: Set up Python for the ATS runtime writer lease
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit
 
@@ -154,20 +159,32 @@ jobs:
           "
         shell: bash
 
-      - name: The installed package pulled in no dependencies
+      - name: The installed package has the exact reviewed dependency graph
         run: |
           set -euo pipefail
           cd "${RUNNER_TEMP}/cleanroom"
-          # aether-agents declares none; anything else here came from nowhere.
-          test "$(npm ls --omit=dev --depth=1 --json | node -e "
+          npm ls --omit=dev --all --json | node -e "
             let raw='';
             process.stdin.on('data', (c) => (raw += c));
             process.stdin.on('end', () => {
               const tree = JSON.parse(raw);
               const agent = (tree.dependencies || {})['aether-agents'] || {};
-              console.log(Object.keys(agent.dependencies || {}).length);
+              const ats = (agent.dependencies || {})['aether-ats-skills'] || {};
+              const exactKeys = (value, expected) => {
+                const actual = Object.keys(value || {}).sort();
+                if (JSON.stringify(actual) !== JSON.stringify([...expected].sort())) {
+                  throw new Error('unexpected dependency set: ' + JSON.stringify(actual));
+                }
+              };
+              if (agent.version !== '0.4.0') throw new Error('unexpected aether-agents version');
+              if (ats.version !== '0.2.0') throw new Error('unexpected aether-ats-skills version');
+              exactKeys(agent.dependencies, ['aether-ats-skills']);
+              exactKeys(ats.dependencies, ['aether-browser', 'aether-context']);
+              if (ats.dependencies['aether-browser'].version !== '0.2.2') throw new Error('unexpected aether-browser version');
+              if (ats.dependencies['aether-context'].version !== '0.3.1') throw new Error('unexpected aether-context version');
+              console.log('clean-install dependency graph verified');
             });
-          ")" = "0"
+          "
         shell: bash
 
   supply-chain:

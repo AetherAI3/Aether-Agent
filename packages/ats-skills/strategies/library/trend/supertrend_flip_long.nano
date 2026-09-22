@@ -1,0 +1,56 @@
+// SuperTrend flip to bullish, taken only when the plan behind it is acceptable.
+// SUPERTREND_FLIP_BULL = 1 on the bar where SuperTrend(10, 3.0) changed from
+// bearish to bullish, 0 otherwise. The host computes it from the SUPERTREND_DIR
+// kernel in nano/indicators/ - or its own equivalent - and publishes the change
+// as a 0/1 series; Nano compares the published number and nothing else.
+// STOP_DISTANCE_ATR = (entry - protective stop) / ATR(10), where the host places
+// the stop below the flip bar or the swing low the flip broke. TARGET_R =
+// planned target distance / planned stop distance, both in points, both
+// host-computed. ATR_PCT = ATR(10) as a percentage of price.
+// PARAMETERS - every number in this rule is one of these three floors, and each
+// one is named so it can be argued with rather than absorbed:
+//   volatility floor    ATR_PCT >= 0.05           a flip in a dead tape is noise
+//   risk floor          STOP_DISTANCE_ATR >= 0.5  the stop must sit outside the
+//                                                 noise it is meant to survive
+//   reward:risk floor   TARGET_R >= 2.33          the target must be worth the
+//                                                 risk the stop already defines
+// WHAT THIS RULE REFUSES TO DO: it does not carry the stop price, the target
+// price, or a quantity. Nano's intent vocabulary is buy/sell/execute/pause/
+// observe plus a confidence - there is no field for a price level or a size - so
+// the host that published STOP_DISTANCE_ATR and TARGET_R must recompute the
+// bracket and own it. The rule asserts only that on this bar a plan clearing all
+// three floors existed. It is not evidence that the plan works.
+// REGIME: trend initiation after a bearish leg. Do NOT fire in a range - inside
+// a range the band is broken in both directions repeatedly and the flip becomes
+// a metronome. The ATR_PCT floor is the cheap version of that filter and not a
+// substitute for knowing the regime.
+// CONDITIONS: all four, AND-chained. Only the first is about what price did; the
+// other three are the host asserting a tradeable plan exists.
+// INVALIDATION: a close back under the SuperTrend line. Note the line and the
+// rule's stop are different levels - the indicator trails its own band while the
+// stop sits under structure - so the two can disagree, and the host decides
+// which one governs.
+// SHAPE: 15m; a bearish band flipping to a bullish one under price, with enough
+// range in the bar for a stop to sit clear of the noise.
+// NOT golden_cross: that is a slow persistent state and reads as a regime
+// filter; this is a discrete event on a single bar. NOT donchian_breakout: that
+// requires price through a prior extreme, this requires only the band to flip,
+// which can happen well inside one. NOT atr_volatility_halt: that uses ATR_PCT
+// as a ceiling to stand down, this uses the same series as a floor to stand up -
+// not opposites, and both can be true of the same violent tape.
+// CALIBRATED ON: MNQ futures, 15m. The three floors are scale-free ratios and
+// travel across instruments; the 15m bar does not - on a slower chart the same
+// flip carries a much larger stop in points for the same 0.5 ATR.
+strategy SupertrendFlipLong {
+
+    every 15m {
+
+        if SUPERTREND_FLIP_BULL(10) >= 1 and ATR_PCT(10) >= 0.05 and STOP_DISTANCE_ATR(10) >= 0.5 and TARGET_R >= 2.33 {
+
+            buy(MNQ, 0.7)
+
+        }
+
+    }
+
+}
