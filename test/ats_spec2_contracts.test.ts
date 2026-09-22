@@ -131,6 +131,17 @@ function ensureAsciiDigest(value: unknown): string {
  * ASCII. These named vectors now carry non-ASCII in fields that would
  * realistically hold it, and this test fails if anyone tidies it back out.
  */
+/**
+ * The floor is a CONSTANT, deliberately not `covered.length`.
+ *
+ * Deriving it from the list being checked makes it self-lowering: trim a name
+ * out of `covered` and the bar drops with it. Measured, that is not
+ * theoretical — trimming `covered` to one name and tidying the non-ASCII out
+ * of the other three takes real coverage from 4 vectors to 1 and the derived
+ * floor still passes. An independent number fails, which is the point.
+ */
+const MIN_ENCODER_COVERAGE = 4;
+
 test("the fixture can actually detect a regression to ensure_ascii encoding", () => {
   const covered = [
     "runtime-capabilities-healthy-observe",
@@ -142,7 +153,11 @@ test("the fixture can actually detect a regression to ensure_ascii encoding", ()
     const entry = vector(name);
     // Still correct under the real encoder...
     assert.equal(digestOf(entry.document), entry.canonical_digest, `${name} no longer matches its digest`);
-    // ...and genuinely load-bearing: the old rule must produce a DIFFERENT digest.
+    // ...and genuinely load-bearing: the old rule must produce a DIFFERENT
+    // digest. This is the assertion that catches the nastiest case — a fixture
+    // regenerated while the encoder is regressed, which is internally
+    // consistent and wholly wrong. Verified to be the first assertion to fire
+    // in exactly that scenario, rather than shadowed by the drift check above.
     assert.notEqual(
       ensureAsciiDigest(entry.document),
       entry.canonical_digest,
@@ -152,8 +167,13 @@ test("the fixture can actually detect a regression to ensure_ascii encoding", ()
 
   const catching = golden.vectors.filter(e => ensureAsciiDigest(e.document) !== e.canonical_digest);
   assert.ok(
-    catching.length >= covered.length,
-    `only ${catching.length} vectors can detect an ensure_ascii regression`,
+    catching.length >= MIN_ENCODER_COVERAGE,
+    `only ${catching.length} vectors can detect an ensure_ascii regression, floor is ${MIN_ENCODER_COVERAGE}`,
+  );
+  // Shrinking `covered` must not shrink the bar it is measured against.
+  assert.ok(
+    covered.length >= MIN_ENCODER_COVERAGE,
+    "the covered list was trimmed below the enforced coverage floor",
   );
 });
 
