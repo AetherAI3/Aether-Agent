@@ -31,9 +31,10 @@ into the terminal, with guided ATS setup.
 
 > **Requires 0.3.2 or newer.** Check what you have with `aether --version`.
 >
-> npm `latest` is still the published 0.3.2 line. The account-agent and ATS
-> sections below describe the 0.4.0 source candidate on `main`; they are not a
-> claim that 0.4.0 has been tagged or published.
+> The live npm badge below resolves the currently published `latest`. Until a
+> verified `v0.4.0` tag and registry publication exist, the account-agent and
+> ATS sections below describe the 0.4.0 source candidate on `main`; source text
+> alone is not publication evidence.
 
 ## Quickstart
 
