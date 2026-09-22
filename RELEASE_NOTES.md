@@ -11,7 +11,7 @@
   size and location, and scans a strategy folder. Local settings stay bound to
   the selected agent and Cloud origin. A local memory receipt does not satisfy
   Cloud's separate APR activation requirements.
-- **Packaged ATS adapters.** The reviewed `aether-ats-skills` 0.1.0 source is
+- **Packaged ATS adapters.** The reviewed `aether-ats-skills` 0.2.0 source is
   bundled with the CLI, with exact `aether-browser` 0.2.2 and `aether-context`
   0.3.1 dependencies. Installation hooks remain forbidden. The existing Python
   launcher remains free of Python runtime dependencies.

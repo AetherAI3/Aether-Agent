@@ -16,13 +16,14 @@ before evaluating release readiness.
 | Source custody | ATS owns the canonical source. The Agent copy must match its recorded upstream source and digest; it is not a separate implementation. |
 | Required Cloud companion | Cloud #1691 at `13a6ef5857d14d036d7275d123c521a889d804f2`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`, restacked after Cloud #1687 without replacing its admission/runtime ownership. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
 | Local prerequisites | The ATS Python engine and a reachable Agent Browser runtime are separate prerequisites. The npm context dependency is a launcher, not proof that Python memory is installed or verified. |
-| Platform evidence | Linux packed offline installation, CLI selftest and process-held writer lease passed in this workspace. The exact Agent head must pass its Linux/Windows matrix, which now runs the shipped writer-lease test with Python. Native headed Browser/noVNC remains Linux/POSIX-only; a Windows client is not a native Windows browser-host qualification. |
-| Archive evidence | Local packed-install checks are recorded below. Release archive, checksum and publishing provenance remain pending. |
-| Hosted checks | Required exact-commit CI, CodeQL, supply-chain audit, generated-documentation, production-package and release-truth checks pending. |
+| Platform evidence | Audited `main` at `c0feb1970986cfaf166504ebe51b882aea608e4f` passed Linux and Windows tests plus Linux and Windows clean-install jobs in [CI 35358929047](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929047). Native headed Browser/noVNC remains Linux/POSIX-only and still needs its real-host release canary if browser availability is claimed. |
+| Archive evidence | The production-package verifier passed on audited `main`; the immutable `v0.4.0` tag archive, checksum and publishing provenance remain pending and must be produced from the final verified tag commit. |
+| Hosted checks | Audited `main` is green in [CI 35358929047](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929047), [CodeQL 35358929027](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929027) and its later [scheduled run 35601932145](https://github.com/AetherAI3/Aether-Agent/actions/runs/35601932145), plus [release truth 35358929055](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929055) and its later [scheduled run 35629835836](https://github.com/AetherAI3/Aether-Agent/actions/runs/35629835836). CI includes supply-chain, generated-documentation, production-package, clean-install and PyPI-launcher coverage. The final tag commit must rerun these gates. |
 | Live service evidence | Deployment of the Cloud adapter, actual web/terminal DM sync, model/UVT execution and broker connectivity are not established by local tests. |
-| Publication evidence | No npm/PyPI publish, tag, trusted-publishing provenance or registry dist-tag update is established by this packet. |
+| Publication evidence | No `v0.4.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance or registry dist-tag update is established by this packet. Published `latest` remains a separate registry fact until protected workflows complete. |
 | PyPI launcher | Version synchronized with `node packages/sync-version.mjs`; still launches npm `latest` unless explicitly pinned. No Python runtime dependency added. |
 | License scope | The Agent and bundled ATS adapter are Apache-2.0. The paid ATS engine is a separate prerequisite and is not bundled into the CLI. |
+| Governance evidence | Qualified legal review of `ATS_ACCEPTABLE_USE_POLICY.md` is not yet recorded. ATS publication remains withheld until that review and the real-account release canaries are attached. |
 | Rollback | Before publication, revise or withdraw the candidate. After publication, restore the previously verified npm dist-tag and feature rollout if needed; preserve published version history. |
 
 ## Qualification sequence
@@ -34,8 +35,9 @@ before evaluating release readiness.
 3. Run `npm run verify:production -- --tag v0.4.0`. It inspects the actual pack,
    verifies installed runtime manifests, installs the tarball offline with
    lifecycle scripts disabled, and runs the existing packaged CLI selftest.
-4. Complete Windows and Linux clean-install canaries and live Cloud/Online
-   compatibility verification. Record unavailable boundaries as unavailable.
+4. Preserve the green Windows and Linux clean-install evidence, then complete
+   the live Cloud/Online, native ATS, account-switch and headed-browser canaries
+   against the final candidate. Record unavailable boundaries as unavailable.
 5. Run the existing release-truth and supply-chain gates. Only the existing
    protected release workflows can establish publication and provenance.
 
@@ -89,6 +91,26 @@ command, not through a second agent registry.
 
 ## Local validation record
 
+### Exact-head source-candidate closure
+
+- Audited `main` is `c0feb1970986cfaf166504ebe51b882aea608e4f`.
+  [CI 35358929047](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929047)
+  passed Linux tests, Windows tests, Linux clean install, Windows clean install,
+  supply-chain checks, generated docs, production-package verification and the
+  PyPI launcher.
+- [CodeQL 35358929027](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929027)
+  and [scheduled CodeQL 35601932145](https://github.com/AetherAI3/Aether-Agent/actions/runs/35601932145)
+  completed successfully. [Release truth 35358929055](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929055)
+  and [scheduled release truth 35629835836](https://github.com/AetherAI3/Aether-Agent/actions/runs/35629835836)
+  also completed successfully.
+- The final merged head reported **2,579 tests passing, zero failures and four
+  platform skips**. Its production-package verifier passed and the ATS policy
+  was included in the pack. This supersedes the earlier `review_counts` EPIPE
+  qualification below; it is not a current release result.
+- This evidence qualifies the audited source head only. Legal review, real
+  Cloud/DM/model/UVT and native setup canaries, the headed Linux browser canary,
+  final-tag verification, publication and provenance remain pending.
+
 ### LOOP-16 v2 follow-up
 
 - Four isolated builders completed before sequential collection; independent
@@ -124,8 +146,8 @@ command, not through a second agent registry.
 - Agent terminal/controller/managed suites: 45 tests passed; manifest/slash/generated-doc suites: 48 passed; release/package/coherence/public-document suites: 65 passed. Build and all six generated documentation checks passed.
 - Final packed-install verification passed: 569 files, 3,468,703 unpacked bytes, all three exact bundled runtimes, offline installation with lifecycle scripts disabled, installed SDK/visual-skill import, CLI and headless selftest.
 - The earlier candidate dependency audit reported zero vulnerabilities; this follow-up adds no dependency versions or graph edges.
-- The broad Agent test run encountered an existing `review_counts` EPIPE failure. It was reproduced in a detached, untouched `ccbe1595` baseline (10 passes, two EPIPE failures in the isolated review/ship suite). A completely green full suite is not claimed.
+- The earlier `review_counts` EPIPE result was historical candidate evidence and is superseded by the green 2,579-pass audited `main` result recorded above.
 - Cross-repository schema check: the ATS profile validates against Cloud's native `AgentConfigV1`. Cloud terminal adapter: 21 focused tests and independent owner/authentication-boundary review passed.
-- Companions: [Cloud #1691](https://github.com/AetherAI3/AETHER-CLOUD/pull/1691) and [ATS #441](https://github.com/AetherAI3/ATSv2/pull/441). No live broker, deployed Cloud compatibility, Windows, registry publication or autonomous executor qualification.
+- Companions: [Cloud #1691](https://github.com/AetherAI3/AETHER-CLOUD/pull/1691) and [ATS #441](https://github.com/AetherAI3/ATSv2/pull/441). No live broker, deployed Cloud compatibility, headed-browser canary, registry publication or autonomous executor qualification.
 
 - Browser follow-up review: four independent lanes and four bounded review rounds addressed B1–B4; no LOOP-17 convergence claim. Scope and runtime constraints: [review artifact](../loops/ATS_BROWSER_SETUP/2026-09-17/AUDIT-ARTIFACT.md). Actual headed Chrome/noVNC and Cloud vision dispatch remain unqualified.
