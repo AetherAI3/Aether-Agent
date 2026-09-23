@@ -138,10 +138,21 @@ and the ATSv2 Python connector core. Source spec: *Aether Agent trading
 integrations finale — Spec 1*, sections 11.1–11.8.
 
 **Conformance fixture (the drift detector):** `test/fixtures/ats_contracts_golden.json`
-holds one validated example per schema plus its canonical digest. The ATSv2
-Python suite keeps an identical copy. Each side validates every document and
-asserts the recorded digest byte-for-byte; a mismatch is canonicalization drift,
-not a test to relax.
+holds one validated example per schema plus its canonical digest. The matching
+ATSv2 fixture and independent Python digest checks are proposed in ATSv2
+[#443](https://github.com/AetherAI3/ATSv2/pull/443). Its Python checks do not
+yet reproduce all eight TypeScript validators or translate ATSv2's native
+`agent_bridge/v1` objects. A matching digest proves canonical bytes agree for
+these examples; it does not prove that ATS accepted an order or a grant.
+
+`aether.ats.model-order-proposal/1` is the closed **untrusted model input**.
+Its separate fixture is `test/fixtures/ats_model_proposal_golden.json`. It
+contains strategy and quote references, symbol, side, whole-share quantity,
+order type, price and expiry. It has no account, environment, grant, client,
+request ID or operator decision. ATSv2 must inject all of those after client
+authentication and revalidate every reference. The `equity-order-intent/1`
+below is an ATS-private bound object; it must never be exposed as a model tool
+argument. Neither proposal validation nor its digest is execution authority.
 
 ### Frozen schema tags
 

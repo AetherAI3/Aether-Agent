@@ -1,0 +1,66 @@
+{
+  "schema_version": "aether.ats.model-order-proposal-golden/1",
+  "canonical_profile": "rfc8785/1",
+  "document": {
+    "schema_version": "aether.ats.model-order-proposal/1",
+    "activation_id": "activation_ema01",
+    "artifact_id": "artifact_ema_pullback_v3",
+    "symbol": "SPY",
+    "side": "buy",
+    "quantity": 4,
+    "order_type": "limit",
+    "limit_price_minor": 58012,
+    "market_snapshot_ref": "snap_20260922_1430",
+    "broker_quote_ref": "quote_spy_20260922",
+    "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "expires_at": "2026-09-22T14:31:00Z"
+  },
+  "canonical_digest": "sha256:f7d07f072ab21a254ecfa7b41e3f3f3dab6195df19a17096e8f77a67aaeabede",
+  "rejects": [
+    {
+      "name": "account injection",
+      "field": "opaque_account_ref",
+      "value": "acct_9f2c4ab77e10"
+    },
+    {
+      "name": "environment injection",
+      "field": "execution_environment",
+      "value": "provider_live"
+    },
+    {
+      "name": "grant injection",
+      "field": "grant_id",
+      "value": "grant_demo"
+    },
+    {
+      "name": "operator approval injection",
+      "field": "approval",
+      "value": "APPROVE_ONCE"
+    },
+    {
+      "name": "fractional shares",
+      "field": "quantity",
+      "value": 1.5
+    },
+    {
+      "name": "fractional money",
+      "field": "limit_price_minor",
+      "value": 580.12
+    },
+    {
+      "name": "invalid symbol",
+      "field": "symbol",
+      "value": "spy"
+    },
+    {
+      "name": "unsupported type",
+      "field": "order_type",
+      "value": "stop"
+    },
+    {
+      "name": "missing quote",
+      "field": "broker_quote_ref",
+      "value": null
+    }
+  ]
+}
