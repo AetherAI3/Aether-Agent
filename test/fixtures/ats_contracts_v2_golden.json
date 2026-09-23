@@ -1,0 +1,1693 @@
+{
+  "schema_version": "aether.ats.spec1-v2-golden/1",
+  "canonical_profile": "rfc8785/1",
+  "note": "Spec 1 /2 closure. /2 documents carry the same fields as /1; the only semantic change is the strict equity ticker and the closed-charset masked label. Every reject is single-cause and names the exact message both languages emit. frozen_weakness entries are ACCEPTED by the frozen /1 validator and REFUSED by /2. Chain cases pass every version-blind check, so the executable gate's version rule is their only possible refusal. Pure ASCII: non-ASCII values are JSON escapes.",
+  "vectors": [
+    {
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "document": {
+        "schema_version": "aether.ats.model-order-proposal/2",
+        "activation_id": "activation_ema01",
+        "artifact_id": "artifact_ema_pullback_v3",
+        "symbol": "SPY",
+        "side": "buy",
+        "quantity": 4,
+        "order_type": "limit",
+        "limit_price_minor": 58012,
+        "market_snapshot_ref": "snap_20260922_1430",
+        "broker_quote_ref": "quote_spy_20260922",
+        "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "expires_at": "2026-09-22T14:31:00Z"
+      },
+      "canonical": "{\"activation_id\":\"activation_ema01\",\"artifact_id\":\"artifact_ema_pullback_v3\",\"broker_quote_ref\":\"quote_spy_20260922\",\"evidence_digest\":\"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\",\"expires_at\":\"2026-09-22T14:31:00Z\",\"limit_price_minor\":58012,\"market_snapshot_ref\":\"snap_20260922_1430\",\"order_type\":\"limit\",\"quantity\":4,\"schema_version\":\"aether.ats.model-order-proposal/2\",\"side\":\"buy\",\"symbol\":\"SPY\"}",
+      "canonical_digest": "sha256:9fa8ca0103e1d32669f55d586d5fa4ca68c7017fe21b50d033e7867ac7f31687"
+    },
+    {
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "document": {
+        "schema_version": "aether.ats.equity-order-intent/2",
+        "intent_id": "intent_7c1a4f20",
+        "request_id": "req_7c1a4f20",
+        "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
+          "adapter_id": "robinhood_trading_mcp",
+          "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "execution_environment": "ats_paper",
+          "binding_generation": 1
+        },
+        "activation_id": "activation_ema01",
+        "artifact_id": "artifact_ema_pullback_v3",
+        "symbol": "SPY",
+        "side": "buy",
+        "quantity": 4,
+        "order_type": "limit",
+        "limit_price_minor": 58012,
+        "evidence": {
+          "market_snapshot_ref": "snap_20260922_1430",
+          "broker_quote_ref": "quote_spy_20260922",
+          "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "observed_at": "2026-09-22T14:29:55Z"
+        },
+        "created_at": "2026-09-22T14:30:00Z",
+        "expires_at": "2026-09-22T14:33:00Z"
+      },
+      "canonical": "{\"activation_id\":\"activation_ema01\",\"artifact_id\":\"artifact_ema_pullback_v3\",\"connector\":{\"account_binding_id\":\"bind_rh_agentic01\",\"adapter_id\":\"robinhood_trading_mcp\",\"binding_generation\":1,\"endpoint_schema_digest\":\"sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"execution_environment\":\"ats_paper\",\"provider_id\":\"robinhood\"},\"created_at\":\"2026-09-22T14:30:00Z\",\"evidence\":{\"broker_quote_ref\":\"quote_spy_20260922\",\"evidence_digest\":\"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\",\"market_snapshot_ref\":\"snap_20260922_1430\",\"observed_at\":\"2026-09-22T14:29:55Z\"},\"expires_at\":\"2026-09-22T14:33:00Z\",\"intent_id\":\"intent_7c1a4f20\",\"limit_price_minor\":58012,\"order_type\":\"limit\",\"quantity\":4,\"request_id\":\"req_7c1a4f20\",\"schema_version\":\"aether.ats.equity-order-intent/2\",\"side\":\"buy\",\"symbol\":\"SPY\"}",
+      "canonical_digest": "sha256:b4ebe63207061e7f3754aa9f9edeb801c7ca200c5f8a0bbec494bcc1ea159265"
+    },
+    {
+      "schema_version": "aether.ats.operator-approval/2",
+      "document": {
+        "schema_version": "aether.ats.operator-approval/2",
+        "approval_id": "appr_3d91b7c2",
+        "request_id": "req_7c1a4f20",
+        "intent_digest": "sha256:b4ebe63207061e7f3754aa9f9edeb801c7ca200c5f8a0bbec494bcc1ea159265",
+        "review_id": "review_3d91b7",
+        "review_digest": "sha256:16b243382c5d65582942b4821f16a21475537d7124c9fac553b9d20c5537e135",
+        "connector": {
+          "provider_id": "robinhood",
+          "account_binding_id": "bind_rh_agentic01",
+          "adapter_id": "robinhood_trading_mcp",
+          "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "execution_environment": "ats_paper",
+          "binding_generation": 1
+        },
+        "provider_id": "robinhood",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "grant_id": "grant_rh_paper01",
+        "grant_version": 1,
+        "policy_version": "ats-aup-2026-09",
+        "symbol": "SPY",
+        "side": "buy",
+        "quantity": 4,
+        "order_type": "limit",
+        "limit_price_minor": 58012,
+        "worst_case_notional_minor": 232048,
+        "reservation_ref": "resv_88ac10",
+        "broker_preview_id": "preview_5f7b21",
+        "activation_id": "activation_ema01",
+        "artifact_id": "artifact_ema_pullback_v3",
+        "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "operator_id": "operator_local",
+        "local_device_id": "local_a1b2c3d4",
+        "operator_session_id": "opsess_5e6f7a8b",
+        "approved_at": "2026-09-22T14:30:30Z",
+        "expires_at": "2026-09-22T14:32:00Z",
+        "consumed_at": null
+      },
+      "canonical": "{\"activation_id\":\"activation_ema01\",\"approval_id\":\"appr_3d91b7c2\",\"approved_at\":\"2026-09-22T14:30:30Z\",\"artifact_id\":\"artifact_ema_pullback_v3\",\"broker_preview_id\":\"preview_5f7b21\",\"connector\":{\"account_binding_id\":\"bind_rh_agentic01\",\"adapter_id\":\"robinhood_trading_mcp\",\"binding_generation\":1,\"endpoint_schema_digest\":\"sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"execution_environment\":\"ats_paper\",\"provider_id\":\"robinhood\"},\"consumed_at\":null,\"evidence_digest\":\"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\",\"expires_at\":\"2026-09-22T14:32:00Z\",\"grant_id\":\"grant_rh_paper01\",\"grant_version\":1,\"intent_digest\":\"sha256:b4ebe63207061e7f3754aa9f9edeb801c7ca200c5f8a0bbec494bcc1ea159265\",\"limit_price_minor\":58012,\"local_device_id\":\"local_a1b2c3d4\",\"opaque_account_ref\":\"acct_9f2c4ab77e10\",\"operator_id\":\"operator_local\",\"operator_session_id\":\"opsess_5e6f7a8b\",\"order_type\":\"limit\",\"policy_version\":\"ats-aup-2026-09\",\"provider_id\":\"robinhood\",\"quantity\":4,\"request_id\":\"req_7c1a4f20\",\"reservation_ref\":\"resv_88ac10\",\"review_digest\":\"sha256:16b243382c5d65582942b4821f16a21475537d7124c9fac553b9d20c5537e135\",\"review_id\":\"review_3d91b7\",\"schema_version\":\"aether.ats.operator-approval/2\",\"side\":\"buy\",\"symbol\":\"SPY\",\"worst_case_notional_minor\":232048}",
+      "canonical_digest": "sha256:4fdaa6d7c99bd4e94383f1655f330859436d599c6d1d28b924b6a851f3dc63b0"
+    },
+    {
+      "schema_version": "aether.ats.execution-receipt/2",
+      "document": {
+        "schema_version": "aether.ats.execution-receipt/2",
+        "request_id": "req_7c1a4f20",
+        "intent_id": "intent_7c1a4f20",
+        "approval_id": "appr_3d91b7c2",
+        "outcome": "filled",
+        "opaque_order_ref": "ord_44bd10c2",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "symbol": "SPY",
+        "side": "buy",
+        "quantity": 4,
+        "order_type": "limit",
+        "activation_id": "activation_ema01",
+        "artifact_id": "artifact_ema_pullback_v3",
+        "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "client_principal": "agent_atlas",
+        "grant_id": "grant_rh_paper01",
+        "submitted_at": "2026-09-22T14:30:31Z",
+        "settled_at": "2026-09-22T14:30:33Z",
+        "fill": {
+          "filled_quantity": 4,
+          "average_fill_price_minor": 58005,
+          "confirmed_at": "2026-09-22T14:30:33Z"
+        },
+        "reconciliation_state": "not_required",
+        "reason": null
+      },
+      "canonical": "{\"activation_id\":\"activation_ema01\",\"approval_id\":\"appr_3d91b7c2\",\"artifact_id\":\"artifact_ema_pullback_v3\",\"client_principal\":\"agent_atlas\",\"evidence_digest\":\"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\",\"fill\":{\"average_fill_price_minor\":58005,\"confirmed_at\":\"2026-09-22T14:30:33Z\",\"filled_quantity\":4},\"grant_id\":\"grant_rh_paper01\",\"intent_id\":\"intent_7c1a4f20\",\"opaque_account_ref\":\"acct_9f2c4ab77e10\",\"opaque_order_ref\":\"ord_44bd10c2\",\"order_type\":\"limit\",\"outcome\":\"filled\",\"quantity\":4,\"reason\":null,\"reconciliation_state\":\"not_required\",\"request_id\":\"req_7c1a4f20\",\"schema_version\":\"aether.ats.execution-receipt/2\",\"settled_at\":\"2026-09-22T14:30:33Z\",\"side\":\"buy\",\"submitted_at\":\"2026-09-22T14:30:31Z\",\"symbol\":\"SPY\"}",
+      "canonical_digest": "sha256:8e4a3c4dc075d67e1a3edf3097ee7c09bf8c0d3c76b2d00a89979f49943634d9"
+    },
+    {
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "document": {
+        "schema_version": "aether.ats.delegated-trading-grant/2",
+        "grant_id": "grant_rh_paper01",
+        "grant_version": 1,
+        "client_principal": "agent_atlas",
+        "provider_id": "robinhood",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "execution_environment": "ats_paper",
+        "capabilities": [
+          "read_account",
+          "review_order",
+          "commit_order"
+        ],
+        "symbol_allowlist": [
+          "SPY",
+          "QQQ",
+          "BRK.B",
+          "BF-B"
+        ],
+        "limits": {
+          "max_notional_per_order_minor": 250000,
+          "max_notional_per_day_minor": 1000000,
+          "max_position_notional_per_symbol_minor": 500000,
+          "max_orders_per_day": 10,
+          "max_open_orders": 2
+        },
+        "allowed_sides": [
+          "buy",
+          "sell"
+        ],
+        "allowed_order_types": [
+          "market",
+          "limit"
+        ],
+        "confirmation": "per_order",
+        "state": "active",
+        "abuse_flagged": false,
+        "issued_at": "2026-09-22T14:00:00Z",
+        "expires_at": "2026-09-22T18:00:00Z"
+      },
+      "canonical": "{\"abuse_flagged\":false,\"allowed_order_types\":[\"market\",\"limit\"],\"allowed_sides\":[\"buy\",\"sell\"],\"capabilities\":[\"read_account\",\"review_order\",\"commit_order\"],\"client_principal\":\"agent_atlas\",\"confirmation\":\"per_order\",\"execution_environment\":\"ats_paper\",\"expires_at\":\"2026-09-22T18:00:00Z\",\"grant_id\":\"grant_rh_paper01\",\"grant_version\":1,\"issued_at\":\"2026-09-22T14:00:00Z\",\"limits\":{\"max_notional_per_day_minor\":1000000,\"max_notional_per_order_minor\":250000,\"max_open_orders\":2,\"max_orders_per_day\":10,\"max_position_notional_per_symbol_minor\":500000},\"opaque_account_ref\":\"acct_9f2c4ab77e10\",\"provider_id\":\"robinhood\",\"schema_version\":\"aether.ats.delegated-trading-grant/2\",\"state\":\"active\",\"symbol_allowlist\":[\"SPY\",\"QQQ\",\"BRK.B\",\"BF-B\"]}",
+      "canonical_digest": "sha256:ee408bfc54201e6573695f503f888a288e05dd6a34cd5d410b508b789a125b0d"
+    },
+    {
+      "schema_version": "aether.ats.account-binding/2",
+      "document": {
+        "schema_version": "aether.ats.account-binding/2",
+        "account_binding_id": "bind_rh_agentic01",
+        "provider_id": "robinhood",
+        "credential_ref": "vault_rh_primary01",
+        "encrypted_account_ref": "enc_rh_acct_0001",
+        "opaque_account_ref": "acct_9f2c4ab77e10",
+        "masked_label": "Agentic \u2022\u2022\u2022\u202241",
+        "asset_capabilities": [
+          "equity"
+        ],
+        "connector_snapshot_digest": "sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+        "selected_at": "2026-09-22T14:20:00Z",
+        "binding_generation": 1
+      },
+      "canonical": "{\"account_binding_id\":\"bind_rh_agentic01\",\"asset_capabilities\":[\"equity\"],\"binding_generation\":1,\"connector_snapshot_digest\":\"sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4\",\"credential_ref\":\"vault_rh_primary01\",\"encrypted_account_ref\":\"enc_rh_acct_0001\",\"masked_label\":\"Agentic \u2022\u2022\u2022\u202241\",\"opaque_account_ref\":\"acct_9f2c4ab77e10\",\"provider_id\":\"robinhood\",\"schema_version\":\"aether.ats.account-binding/2\",\"selected_at\":\"2026-09-22T14:20:00Z\"}",
+      "canonical_digest": "sha256:a1500d7eb9f8795025aaba6df4670b2200404439c818bdf4fc354b710e323212"
+    }
+  ],
+  "accepts": [
+    {
+      "name": "class share with a dot",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "BRK.B"
+        }
+      ]
+    },
+    {
+      "name": "class share with a hyphen",
+      "schema_version": "aether.ats.operator-approval/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "BRK-B"
+        }
+      ]
+    },
+    {
+      "name": "one-letter ticker",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "F"
+        }
+      ]
+    },
+    {
+      "name": "longest ticker",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "ABCDEF.ABCD"
+        }
+      ]
+    },
+    {
+      "name": "allowlist of strict tickers",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist"
+          ],
+          "value": [
+            "SPY",
+            "BRK-B",
+            "F",
+            "ABCDEF.ABCD"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "label with four digits and asterisks",
+      "schema_version": "aether.ats.account-binding/2",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "Brokerage ****1234"
+        }
+      ]
+    },
+    {
+      "name": "label with an ellipsis",
+      "schema_version": "aether.ats.account-binding/2",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "IRA \u20269876"
+        }
+      ]
+    },
+    {
+      "name": "label with every permitted punctuation mark",
+      "schema_version": "aether.ats.account-binding/2",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "Joint (x2) #0042_A.b-c *"
+        }
+      ]
+    }
+  ],
+  "rejects": [
+    {
+      "name": "aether.ats.model-order-proposal/2: lowercase ticker spy",
+      "category": "ticker",
+      "case": "spy",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "spy"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B.",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "v1_expect": "Proposal symbol must be a bounded uppercase ticker."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: lowercase ticker spy",
+      "category": "ticker",
+      "case": "spy",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "spy"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B.",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "v1_expect": "Order intent symbol must be a bounded uppercase ticker."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: lowercase ticker spy",
+      "category": "ticker",
+      "case": "spy",
+      "schema_version": "aether.ats.operator-approval/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "spy"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B.",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "v1_expect": "Operator approval symbol must be a bounded uppercase ticker."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: lowercase ticker spy",
+      "category": "ticker",
+      "case": "spy",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "spy"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B.",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "v1_expect": "Execution receipt symbol must be a bounded uppercase ticker."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: lowercase ticker spy",
+      "category": "ticker",
+      "case": "spy",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "spy"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B.",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "v1_expect": "Trading grant symbol allowlist[1] must be a bounded uppercase ticker."
+    },
+    {
+      "name": "aether.ats.account-binding/2: masked label with five ASCII digits",
+      "category": "label",
+      "case": "five_ascii_digits",
+      "schema_version": "aether.ats.account-binding/2",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "Agentic 41255"
+        }
+      ],
+      "expect": "Account binding masked label must not embed a full account number.",
+      "v1_schema_version": "aether.ats.account-binding/1",
+      "v1_expect": "Account binding masked label must not embed a full account number."
+    },
+    {
+      "name": "aether.ats.model-order-proposal/2 validator given a /1 tag",
+      "category": "schema_tag",
+      "case": "v1_tag",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "patches": [
+        {
+          "path": [
+            "schema_version"
+          ],
+          "value": "aether.ats.model-order-proposal/1"
+        }
+      ],
+      "expect": "Model order proposal must declare schema aether.ats.model-order-proposal/2."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2 validator given a /1 tag",
+      "category": "schema_tag",
+      "case": "v1_tag",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "patches": [
+        {
+          "path": [
+            "schema_version"
+          ],
+          "value": "aether.ats.equity-order-intent/1"
+        }
+      ],
+      "expect": "Order intent must declare schema aether.ats.equity-order-intent/2."
+    },
+    {
+      "name": "aether.ats.operator-approval/2 validator given a /1 tag",
+      "category": "schema_tag",
+      "case": "v1_tag",
+      "schema_version": "aether.ats.operator-approval/2",
+      "patches": [
+        {
+          "path": [
+            "schema_version"
+          ],
+          "value": "aether.ats.operator-approval/1"
+        }
+      ],
+      "expect": "Operator approval must declare schema aether.ats.operator-approval/2."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2 validator given a /1 tag",
+      "category": "schema_tag",
+      "case": "v1_tag",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "patches": [
+        {
+          "path": [
+            "schema_version"
+          ],
+          "value": "aether.ats.execution-receipt/1"
+        }
+      ],
+      "expect": "Execution receipt must declare schema aether.ats.execution-receipt/2."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2 validator given a /1 tag",
+      "category": "schema_tag",
+      "case": "v1_tag",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "patches": [
+        {
+          "path": [
+            "schema_version"
+          ],
+          "value": "aether.ats.delegated-trading-grant/1"
+        }
+      ],
+      "expect": "Trading grant must declare schema aether.ats.delegated-trading-grant/2."
+    },
+    {
+      "name": "aether.ats.account-binding/2 validator given a /1 tag",
+      "category": "schema_tag",
+      "case": "v1_tag",
+      "schema_version": "aether.ats.account-binding/2",
+      "patches": [
+        {
+          "path": [
+            "schema_version"
+          ],
+          "value": "aether.ats.account-binding/1"
+        }
+      ],
+      "expect": "Account binding must declare schema aether.ats.account-binding/2."
+    }
+  ],
+  "frozen_weakness": [
+    {
+      "name": "aether.ats.model-order-proposal/2: url-shaped ticker HTTPS://X",
+      "category": "ticker",
+      "case": "HTTPS://X",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "HTTPS://X"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.model-order-proposal/2: colon-separated ticker A:B",
+      "category": "ticker",
+      "case": "A:B",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A:B"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.model-order-proposal/2: slash-separated ticker X/Y",
+      "category": "ticker",
+      "case": "X/Y",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "X/Y"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.model-order-proposal/2: seven-letter root ABCDEFG",
+      "category": "ticker",
+      "case": "ABCDEFG",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "ABCDEFG"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.model-order-proposal/2: five-letter class suffix BRK.BBBBB",
+      "category": "ticker",
+      "case": "BRK.BBBBB",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "BRK.BBBBB"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.model-order-proposal/2: caret index marker A^B",
+      "category": "ticker",
+      "case": "A^B",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A^B"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.model-order-proposal/2: leading digit 1ABC",
+      "category": "ticker",
+      "case": "1ABC",
+      "schema_version": "aether.ats.model-order-proposal/2",
+      "v1_schema_version": "aether.ats.model-order-proposal/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "1ABC"
+        }
+      ],
+      "expect": "Proposal symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: url-shaped ticker HTTPS://X",
+      "category": "ticker",
+      "case": "HTTPS://X",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "HTTPS://X"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: colon-separated ticker A:B",
+      "category": "ticker",
+      "case": "A:B",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A:B"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: slash-separated ticker X/Y",
+      "category": "ticker",
+      "case": "X/Y",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "X/Y"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: seven-letter root ABCDEFG",
+      "category": "ticker",
+      "case": "ABCDEFG",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "ABCDEFG"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: five-letter class suffix BRK.BBBBB",
+      "category": "ticker",
+      "case": "BRK.BBBBB",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "BRK.BBBBB"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: caret index marker A^B",
+      "category": "ticker",
+      "case": "A^B",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A^B"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.equity-order-intent/2: leading digit 1ABC",
+      "category": "ticker",
+      "case": "1ABC",
+      "schema_version": "aether.ats.equity-order-intent/2",
+      "v1_schema_version": "aether.ats.equity-order-intent/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "1ABC"
+        }
+      ],
+      "expect": "Order intent symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: url-shaped ticker HTTPS://X",
+      "category": "ticker",
+      "case": "HTTPS://X",
+      "schema_version": "aether.ats.operator-approval/2",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "HTTPS://X"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: colon-separated ticker A:B",
+      "category": "ticker",
+      "case": "A:B",
+      "schema_version": "aether.ats.operator-approval/2",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A:B"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: slash-separated ticker X/Y",
+      "category": "ticker",
+      "case": "X/Y",
+      "schema_version": "aether.ats.operator-approval/2",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "X/Y"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: seven-letter root ABCDEFG",
+      "category": "ticker",
+      "case": "ABCDEFG",
+      "schema_version": "aether.ats.operator-approval/2",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "ABCDEFG"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: five-letter class suffix BRK.BBBBB",
+      "category": "ticker",
+      "case": "BRK.BBBBB",
+      "schema_version": "aether.ats.operator-approval/2",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "BRK.BBBBB"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: caret index marker A^B",
+      "category": "ticker",
+      "case": "A^B",
+      "schema_version": "aether.ats.operator-approval/2",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A^B"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.operator-approval/2: leading digit 1ABC",
+      "category": "ticker",
+      "case": "1ABC",
+      "schema_version": "aether.ats.operator-approval/2",
+      "v1_schema_version": "aether.ats.operator-approval/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "1ABC"
+        }
+      ],
+      "expect": "Operator approval symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: url-shaped ticker HTTPS://X",
+      "category": "ticker",
+      "case": "HTTPS://X",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "HTTPS://X"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: colon-separated ticker A:B",
+      "category": "ticker",
+      "case": "A:B",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A:B"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: slash-separated ticker X/Y",
+      "category": "ticker",
+      "case": "X/Y",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "X/Y"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: seven-letter root ABCDEFG",
+      "category": "ticker",
+      "case": "ABCDEFG",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "ABCDEFG"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: five-letter class suffix BRK.BBBBB",
+      "category": "ticker",
+      "case": "BRK.BBBBB",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "BRK.BBBBB"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: caret index marker A^B",
+      "category": "ticker",
+      "case": "A^B",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "A^B"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.execution-receipt/2: leading digit 1ABC",
+      "category": "ticker",
+      "case": "1ABC",
+      "schema_version": "aether.ats.execution-receipt/2",
+      "v1_schema_version": "aether.ats.execution-receipt/1",
+      "patches": [
+        {
+          "path": [
+            "symbol"
+          ],
+          "value": "1ABC"
+        }
+      ],
+      "expect": "Execution receipt symbol must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: url-shaped ticker HTTPS://X",
+      "category": "ticker",
+      "case": "HTTPS://X",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "HTTPS://X"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: colon-separated ticker A:B",
+      "category": "ticker",
+      "case": "A:B",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "A:B"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: slash-separated ticker X/Y",
+      "category": "ticker",
+      "case": "X/Y",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "X/Y"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: seven-letter root ABCDEFG",
+      "category": "ticker",
+      "case": "ABCDEFG",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "ABCDEFG"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: five-letter class suffix BRK.BBBBB",
+      "category": "ticker",
+      "case": "BRK.BBBBB",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "BRK.BBBBB"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: caret index marker A^B",
+      "category": "ticker",
+      "case": "A^B",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "A^B"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.delegated-trading-grant/2: leading digit 1ABC",
+      "category": "ticker",
+      "case": "1ABC",
+      "schema_version": "aether.ats.delegated-trading-grant/2",
+      "v1_schema_version": "aether.ats.delegated-trading-grant/1",
+      "patches": [
+        {
+          "path": [
+            "symbol_allowlist",
+            "1"
+          ],
+          "value": "1ABC"
+        }
+      ],
+      "expect": "Trading grant symbol allowlist[1] must be an equity ticker such as SPY or BRK.B."
+    },
+    {
+      "name": "aether.ats.account-binding/2: masked label with a fullwidth digit run",
+      "category": "label",
+      "case": "fullwidth_digits",
+      "schema_version": "aether.ats.account-binding/2",
+      "v1_schema_version": "aether.ats.account-binding/1",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "Agentic \uff14\uff11\uff12\uff15\uff15"
+        }
+      ],
+      "expect": "Account binding masked label must use only letters, digits, spaces, masking bullets and . - _ ( ) # *."
+    },
+    {
+      "name": "aether.ats.account-binding/2: masked label with a Arabic-Indic digit run",
+      "category": "label",
+      "case": "arabic_indic_digits",
+      "schema_version": "aether.ats.account-binding/2",
+      "v1_schema_version": "aether.ats.account-binding/1",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "Agentic \u0664\u0661\u0662\u0665\u0665"
+        }
+      ],
+      "expect": "Account binding masked label must use only letters, digits, spaces, masking bullets and . - _ ( ) # *."
+    },
+    {
+      "name": "aether.ats.account-binding/2: masked label with a Cyrillic confusable letter",
+      "category": "label",
+      "case": "cyrillic_confusable",
+      "schema_version": "aether.ats.account-binding/2",
+      "v1_schema_version": "aether.ats.account-binding/1",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "\u0410gentic \u2022\u2022\u2022\u202241"
+        }
+      ],
+      "expect": "Account binding masked label must use only letters, digits, spaces, masking bullets and . - _ ( ) # *."
+    },
+    {
+      "name": "aether.ats.account-binding/2: masked label with a right-to-left override (U+202E)",
+      "category": "label",
+      "case": "right_to_left_override",
+      "schema_version": "aether.ats.account-binding/2",
+      "v1_schema_version": "aether.ats.account-binding/1",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "Agentic \u202e14\u2022\u2022\u2022\u2022"
+        }
+      ],
+      "expect": "Account binding masked label must use only letters, digits, spaces, masking bullets and . - _ ( ) # *."
+    },
+    {
+      "name": "aether.ats.account-binding/2: masked label with a zero-width space (U+200B)",
+      "category": "label",
+      "case": "zero_width_space",
+      "schema_version": "aether.ats.account-binding/2",
+      "v1_schema_version": "aether.ats.account-binding/1",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "Agentic\u200b \u2022\u2022\u2022\u202241"
+        }
+      ],
+      "expect": "Account binding masked label must use only letters, digits, spaces, masking bullets and . - _ ( ) # *."
+    },
+    {
+      "name": "aether.ats.account-binding/2: masked label with a byte order mark (U+FEFF)",
+      "category": "label",
+      "case": "byte_order_mark",
+      "schema_version": "aether.ats.account-binding/2",
+      "v1_schema_version": "aether.ats.account-binding/1",
+      "patches": [
+        {
+          "path": [
+            "masked_label"
+          ],
+          "value": "\ufeffAgentic \u2022\u2022\u2022\u202241"
+        }
+      ],
+      "expect": "Account binding masked label must use only letters, digits, spaces, masking bullets and . - _ ( ) # *."
+    }
+  ],
+  "chains": {
+    "now": "2026-09-22T14:30:45Z",
+    "usage": {
+      "notional_today_minor": 0,
+      "orders_today": 0,
+      "open_orders": 0
+    },
+    "resulting_position_notional_minor": 232048,
+    "documents": {
+      "intent_v2": {
+        "document": {
+          "schema_version": "aether.ats.equity-order-intent/2",
+          "intent_id": "intent_7c1a4f20",
+          "request_id": "req_7c1a4f20",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "activation_id": "activation_ema01",
+          "artifact_id": "artifact_ema_pullback_v3",
+          "symbol": "SPY",
+          "side": "buy",
+          "quantity": 4,
+          "order_type": "limit",
+          "limit_price_minor": 58012,
+          "evidence": {
+            "market_snapshot_ref": "snap_20260922_1430",
+            "broker_quote_ref": "quote_spy_20260922",
+            "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "observed_at": "2026-09-22T14:29:55Z"
+          },
+          "created_at": "2026-09-22T14:30:00Z",
+          "expires_at": "2026-09-22T14:33:00Z"
+        },
+        "canonical_digest": "sha256:b4ebe63207061e7f3754aa9f9edeb801c7ca200c5f8a0bbec494bcc1ea159265"
+      },
+      "review_for_intent_v2": {
+        "document": {
+          "schema_version": "aether.ats.order-review-receipt/1",
+          "review_id": "review_3d91b7",
+          "request_id": "req_7c1a4f20",
+          "intent_digest": "sha256:b4ebe63207061e7f3754aa9f9edeb801c7ca200c5f8a0bbec494bcc1ea159265",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "usage": {
+            "notional_today_minor": 0,
+            "orders_today": 0,
+            "open_orders": 0
+          },
+          "reservation_ref": "resv_88ac10",
+          "reservation_expires_at": "2026-09-22T14:33:00Z",
+          "risk_verdict": "pass",
+          "risk_reason": null,
+          "broker_preview_id": "preview_5f7b21",
+          "broker_preview_digest": "sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+          "evidence": {
+            "market_snapshot_ref": "snap_20260922_1430",
+            "broker_quote_ref": "quote_spy_20260922",
+            "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "observed_at": "2026-09-22T14:29:55Z"
+          },
+          "evidence_age_ms": 5000,
+          "worst_case_notional_minor": 232048,
+          "approval_deadline": "2026-09-22T14:32:00Z",
+          "execution_state": {
+            "schema_version": "aether.ats.execution-state/1",
+            "requested_mode": "paper",
+            "effective_mode": "paper",
+            "effective_reason": null
+          },
+          "recorded_at": "2026-09-22T14:30:05Z"
+        },
+        "canonical_digest": "sha256:16b243382c5d65582942b4821f16a21475537d7124c9fac553b9d20c5537e135"
+      },
+      "approval_v2": {
+        "document": {
+          "schema_version": "aether.ats.operator-approval/2",
+          "approval_id": "appr_3d91b7c2",
+          "request_id": "req_7c1a4f20",
+          "intent_digest": "sha256:b4ebe63207061e7f3754aa9f9edeb801c7ca200c5f8a0bbec494bcc1ea159265",
+          "review_id": "review_3d91b7",
+          "review_digest": "sha256:16b243382c5d65582942b4821f16a21475537d7124c9fac553b9d20c5537e135",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "provider_id": "robinhood",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "policy_version": "ats-aup-2026-09",
+          "symbol": "SPY",
+          "side": "buy",
+          "quantity": 4,
+          "order_type": "limit",
+          "limit_price_minor": 58012,
+          "worst_case_notional_minor": 232048,
+          "reservation_ref": "resv_88ac10",
+          "broker_preview_id": "preview_5f7b21",
+          "activation_id": "activation_ema01",
+          "artifact_id": "artifact_ema_pullback_v3",
+          "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "operator_id": "operator_local",
+          "local_device_id": "local_a1b2c3d4",
+          "operator_session_id": "opsess_5e6f7a8b",
+          "approved_at": "2026-09-22T14:30:30Z",
+          "expires_at": "2026-09-22T14:32:00Z",
+          "consumed_at": null
+        },
+        "canonical_digest": "sha256:4fdaa6d7c99bd4e94383f1655f330859436d599c6d1d28b924b6a851f3dc63b0"
+      },
+      "binding_v2": {
+        "document": {
+          "schema_version": "aether.ats.account-binding/2",
+          "account_binding_id": "bind_rh_agentic01",
+          "provider_id": "robinhood",
+          "credential_ref": "vault_rh_primary01",
+          "encrypted_account_ref": "enc_rh_acct_0001",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "masked_label": "Agentic \u2022\u2022\u2022\u202241",
+          "asset_capabilities": [
+            "equity"
+          ],
+          "connector_snapshot_digest": "sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+          "selected_at": "2026-09-22T14:20:00Z",
+          "binding_generation": 1
+        },
+        "canonical_digest": "sha256:a1500d7eb9f8795025aaba6df4670b2200404439c818bdf4fc354b710e323212"
+      },
+      "grant_v2": {
+        "document": {
+          "schema_version": "aether.ats.delegated-trading-grant/2",
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "client_principal": "agent_atlas",
+          "provider_id": "robinhood",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "execution_environment": "ats_paper",
+          "capabilities": [
+            "read_account",
+            "review_order",
+            "commit_order"
+          ],
+          "symbol_allowlist": [
+            "SPY",
+            "QQQ",
+            "BRK.B",
+            "BF-B"
+          ],
+          "limits": {
+            "max_notional_per_order_minor": 250000,
+            "max_notional_per_day_minor": 1000000,
+            "max_position_notional_per_symbol_minor": 500000,
+            "max_orders_per_day": 10,
+            "max_open_orders": 2
+          },
+          "allowed_sides": [
+            "buy",
+            "sell"
+          ],
+          "allowed_order_types": [
+            "market",
+            "limit"
+          ],
+          "confirmation": "per_order",
+          "state": "active",
+          "abuse_flagged": false,
+          "issued_at": "2026-09-22T14:00:00Z",
+          "expires_at": "2026-09-22T18:00:00Z"
+        },
+        "canonical_digest": "sha256:ee408bfc54201e6573695f503f888a288e05dd6a34cd5d410b508b789a125b0d"
+      },
+      "intent_v1": {
+        "document": {
+          "schema_version": "aether.ats.equity-order-intent/1",
+          "intent_id": "intent_7c1a4f20",
+          "request_id": "req_7c1a4f20",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "activation_id": "activation_ema01",
+          "artifact_id": "artifact_ema_pullback_v3",
+          "symbol": "SPY",
+          "side": "buy",
+          "quantity": 4,
+          "order_type": "limit",
+          "limit_price_minor": 58012,
+          "evidence": {
+            "market_snapshot_ref": "snap_20260922_1430",
+            "broker_quote_ref": "quote_spy_20260922",
+            "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "observed_at": "2026-09-22T14:29:55Z"
+          },
+          "created_at": "2026-09-22T14:30:00Z",
+          "expires_at": "2026-09-22T14:33:00Z"
+        },
+        "canonical_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130"
+      },
+      "review_for_intent_v1": {
+        "document": {
+          "schema_version": "aether.ats.order-review-receipt/1",
+          "review_id": "review_3d91b7",
+          "request_id": "req_7c1a4f20",
+          "intent_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "usage": {
+            "notional_today_minor": 0,
+            "orders_today": 0,
+            "open_orders": 0
+          },
+          "reservation_ref": "resv_88ac10",
+          "reservation_expires_at": "2026-09-22T14:33:00Z",
+          "risk_verdict": "pass",
+          "risk_reason": null,
+          "broker_preview_id": "preview_5f7b21",
+          "broker_preview_digest": "sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+          "evidence": {
+            "market_snapshot_ref": "snap_20260922_1430",
+            "broker_quote_ref": "quote_spy_20260922",
+            "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "observed_at": "2026-09-22T14:29:55Z"
+          },
+          "evidence_age_ms": 5000,
+          "worst_case_notional_minor": 232048,
+          "approval_deadline": "2026-09-22T14:32:00Z",
+          "execution_state": {
+            "schema_version": "aether.ats.execution-state/1",
+            "requested_mode": "paper",
+            "effective_mode": "paper",
+            "effective_reason": null
+          },
+          "recorded_at": "2026-09-22T14:30:05Z"
+        },
+        "canonical_digest": "sha256:5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c"
+      },
+      "approval_v2_for_intent_v1": {
+        "document": {
+          "schema_version": "aether.ats.operator-approval/2",
+          "approval_id": "appr_3d91b7c2",
+          "request_id": "req_7c1a4f20",
+          "intent_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
+          "review_id": "review_3d91b7",
+          "review_digest": "sha256:5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "provider_id": "robinhood",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "policy_version": "ats-aup-2026-09",
+          "symbol": "SPY",
+          "side": "buy",
+          "quantity": 4,
+          "order_type": "limit",
+          "limit_price_minor": 58012,
+          "worst_case_notional_minor": 232048,
+          "reservation_ref": "resv_88ac10",
+          "broker_preview_id": "preview_5f7b21",
+          "activation_id": "activation_ema01",
+          "artifact_id": "artifact_ema_pullback_v3",
+          "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "operator_id": "operator_local",
+          "local_device_id": "local_a1b2c3d4",
+          "operator_session_id": "opsess_5e6f7a8b",
+          "approved_at": "2026-09-22T14:30:30Z",
+          "expires_at": "2026-09-22T14:32:00Z",
+          "consumed_at": null
+        },
+        "canonical_digest": "sha256:ac9c211b2fcdc77475540ad35a7016f482950a3ffb0338aa50442ac44fa941ce"
+      },
+      "approval_v1_for_intent_v1": {
+        "document": {
+          "schema_version": "aether.ats.operator-approval/1",
+          "approval_id": "appr_3d91b7c2",
+          "request_id": "req_7c1a4f20",
+          "intent_digest": "sha256:6961590bc38a9502156e8779cc8f991abe75708be0d7c8a23517b97811e3c130",
+          "review_id": "review_3d91b7",
+          "review_digest": "sha256:5f41d7a797155d131f26287d4e433438a9db8894e55b9e7c9fe2652515e3614c",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "provider_id": "robinhood",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "policy_version": "ats-aup-2026-09",
+          "symbol": "SPY",
+          "side": "buy",
+          "quantity": 4,
+          "order_type": "limit",
+          "limit_price_minor": 58012,
+          "worst_case_notional_minor": 232048,
+          "reservation_ref": "resv_88ac10",
+          "broker_preview_id": "preview_5f7b21",
+          "activation_id": "activation_ema01",
+          "artifact_id": "artifact_ema_pullback_v3",
+          "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "operator_id": "operator_local",
+          "local_device_id": "local_a1b2c3d4",
+          "operator_session_id": "opsess_5e6f7a8b",
+          "approved_at": "2026-09-22T14:30:30Z",
+          "expires_at": "2026-09-22T14:32:00Z",
+          "consumed_at": null
+        },
+        "canonical_digest": "sha256:8085ceffcd9c59c1b2f9624d87efff5bf061f5642ad25554030548833a09e2be"
+      },
+      "approval_v1": {
+        "document": {
+          "schema_version": "aether.ats.operator-approval/1",
+          "approval_id": "appr_3d91b7c2",
+          "request_id": "req_7c1a4f20",
+          "intent_digest": "sha256:b4ebe63207061e7f3754aa9f9edeb801c7ca200c5f8a0bbec494bcc1ea159265",
+          "review_id": "review_3d91b7",
+          "review_digest": "sha256:16b243382c5d65582942b4821f16a21475537d7124c9fac553b9d20c5537e135",
+          "connector": {
+            "provider_id": "robinhood",
+            "account_binding_id": "bind_rh_agentic01",
+            "adapter_id": "robinhood_trading_mcp",
+            "endpoint_schema_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "execution_environment": "ats_paper",
+            "binding_generation": 1
+          },
+          "provider_id": "robinhood",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "policy_version": "ats-aup-2026-09",
+          "symbol": "SPY",
+          "side": "buy",
+          "quantity": 4,
+          "order_type": "limit",
+          "limit_price_minor": 58012,
+          "worst_case_notional_minor": 232048,
+          "reservation_ref": "resv_88ac10",
+          "broker_preview_id": "preview_5f7b21",
+          "activation_id": "activation_ema01",
+          "artifact_id": "artifact_ema_pullback_v3",
+          "evidence_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "operator_id": "operator_local",
+          "local_device_id": "local_a1b2c3d4",
+          "operator_session_id": "opsess_5e6f7a8b",
+          "approved_at": "2026-09-22T14:30:30Z",
+          "expires_at": "2026-09-22T14:32:00Z",
+          "consumed_at": null
+        },
+        "canonical_digest": "sha256:18e5129e9d6e522534857ec6c4fac73e1003baed09e8f45fd234985491568b08"
+      },
+      "binding_v1": {
+        "document": {
+          "schema_version": "aether.ats.account-binding/1",
+          "account_binding_id": "bind_rh_agentic01",
+          "provider_id": "robinhood",
+          "credential_ref": "vault_rh_primary01",
+          "encrypted_account_ref": "enc_rh_acct_0001",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "masked_label": "Agentic \u2022\u2022\u2022\u202241",
+          "asset_capabilities": [
+            "equity"
+          ],
+          "connector_snapshot_digest": "sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+          "selected_at": "2026-09-22T14:20:00Z",
+          "binding_generation": 1
+        },
+        "canonical_digest": "sha256:f008050859472d13b6643f784e1620f11d7e09b87f6e4e1b7ab69502b1827b32"
+      },
+      "grant_v1": {
+        "document": {
+          "schema_version": "aether.ats.delegated-trading-grant/1",
+          "grant_id": "grant_rh_paper01",
+          "grant_version": 1,
+          "client_principal": "agent_atlas",
+          "provider_id": "robinhood",
+          "opaque_account_ref": "acct_9f2c4ab77e10",
+          "execution_environment": "ats_paper",
+          "capabilities": [
+            "read_account",
+            "review_order",
+            "commit_order"
+          ],
+          "symbol_allowlist": [
+            "SPY",
+            "QQQ",
+            "BRK.B",
+            "BF-B"
+          ],
+          "limits": {
+            "max_notional_per_order_minor": 250000,
+            "max_notional_per_day_minor": 1000000,
+            "max_position_notional_per_symbol_minor": 500000,
+            "max_orders_per_day": 10,
+            "max_open_orders": 2
+          },
+          "allowed_sides": [
+            "buy",
+            "sell"
+          ],
+          "allowed_order_types": [
+            "market",
+            "limit"
+          ],
+          "confirmation": "per_order",
+          "state": "active",
+          "abuse_flagged": false,
+          "issued_at": "2026-09-22T14:00:00Z",
+          "expires_at": "2026-09-22T18:00:00Z"
+        },
+        "canonical_digest": "sha256:3c5bfeb5579d68000a7267e6121831699d2d42bf3f8527a02fbd25a0e8db3c70"
+      }
+    },
+    "cases": [
+      {
+        "name": "faithful /2 chain",
+        "case": "all_v2",
+        "members": {
+          "intent": "intent_v2",
+          "review": "review_for_intent_v2",
+          "approval": "approval_v2",
+          "binding": "binding_v2",
+          "grant": "grant_v2"
+        },
+        "approval_chain_expect": null,
+        "commit_expect": null
+      },
+      {
+        "name": "a /1 intent in an otherwise /2 chain",
+        "case": "intent_v1",
+        "members": {
+          "intent": "intent_v1",
+          "review": "review_for_intent_v1",
+          "approval": "approval_v2_for_intent_v1",
+          "binding": "binding_v2",
+          "grant": "grant_v2"
+        },
+        "approval_chain_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record.",
+        "commit_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record."
+      },
+      {
+        "name": "a /1 approval in an otherwise /2 chain",
+        "case": "approval_v1",
+        "members": {
+          "intent": "intent_v2",
+          "review": "review_for_intent_v2",
+          "approval": "approval_v1",
+          "binding": "binding_v2",
+          "grant": "grant_v2"
+        },
+        "approval_chain_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record.",
+        "commit_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record."
+      },
+      {
+        "name": "a /1 account binding in an otherwise /2 chain",
+        "case": "binding_v1",
+        "members": {
+          "intent": "intent_v2",
+          "review": "review_for_intent_v2",
+          "approval": "approval_v2",
+          "binding": "binding_v1",
+          "grant": "grant_v2"
+        },
+        "approval_chain_expect": null,
+        "commit_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record."
+      },
+      {
+        "name": "a /1 grant in an otherwise /2 chain",
+        "case": "grant_v1",
+        "members": {
+          "intent": "intent_v2",
+          "review": "review_for_intent_v2",
+          "approval": "approval_v2",
+          "binding": "binding_v2",
+          "grant": "grant_v1"
+        },
+        "approval_chain_expect": null,
+        "commit_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record."
+      },
+      {
+        "name": "an all-/1 historical chain",
+        "case": "all_v1",
+        "members": {
+          "intent": "intent_v1",
+          "review": "review_for_intent_v1",
+          "approval": "approval_v1_for_intent_v1",
+          "binding": "binding_v1",
+          "grant": "grant_v1"
+        },
+        "approval_chain_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record.",
+        "commit_expect": "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record."
+      }
+    ]
+  }
+}

@@ -17,6 +17,7 @@ import {
   bool,
   choice,
   closed,
+  closedMaskedLabel,
   digest,
   fail,
   ident,
@@ -29,11 +30,15 @@ import {
   text,
   timestamp,
   uniqueList,
+  type FieldCheck,
+  type Retagged,
 } from "./primitives.js";
 import { validateExecutionState, type RequestedEffectiveExecutionStateV1 } from "./mode.js";
 
 export const CONNECTOR_CAPABILITY_SCHEMA = "aether.ats.connector-capability/1" as const;
 export const ACCOUNT_BINDING_SCHEMA = "aether.ats.account-binding/1" as const;
+/** Frozen `/1` admits any printable label without a 5-digit ASCII run; `/2` uses the closed set. */
+export const ACCOUNT_BINDING_SCHEMA_V2 = "aether.ats.account-binding/2" as const;
 
 /**
  * The fixed normalized operations the execution layer may name (Spec 1 section
@@ -186,6 +191,12 @@ export function isCapabilityExpired(capability: BrokerConnectorCapabilityV1, now
  * A masked account label such as `Agentic ****41`. The validator caps the run
  * of consecutive digits at four so a "label" cannot carry a full account number
  * past the redaction boundary.
+ *
+ * FROZEN `/1` BEHAVIOUR, AND WEAK: the digit-run rule counts ASCII digits
+ * only, so fullwidth or Arabic-Indic digits, confusable letters, direction
+ * overrides and zero-width characters all pass. `/2` bindings use
+ * `closedMaskedLabel()` instead; this stays so `/1` keeps accepting exactly
+ * what it accepted when it froze.
  */
 function maskedLabel(value: unknown, name: string): string {
   const label = text(value, name, 64);
@@ -223,6 +234,11 @@ export interface BrokerAccountBindingV1 {
   readonly binding_generation: number;
 }
 
+/** Same fields as `/1`; the masked label must use the closed set (`closedMaskedLabel()`). */
+export interface BrokerAccountBindingV2 extends Omit<BrokerAccountBindingV1, "schema_version"> {
+  readonly schema_version: typeof ACCOUNT_BINDING_SCHEMA_V2;
+}
+
 const BINDING_FIELDS = [
   "schema_version",
   "account_binding_id",
@@ -238,15 +254,30 @@ const BINDING_FIELDS = [
 ] as const;
 
 export function validateAccountBinding(value: unknown, name = "Account binding"): BrokerAccountBindingV1 {
+  return accountBinding(value, name, ACCOUNT_BINDING_SCHEMA, maskedLabel);
+}
+
+/** `/2`: the `/1` binding, except that the masked label is drawn from the closed set. */
+export function validateAccountBindingV2(value: unknown, name = "Account binding"): BrokerAccountBindingV2 {
+  return accountBinding(value, name, ACCOUNT_BINDING_SCHEMA_V2, closedMaskedLabel);
+}
+
+/** One body for both versions; only the schema tag and the label check vary. */
+function accountBinding<S extends string>(
+  value: unknown,
+  name: string,
+  schema: S,
+  label: FieldCheck,
+): Retagged<BrokerAccountBindingV1, S> {
   const raw = closed(value, name, BINDING_FIELDS);
   return Object.freeze({
-    schema_version: schemaTag(raw.schema_version, ACCOUNT_BINDING_SCHEMA, name) as typeof ACCOUNT_BINDING_SCHEMA,
+    schema_version: schemaTag(raw.schema_version, schema, name) as S,
     account_binding_id: opaqueRef(raw.account_binding_id, `${name} binding id`),
     provider_id: ident(raw.provider_id, `${name} provider`),
     credential_ref: opaqueRef(raw.credential_ref, `${name} credential reference`),
     encrypted_account_ref: opaqueRef(raw.encrypted_account_ref, `${name} encrypted account reference`),
     opaque_account_ref: opaqueRef(raw.opaque_account_ref, `${name} opaque account reference`),
-    masked_label: maskedLabel(raw.masked_label, `${name} masked label`),
+    masked_label: label(raw.masked_label, `${name} masked label`),
     asset_capabilities: Object.freeze(
       uniqueList(raw.asset_capabilities, `${name} asset capabilities`, ASSET_CLASSES.length, (v, n) =>
         choice(v, ASSET_CLASSES, n),
@@ -274,7 +305,7 @@ export interface ExportedAccountBinding {
   readonly binding_generation: number;
 }
 
-export function redactBindingForExport(binding: BrokerAccountBindingV1): ExportedAccountBinding {
+export function redactBindingForExport(binding: BrokerAccountBindingV1 | BrokerAccountBindingV2): ExportedAccountBinding {
   return Object.freeze({
     provider_id: binding.provider_id,
     opaque_account_ref: binding.opaque_account_ref,
@@ -286,7 +317,7 @@ export function redactBindingForExport(binding: BrokerAccountBindingV1): Exporte
 /** Connector status for an operator surface; renders the masked label only. */
 export function connectorStatusLine(
   capability: BrokerConnectorCapabilityV1,
-  binding: BrokerAccountBindingV1 | null,
+  binding: BrokerAccountBindingV1 | BrokerAccountBindingV2 | null,
   nowMs: number = Date.now(),
 ): string {
   const account = binding ? redactBindingForExport(binding).masked_label : "not bound";

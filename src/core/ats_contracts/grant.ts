@@ -24,6 +24,7 @@ import {
   bool,
   choice,
   closed,
+  equityTicker,
   fail,
   ident,
   integer,
@@ -35,10 +36,14 @@ import {
   symbol,
   timestamp,
   uniqueList,
+  type FieldCheck,
+  type Retagged,
 } from "./primitives.js";
 import { EXECUTION_ENVIRONMENTS, type ExecutionEnvironment } from "./mode.js";
 
 export const TRADING_GRANT_SCHEMA = "aether.ats.delegated-trading-grant/1" as const;
+/** Frozen `/1` admits URL-shaped allowlist entries; `/2` requires equity tickers. */
+export const TRADING_GRANT_SCHEMA_V2 = "aether.ats.delegated-trading-grant/2" as const;
 
 /** What a grant may authorize. Deliberately coarse and short. */
 export const GRANT_CAPABILITIES = ["read_account", "review_order", "commit_order"] as const;
@@ -89,6 +94,11 @@ export interface DelegatedTradingGrantV1 {
   readonly abuse_flagged: boolean;
   readonly issued_at: string;
   readonly expires_at: string;
+}
+
+/** Same fields as `/1`; every allowlist entry must be an equity ticker (`equityTicker()`). */
+export interface DelegatedTradingGrantV2 extends Omit<DelegatedTradingGrantV1, "schema_version"> {
+  readonly schema_version: typeof TRADING_GRANT_SCHEMA_V2;
 }
 
 const GRANT_FIELDS = [
@@ -151,6 +161,21 @@ export function validateGrantUsage(value: unknown, name = "Grant usage"): GrantU
 }
 
 export function validateTradingGrant(value: unknown, name = "Trading grant"): DelegatedTradingGrantV1 {
+  return tradingGrant(value, name, TRADING_GRANT_SCHEMA, symbol);
+}
+
+/** `/2`: the `/1` grant, except that every allowlist entry must be an equity ticker. */
+export function validateTradingGrantV2(value: unknown, name = "Trading grant"): DelegatedTradingGrantV2 {
+  return tradingGrant(value, name, TRADING_GRANT_SCHEMA_V2, equityTicker);
+}
+
+/** One body for both versions; only the schema tag and the allowlist entry check vary. */
+function tradingGrant<S extends string>(
+  value: unknown,
+  name: string,
+  schema: S,
+  ticker: FieldCheck,
+): Retagged<DelegatedTradingGrantV1, S> {
   const raw = closed(value, name, GRANT_FIELDS);
   const issuedAt = timestamp(raw.issued_at, `${name} issued_at`);
   const expiresAt = timestamp(raw.expires_at, `${name} expires_at`);
@@ -166,7 +191,7 @@ export function validateTradingGrant(value: unknown, name = "Trading grant"): De
   }
 
   return Object.freeze({
-    schema_version: schemaTag(raw.schema_version, TRADING_GRANT_SCHEMA, name) as typeof TRADING_GRANT_SCHEMA,
+    schema_version: schemaTag(raw.schema_version, schema, name) as S,
     grant_id: ident(raw.grant_id, `${name} id`),
     grant_version: integer(raw.grant_version, `${name} version`, 1, Number.MAX_SAFE_INTEGER),
     client_principal: ident(raw.client_principal, `${name} client principal`),
@@ -174,7 +199,7 @@ export function validateTradingGrant(value: unknown, name = "Trading grant"): De
     opaque_account_ref: opaqueRef(raw.opaque_account_ref, `${name} opaque account reference`),
     execution_environment: choice(raw.execution_environment, EXECUTION_ENVIRONMENTS, `${name} execution environment`),
     capabilities: Object.freeze(capabilities),
-    symbol_allowlist: Object.freeze(uniqueList(raw.symbol_allowlist, `${name} symbol allowlist`, 100, symbol)),
+    symbol_allowlist: Object.freeze(uniqueList(raw.symbol_allowlist, `${name} symbol allowlist`, 100, ticker)),
     limits: validateLimits(raw.limits, `${name} limits`),
     allowed_sides: Object.freeze(
       uniqueList(raw.allowed_sides, `${name} sides`, ORDER_SIDES.length, (v, n) => choice(v, ORDER_SIDES, n)),
@@ -228,7 +253,7 @@ const ALLOWED: GrantDecision = Object.freeze({ allowed: true as const });
  * duplicating them here would create a second ledger.
  */
 export function grantPermits(
-  grant: DelegatedTradingGrantV1,
+  grant: DelegatedTradingGrantV1 | DelegatedTradingGrantV2,
   request: GrantCheckRequest,
   usage: GrantUsage,
   nowMs: number = Date.now(),

@@ -8,13 +8,15 @@
 // commits."
 //
 // This is an ATS-private, fully bound intent, not the model input. The model
-// may submit only ModelEquityOrderProposalV1 in proposal.ts; ATSv2 must inject
-// provider, account, grant, device and runtime identity after authentication.
+// may submit only the closed model order proposal in proposal.ts (`/1`, or
+// `/2` for an executable chain); ATSv2 must inject provider, account, grant,
+// device and runtime identity after authentication.
 
 import {
   choice,
   closed,
   digest,
+  equityTicker,
   fail,
   ident,
   integer,
@@ -26,6 +28,8 @@ import {
   symbol as tickerSymbol,
   text,
   timestamp,
+  type FieldCheck,
+  type Retagged,
 } from "./primitives.js";
 import {
   EXECUTION_ENVIRONMENTS,
@@ -43,6 +47,13 @@ import {
 } from "./grant.js";
 
 export const ORDER_INTENT_SCHEMA = "aether.ats.equity-order-intent/1" as const;
+/** Frozen `/1` admits URL-shaped symbols; `/2` requires an equity ticker. */
+export const ORDER_INTENT_SCHEMA_V2 = "aether.ats.equity-order-intent/2" as const;
+/**
+ * The review receipt has one version. It carries no ticker and no masked
+ * label, and its `intent_digest` covers the intent's schema tag, so a review
+ * answers exactly one intent version (docs/CONTRACTS.md, "Spec 1 `/2` closure").
+ */
 export const ORDER_REVIEW_SCHEMA = "aether.ats.order-review-receipt/1" as const;
 
 /**
@@ -158,6 +169,11 @@ export interface NormalizedEquityOrderIntentV1 {
   readonly expires_at: string;
 }
 
+/** Same fields as `/1`; only the symbol check is stricter (`equityTicker()`). */
+export interface NormalizedEquityOrderIntentV2 extends Omit<NormalizedEquityOrderIntentV1, "schema_version"> {
+  readonly schema_version: typeof ORDER_INTENT_SCHEMA_V2;
+}
+
 const INTENT_FIELDS = [
   "schema_version",
   "intent_id",
@@ -176,6 +192,21 @@ const INTENT_FIELDS = [
 ] as const;
 
 export function validateOrderIntent(value: unknown, name = "Order intent"): NormalizedEquityOrderIntentV1 {
+  return orderIntent(value, name, ORDER_INTENT_SCHEMA, tickerSymbol);
+}
+
+/** `/2`: the `/1` intent, except that the symbol must be an equity ticker. */
+export function validateOrderIntentV2(value: unknown, name = "Order intent"): NormalizedEquityOrderIntentV2 {
+  return orderIntent(value, name, ORDER_INTENT_SCHEMA_V2, equityTicker);
+}
+
+/** One body for both versions; only the schema tag and the ticker check vary. */
+function orderIntent<S extends string>(
+  value: unknown,
+  name: string,
+  schema: S,
+  ticker: FieldCheck,
+): Retagged<NormalizedEquityOrderIntentV1, S> {
   const raw = closed(value, name, INTENT_FIELDS);
   const createdAt = timestamp(raw.created_at, `${name} created_at`);
   const expiresAt = timestamp(raw.expires_at, `${name} expires_at`);
@@ -192,13 +223,13 @@ export function validateOrderIntent(value: unknown, name = "Order intent"): Norm
   if (limitPrice !== null && limitPrice <= 0) fail(`${name} limit price must be above zero.`);
 
   return Object.freeze({
-    schema_version: schemaTag(raw.schema_version, ORDER_INTENT_SCHEMA, name) as typeof ORDER_INTENT_SCHEMA,
+    schema_version: schemaTag(raw.schema_version, schema, name) as S,
     intent_id: ident(raw.intent_id, `${name} id`),
     request_id: ident(raw.request_id, `${name} request id`),
     connector: validateConnectorBindingRef(raw.connector, `${name} connector`),
     activation_id: ident(raw.activation_id, `${name} activation`),
     artifact_id: ident(raw.artifact_id, `${name} artifact`),
-    symbol: tickerSymbol(raw.symbol, `${name} symbol`),
+    symbol: ticker(raw.symbol, `${name} symbol`),
     side: choice(raw.side, ORDER_SIDES, `${name} side`),
     quantity: integer(raw.quantity, `${name} quantity`, 1, 1_000_000),
     order_type: orderType,

@@ -84,6 +84,18 @@ export function fail(message: string): never {
   throw new Error(message);
 }
 
+/** A field check: the validated string, or an Error whose message names the field. */
+export type FieldCheck = (value: unknown, name: string) => string;
+
+/**
+ * Document `D` under schema tag `S`. Each Spec 1 `/2` shape is its `/1` shape
+ * re-tagged: the same fields, with only the ticker or masked-label check
+ * replaced, so the two versions share one validator body.
+ */
+export type Retagged<D extends { readonly schema_version: string }, S extends string> = Omit<D, "schema_version"> & {
+  readonly schema_version: S;
+};
+
 /**
  * Reject anything that is not a plain object, then reject unknown keys.
  * A prototype other than Object.prototype/null is refused so a crafted payload
