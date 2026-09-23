@@ -133,3 +133,6 @@ export const ATS_SPEC1_SCHEMAS = [
   "aether.ats.execution-receipt/1",
 ] as const;
 export * from "./proposal.js";
+export * from "./browser_order.js";
+export * from "./browser_order_result.js";
+export * from "./browser_order_gate.js";

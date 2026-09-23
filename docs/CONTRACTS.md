@@ -282,7 +282,7 @@ land in a separate lane under the same directory and import this base.
 Spec 2's half of the freeze, in `src/core/ats_contracts/`. These import the
 section 2 base (`primitives.ts`, `canonical.ts`, `mode.ts`) rather than
 redefining it, so both specs share one canonicalization profile
-(`jcs-integer-subset/1`) and one authority ladder.
+(`rfc8785/1`) and one authority ladder.
 
 | Schema | Module | What it asserts |
 |---|---|---|
@@ -327,6 +327,147 @@ there is a deliberate, versioned act.
 Runtime state lives in `runtime.json`, `data-profile.json`, `dashboard.json`
 and `setup.json` beside the immutable `ats.json` (`aether.ats.local/2`), so an
 older Agent build cannot misread runtime authority as setup state.
+
+---
+
+## 4. Agent Browser order ticket  ·  `agent-browser-ats-order/1`  ·  frozen
+
+The typed wire between ATSv2's browser order-ticket port (caller) and the
+qualified site adapter in the private extension on the browser host (callee).
+Source spec, diagram and gates:
+[`specs/2026-09-23-ats-agent-browser-orders.md`](specs/2026-09-23-ats-agent-browser-orders.md).
+Modules in `src/core/ats_contracts/`: `browser_order.ts` (vocabulary and call),
+`browser_order_result.ts` (result), `browser_order_gate.ts` (decisions) and the
+internal `browser_order_values.ts` (shared value shapes, not re-exported).
+
+| Tag | Shape |
+|---|---|
+| `aether.ats.browser-order-call/1` | `BrowserOrderCallV1`, one of ten operations |
+| `aether.ats.browser-order-result/1` | `BrowserOrderResultV1`, status `ok`, `refused` or `ambiguous` |
+
+`verify_session`, `read_market`, `read_account`, `verify_ticket`, `read_order`
+and `read_positions` observe; `prepare_ticket` fills a ticket without
+submitting it; `commit_once` and `cancel_order` mutate; `end_control` returns
+control to the user.
+
+**Who may call it.** Only the deterministic ATSv2 controller. A model never
+names an operation, adapter or binding: its one order-shaped output is the
+closed `aether.ats.model-order-proposal/1` (section 2). The generic Agent
+Browser MCP tools (`browser_click`, `browser_type`, …) are never an order path.
+
+### Invariants the shapes enforce
+
+1. **No caller-supplied selector, coordinate, URL, script or free text.** Every
+   call and parameter object is closed, and every string a caller can send is
+   a bounded identifier, digest, equity ticker, timestamp or enum member; a test
+   walks every string leaf. Tickers are equity-shaped (`SPY`, `BRK.B`,
+   `BRK-B`), deliberately narrower than the shared ticker, whose `/` and `:`
+   let an all-caps string spell `HTTPS://…`. The adapter's recipe is code
+   pinned by `adapter_digest`.
+2. **Every call names its principal, session generation, adapter, request and
+   deadline.** The deadline follows `issued_at` by at most 120 s, and by at most
+   30 s for `commit_once` and `cancel_order`.
+3. **ATS simulated paper never reaches a browser.** A binding's environment is
+   `provider_sandbox` or `provider_live` and must equal
+   `environmentForSiteMode(site_mode)`, so a paper binding is never live
+   capital and a live binding is never paper.
+4. **Only discovery and release run unbound.** Every other operation needs a
+   binding: id, generation, account fingerprint, site mode, environment.
+5. **Results carry no page content.** Page text, pixels, HTML, cookies and
+   account numbers are unrepresentable. The only site-derived strings are a
+   bare canonical https origin and a masked label drawn from a **closed
+   character set** — ASCII letters and digits, space, `. - _ ( ) # *`, bullet
+   and ellipsis — with at most four consecutive digits. A blacklist could not
+   hold: fullwidth or other-script digits slip past a digit-run rule, and
+   confusable letters or direction overrides can make the approval card lie.
+   Order, cancel, account and position results name the account and mode they
+   were read from, and positions count the holdings the contract cannot
+   represent rather than silently dropping that exposure.
+6. **A login screen carries nothing.** An unverified session has no origin,
+   account, mode evidence or permission, and authentication leaves control
+   with the user.
+7. **Paper needs a site-specific indicator and, where the adapter has one, an
+   agreeing second indicator.** `resolveSiteMode()` returns null for an absent
+   or contradicting second indicator and `deriveBrowserBindingState()` then
+   yields `observe_only`. A verified live session is always `live_locked`.
+8. **The rendered ticket is digest-bound.** `rendered_ticket_digest` is
+   recomputed on parse, so a changed field under an unchanged digest is
+   refused.
+9. **A commit is never a fill.** `commit_once` returns `confirmed` with the site
+   order id, or `site_rejected`, and cannot express fill facts. Fills come only
+   from `read_order` with `order_history` or `order_detail` evidence and must
+   agree with the order status.
+10. **Unknown is first-class.** Only the two mutations may be `ambiguous`. A
+    refused mutation promises that nothing was dispatched, and
+    `requiresReconciliation()` is true for every mutation that was not refused.
+    `duplicate_commit` is legal only on `commit_once`, and although that
+    refusal dispatched nothing, it proves an earlier commit for the request
+    exists, so it requires reconciliation too.
+11. **A result must answer exactly its call.** `verifyBrowserResult()` refuses
+    another call, request or operation; a changed session generation; another
+    user, agent or browser session; a changed adapter id, version or digest;
+    an observation more than `MAX_CLOCK_SKEW_MS` (5 s) older than the call,
+    which is a replayed or cached answer; data that disagrees with the binding
+    or parameters; and a read observed after its deadline. A mutation's
+    outcome is never discarded for lateness, and when the gate refuses an
+    answer to a mutation, ATSv2 treats that mutation as `ambiguous`, because
+    it journaled `COMMITTING` before it asked.
+
+### Golden vectors and the Python mirror
+
+`test/fixtures/ats_browser_order_golden.json` holds 28 faithful exchanges
+covering every operation, both site modes and all three statuses, with their
+`rfc8785/1` digests. It also holds 69 call rejects, 58 result rejects and 34
+gate mismatches (189 vectors). Each negative vector is single-cause and names
+the exact message of the check that must refuse it, and the TypeScript and
+Python validators emit identical messages, so a vector proves it failed for
+its **stated** reason in both languages. Coverage floors are named constants
+equal to the coverage that exists, and every test collects all failing vectors
+before asserting, so a broken guard names every vector it blinds. The file is
+pure ASCII: non-ASCII vector values (a direction override, confusables,
+fullwidth digits) are stored as JSON `\u` escapes, never as literal characters.
+
+`test/fixtures/ats_browser_order_wire.py` and `ats_browser_order_gate.py` are an
+independent Python mirror of the validators and decisions; they borrow only the
+section 2 JCS encoder. `ats_browser_order_verify.py` runs every vector through
+them, and CI runs it on Linux and Windows. It handles the traps a Python port meets:
+`re` lets `$` match before a trailing newline and `\d` match any Unicode digit
+(use `fullmatch` and `[0-9]`), and JavaScript measures string length in UTF-16
+code units. The fixture carries a vector for each. The timestamp validator
+emulates V8's `Date.parse` exactly rather than Python's `datetime`: year 0000
+is valid, month 13, day 32, minute 60, a leap second and 24:00 with any
+non-zero part are "not a real instant", and 24:00:00 or a day past its month
+rolls over and is "not a real calendar date". A differential probe of 37 edge
+cases agreed on every message and millisecond. One asymmetry remains:
+`json.loads("4.0")` is a float that Python refuses while `JSON.parse` yields the
+integer 4, so producers must emit plain integers.
+
+Each guard was verified by breaking it. Removing any of these in either
+language, corrupting a digest, eroding a coverage category, or stating the
+wrong reason fails both suites and names the vector:
+
+- the binding environment check;
+- the adapter pin check;
+- the rule that only mutations may be ambiguous;
+- the reconciliation rule, including `duplicate_commit`;
+- the rule that only `commit_once` may be refused as a duplicate;
+- the second-indicator rule;
+- the label character set;
+- the equity ticker;
+- the stale-read check and the replay bound;
+- the account checks on order and cancel results;
+- the ticket digest check;
+- the binding requirement;
+- in Python, `fullmatch`, UTF-16 length, the hour-24 rule and year 0000.
+
+### Scope boundary
+
+The module performs no I/O, and nothing registers these operations as a tool.
+Agent Browser v0.2.2 implements none of the callee side: it has no lease,
+takeover signal, session generation, persistent profile, origin allowlist or
+drift detection. ATSv2's execution controller still requires broker-API truth
+for a commit. Both are later gates in the source spec. ATSv2 lifts the Python
+validators into `ats-mcp` in its companion change.
 
 ---
 
