@@ -1,11 +1,9 @@
 // The security contract every ATS runtime archive must satisfy before its
 // bytes are allowed to become an installation.
 //
-// There is no real extractor in the tree yet, and that is precisely why this
-// lands first. An extractor added later without these rules is how an archive
-// escapes its staging directory — the classic "zip slip" — or exhausts the
-// disk, or plants a symlink that a later 0600 write follows out of the private
-// runtime directory.
+// strictTarExtractor now provides a bounded ustar implementation, but it is
+// not automatically selected until the release owner pins a signed archive
+// format. Other extractors must satisfy these same rules.
 //
 // TWO LAYERS. The extractor must enforce confinement while it writes:
 //

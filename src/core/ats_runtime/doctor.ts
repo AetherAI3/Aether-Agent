@@ -25,7 +25,9 @@ import {
   type RuntimeRecordV1,
 } from "./store.js";
 
-export const ATS_DOCTOR_SCHEMA = "aether.ats.doctor/1" as const;
+// /2 separates preparation from order authority. /1 called the former
+// `paper_ready`, which made a verified research probe look like trade evidence.
+export const ATS_DOCTOR_SCHEMA = "aether.ats.doctor/2" as const;
 
 /**
  * `ok` means this axis is doing its job. `incomplete` means it is honestly
@@ -62,8 +64,12 @@ export interface AtsReadiness {
   readonly runtime_ready: boolean;
   /** At least one strategy actually compiled. */
   readonly strategy_ready: boolean;
-  /** Everything an observe/paper activation needs: runtime, data, a strategy. */
-  readonly paper_ready: boolean;
+  /** Local prerequisites only. The data probe may be a research-only feed. */
+  readonly paper_activation_prerequisites: boolean;
+  /** ATSv2 grant, executable evidence, review and operator path are required. */
+  readonly paper_order_ready: boolean;
+  /** An external provider's non-live adapter is separately qualified. */
+  readonly provider_sandbox_ready: boolean;
   /** Live broker execution. Always false in this release; see section 19. */
   readonly broker_live_ready: boolean;
 }
@@ -228,6 +234,21 @@ export async function buildAtsDoctorReport(
         : "Authentication required. Local execution authority is separate from this report.",
     },
     executionAxis(runtimeRecord, snapshot),
+    {
+      name: "ATS order authority",
+      state: "unavailable",
+      detail: "No authenticated ATSv2 order channel, target, grant, executable quote or operator session is connected.",
+    },
+    {
+      name: "Provider sandbox",
+      state: "unavailable",
+      detail: "No external broker sandbox adapter or provider fill is verified.",
+    },
+    {
+      name: "Live capital",
+      state: "unavailable",
+      detail: "No live broker adapter or expiring live-capital arm is qualified.",
+    },
     dashboardAxis(dashboardRecord),
   ];
 
@@ -249,11 +270,11 @@ export async function buildAtsDoctorReport(
       setup_complete: setupState !== null && setupComplete(setupState),
       runtime_ready: runtimeReady,
       strategy_ready: strategyReady,
-      // Everything an observe or paper activation actually needs. Section 9
-      // admits an activation only with a compiled artifact, a healthy runtime
-      // and a FRESH verified probe, so all three are required here rather than
-      // implied by the runtime being up.
-      paper_ready: runtimeReady && strategyReady && dataVerified,
+      // This is local preparation only. A research data probe cannot stand in
+      // for ATSv2's executable snapshot, quote, binding and grant.
+      paper_activation_prerequisites: runtimeReady && strategyReady && dataVerified,
+      paper_order_ready: false,
+      provider_sandbox_ready: false,
       // Section 19 lists live trading as a non-goal for this release, so this
       // is pinned false rather than computed. Making it derivable would invite
       // a future change to quietly turn it true.
@@ -286,12 +307,12 @@ export function renderAtsDoctorReport(report: AtsDoctorReport): string {
     `setup ${r.setup_complete ? "complete" : "incomplete"}`,
     `runtime ${r.runtime_ready ? "ready" : "not ready"}`,
     `strategies ${r.strategy_ready ? "ready" : "not ready"}`,
-    `paper ${r.paper_ready ? "ready" : "not ready"}`,
+    `paper activation prerequisites ${r.paper_activation_prerequisites ? "met" : "not met"}`,
+    `ATS simulated paper orders ${r.paper_order_ready ? "ready" : "not ready"}`,
+    `provider sandbox ${r.provider_sandbox_ready ? "ready" : "not ready"}`,
     `live ${r.broker_live_ready ? "ready" : "not ready"}`,
   ].join(" · ");
-  const headline = r.paper_ready
-    ? "ATS ready for observe and paper activation"
-    : "ATS not ready · see the scopes and axes below";
+  const headline = "ATS not ready for order execution · see independent scopes and axes below";
   return [headline, `  ${scopes}`, "", ...lines, ""].join("\n");
 }
 
