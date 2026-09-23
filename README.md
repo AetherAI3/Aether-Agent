@@ -71,17 +71,22 @@ broker execution.
 | Account agent, consent and local ownership | **Available in the source candidate** | Identity-bound setup; consent never grants trading authority. |
 | Memory, strategy scan/compile and data configuration | **Available in the source candidate** | Preparation and diagnostics only; no order can result. |
 | Browser observation | **Available in the source candidate** | Read-only, freshness-checked images; no model-controlled browser action. |
-| ATS runtime and market-data session | **Next implementation gate** | Must prove lifecycle, health, freshness, cancellation and cleanup before paper trading. |
-| Paper-order execution and reconciliation | **Not shipped** | Requires typed intents, limits, idempotency, venue receipts and uncertain-outcome recovery. |
-| Supervised live orders | **Not shipped** | Requires separate, scoped user authority, broker connectivity, preflight limits, confirmation and a kill switch. |
+| ATS runtime and market-data session | **Verification framework on `main`; production wiring unavailable** | The signed runtime source, pinned trust anchor, launcher and authenticated probe are not configured. Strategy compilation and a research data setting do not prove executable market data. |
+| ATS simulated paper orders | **Not connected to the managed agent** | ATSv2 has a separate local paper journal; the Agent has no authenticated order path to it. A simulated fill is not a trading-site fill. |
+| Agent Browser paper orders | **Contract only; no order tool registered** | The browser order wire is validated in Agent and ATSv2, but an authenticated viewer, qualified site adapter, browser ticket port, approval and order-history reconciliation are still required. |
+| Supervised live orders | **Not shipped** | Requires a separately verified live account and arm, scoped limits, human approval, reliable stop/cancel and an attended reconciled canary. |
 | Autonomous live trading | **Not shipped** | No setup choice, mode preference, strategy, chat message or policy receipt enables it. |
 
-Execution work is deliberately sequential: establish the runtime and data-plane
-contracts first, then paper execution and reconciliation, then supervised live
-execution. Autonomous live authority is a later, separately qualified product
-gate—not a side effect of installing 0.4.0. The exact candidate evidence and
-remaining qualification are tracked in the
-[operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md).
+The merged [Agent browser order contract](https://github.com/AetherAI3/Aether-Agent/pull/164)
+and [ATSv2 mirror](https://github.com/AetherAI3/ATSv2/pull/444) agree on typed
+calls and refusal results. They register no trading tool and cannot submit an
+order. `/ats doctor` reports paper activation prerequisites separately from
+ATS simulated paper, provider sandbox and live order readiness; the latter
+three are not ready in this build. The first intended browser execution proof
+is an order in a user-signed-in **paper** account through the same Agent Browser
+session, confirmed against that site's order history. Live capital has a
+separate gate. See the [Agent Browser execution plan](docs/specs/2026-09-23-ats-agent-browser-orders.md)
+and [operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md).
 
 After signing in, use `aether agent list` to see the same managed agents as
 Aether Online. `aether agent chat` opens the one-column picker; select an agent
