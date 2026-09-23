@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aethersystems.net/managed-ats-tool-host/v1/host-open-proof.schema.json",
+  "x-aether-schema-id": "aether.managed-tool-host-open-proof/1",
+  "title": "HostOpenProofV1",
+  "description": "Proof of possession of the enrolled device key. device_signature is Ed25519 by device_public_key over the ASCII string aether.managed-tool-host-open/1, LF, then JCS of {challenge, device_proof_digest, agent_id, conversation_id, local_session_id, session_generation, registry_digest}.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "challenge",
+    "device_proof_digest",
+    "agent_id",
+    "conversation_id",
+    "local_session_id",
+    "session_generation",
+    "registry_digest",
+    "device_signature"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "aether.managed-tool-host-open-proof/1"
+    },
+    "challenge": {
+      "$ref": "#/$defs/base64url_32"
+    },
+    "device_proof_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "agent_id": {
+      "$ref": "#/$defs/id"
+    },
+    "conversation_id": {
+      "$ref": "#/$defs/id"
+    },
+    "local_session_id": {
+      "$ref": "#/$defs/id"
+    },
+    "session_generation": {
+      "$ref": "#/$defs/positive_uint53"
+    },
+    "registry_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "device_signature": {
+      "$ref": "#/$defs/base64url_64"
+    }
+  },
+  "$defs": {
+    "base64url_32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "positive_uint53": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "base64url_64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+    }
+  }
+}

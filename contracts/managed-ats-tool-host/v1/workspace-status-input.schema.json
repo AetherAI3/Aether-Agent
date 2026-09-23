@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aethersystems.net/managed-ats-tool-host/v1/workspace-status-input.schema.json",
+  "x-aether-schema-id": "aether.ats.workspace-status-input/1",
+  "title": "WorkspaceStatusInputV1",
+  "description": "The ats_workspace_status arguments: exactly an empty object. The model cannot select a path, runtime, browser session, provider or account.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [],
+  "properties": {}
+}

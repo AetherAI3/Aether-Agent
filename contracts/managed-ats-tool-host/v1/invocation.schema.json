@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aethersystems.net/managed-ats-tool-host/v1/invocation.schema.json",
+  "x-aether-schema-id": "aether.managed-tool-invocation/1",
+  "title": "ToolInvocationV1",
+  "description": "One bounded call of one registered tool, authenticated by the bound host transport rather than an object signature. arguments_digest = sha256(aether.managed-tool-arguments/1 + LF + JCS(arguments)). deadline_at is later than issued_at and no later than the lease expiry or issued_at plus the registered max_duration_ms. invocation_digest follows the common digest rule.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request_id",
+    "cloud_tool_call_id",
+    "lease_id",
+    "host_session_id",
+    "session_generation",
+    "revocation_epoch",
+    "cloud_origin_id",
+    "account_scope_digest",
+    "agent_id",
+    "device_id",
+    "local_session_id",
+    "conversation_id",
+    "run_id",
+    "sequence",
+    "tool_name",
+    "tool_version",
+    "input_schema_id",
+    "input_schema_digest",
+    "arguments",
+    "arguments_digest",
+    "issued_at",
+    "deadline_at",
+    "nonce",
+    "invocation_digest"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "aether.managed-tool-invocation/1"
+    },
+    "request_id": {
+      "$ref": "#/$defs/id"
+    },
+    "cloud_tool_call_id": {
+      "$ref": "#/$defs/id"
+    },
+    "lease_id": {
+      "$ref": "#/$defs/id"
+    },
+    "host_session_id": {
+      "$ref": "#/$defs/id"
+    },
+    "session_generation": {
+      "$ref": "#/$defs/positive_uint53"
+    },
+    "revocation_epoch": {
+      "$ref": "#/$defs/uint53"
+    },
+    "cloud_origin_id": {
+      "$ref": "#/$defs/https_origin"
+    },
+    "account_scope_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "agent_id": {
+      "$ref": "#/$defs/id"
+    },
+    "device_id": {
+      "$ref": "#/$defs/device_id"
+    },
+    "local_session_id": {
+      "$ref": "#/$defs/id"
+    },
+    "conversation_id": {
+      "$ref": "#/$defs/id"
+    },
+    "run_id": {
+      "$ref": "#/$defs/id"
+    },
+    "sequence": {
+      "$ref": "#/$defs/positive_uint53"
+    },
+    "tool_name": {
+      "$ref": "#/$defs/tool_name"
+    },
+    "tool_version": {
+      "$ref": "#/$defs/tool_version"
+    },
+    "input_schema_id": {
+      "$ref": "#/$defs/schema_id"
+    },
+    "input_schema_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "arguments": {
+      "description": "Any JSON value at most 8 levels deep; validated a second time against the registered input schema."
+    },
+    "arguments_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "issued_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "deadline_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "nonce": {
+      "$ref": "#/$defs/base64url_32"
+    },
+    "invocation_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "positive_uint53": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "uint53": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "https_origin": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^https://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?([.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+(:[1-9][0-9]{0,4})?$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "device_id": {
+      "type": "string",
+      "pattern": "^scdev_[A-Za-z0-9._:-]{2,122}$"
+    },
+    "tool_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "tool_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "schema_id": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^aether[.][a-z0-9.-]+/[1-9][0-9]*$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$"
+    },
+    "base64url_32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    }
+  }
+}
