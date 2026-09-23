@@ -426,7 +426,8 @@
     {
       "check": "text",
       "value": null,
-      "expect": "Value must be a string."
+      "expect": "Value must be a string.",
+      "exception": "type_guard"
     },
     {
       "check": "id",
@@ -1022,7 +1023,7 @@
     {
       "id": "truncated_sequence",
       "frame": {
-        "base64": "WyLigg=="
+        "base64": "WyLigiJd"
       },
       "expect": "Frame is not valid UTF-8."
     },
@@ -1266,9 +1267,9 @@
       "expect": "Frame contains an unpaired surrogate."
     },
     {
-      "id": "high_then_bad_hex",
+      "id": "high_then_escaped_quote",
       "frame": {
-        "text": "[\"\\ud800\\uZZZZ\"]"
+        "text": "[\"\\ud800\\\"\"]"
       },
       "expect": "Frame contains an unpaired surrogate."
     },
@@ -1277,112 +1278,128 @@
       "frame": {
         "text": "{\"a\":1,}"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "nan",
       "frame": {
         "text": "[NaN]"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "infinity",
       "frame": {
         "text": "[Infinity]"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "single_quotes",
       "frame": {
         "text": "{'a':1}"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "trailing_data",
       "frame": {
         "text": "{} {}"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "empty",
       "frame": {
         "text": ""
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "whitespace_only",
       "frame": {
         "text": " "
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "invalid_escape",
       "frame": {
         "text": "[\"\\x41\"]"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "bad_unicode_escape",
       "frame": {
         "text": "[\"\\u12G4\"]"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "comment",
       "frame": {
         "text": "{} //"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "unterminated_string",
       "frame": {
         "text": "[\"abc"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "plus_number",
       "frame": {
         "text": "[+1]"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "leading_decimal",
       "frame": {
         "text": "[.5]"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "missing_colon",
       "frame": {
         "text": "{\"a\" 1}"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "bare_word",
       "frame": {
         "text": "[yes]"
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     },
     {
       "id": "non_json_whitespace",
       "frame": {
         "base64": "e8KgfQ=="
       },
-      "expect": "Frame is not valid JSON."
+      "expect": "Frame is not valid JSON.",
+      "exception": "grammar"
     }
   ],
   "accept": [

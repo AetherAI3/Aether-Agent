@@ -14,21 +14,30 @@
 import { fail } from "./errors.js";
 import { MAX_FRAME_BYTES, MAX_FRAME_DEPTH, MAX_SAFE } from "./vocabulary.js";
 
-const DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+// A leading byte order mark is refused by its own guard in parseFrame, before
+// decoding. The decoder would strip one, so that guard is the only rule that
+// refuses it.
+const DECODER = new TextDecoder("utf-8", { fatal: true });
 const MAX_SAFE_DIGITS = String(MAX_SAFE);
 const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
+const UNICODE_ESCAPE = `${String.fromCharCode(BACKSLASH)}u`;
 const WHITESPACE = new Set([0x20, 0x09, 0x0a, 0x0d]);
 const NUMBER_RUN = /^[0-9A-Za-z.+-]$/;
 const CANONICAL_INTEGER = /^(?:0|[1-9][0-9]*)$/;
 const HEX4 = /^[0-9A-Fa-f]{4}$/;
 const LITERALS: readonly (readonly [string, boolean | null])[] = [["true", true], ["false", false], ["null", null]];
-const SIMPLE_ESCAPES: Readonly<Record<string, string>> = {
-  [String.fromCharCode(QUOTE)]: String.fromCharCode(QUOTE),
-  [String.fromCharCode(BACKSLASH)]: String.fromCharCode(BACKSLASH),
-  "/": "/",
-};
-const CONTROL_ESCAPES = "bfnrt";
+/** Each two-character escape, by the character after the backslash, and the UTF-16 unit it decodes to. */
+const SIMPLE_ESCAPES: ReadonlyMap<string, number> = new Map([
+  [String.fromCharCode(QUOTE), QUOTE],
+  [String.fromCharCode(BACKSLASH), BACKSLASH],
+  ["/", 0x2f],
+  ["b", 0x08],
+  ["f", 0x0c],
+  ["n", 0x0a],
+  ["r", 0x0d],
+  ["t", 0x09],
+]);
 
 const isControl = (unit: number): boolean => unit < 0x20 || (unit >= 0x7f && unit <= 0x9f);
 
@@ -146,26 +155,36 @@ class Lexer {
     return HEX4.test(digits) ? Number.parseInt(digits, 16) : -1;
   }
 
+  /**
+   * Decodes one escape to its UTF-16 unit first and then applies the string
+   * rules to that unit. An escaped newline is therefore refused by the same
+   * control rule whether it is spelled with a letter or with four hex digits,
+   * and a surrogate that is not half of an escaped pair is refused however it
+   * was written.
+   */
   private escape(): string {
     const marker = this.src.charAt(this.pos + 1);
     this.pos += 2;
-    const simple = SIMPLE_ESCAPES[marker];
-    if (simple !== undefined) return simple;
-    if (marker !== "" && CONTROL_ESCAPES.includes(marker)) fail("Frame contains a control character.");
-    if (marker !== "u") fail("Frame is not valid JSON.");
-    const unit = this.hex(this.pos);
-    if (unit < 0) fail("Frame is not valid JSON.");
-    this.pos += 4;
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const paired = this.src.charCodeAt(this.pos) === BACKSLASH && this.src.charAt(this.pos + 1) === "u";
-      const low = paired ? this.hex(this.pos + 2) : -1;
-      if (low < 0xdc00 || low > 0xdfff) fail("Frame contains an unpaired surrogate.");
-      this.pos += 6;
-      return String.fromCharCode(unit, low);
+    const code = SIMPLE_ESCAPES.get(marker) ?? this.unicodeEscape(marker);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const low = this.src.startsWith(UNICODE_ESCAPE, this.pos) ? this.hex(this.pos + 2) : -1;
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        this.pos += 6;
+        return String.fromCharCode(code, low);
+      }
     }
-    if (unit >= 0xdc00 && unit <= 0xdfff) fail("Frame contains an unpaired surrogate.");
-    if (isControl(unit)) fail("Frame contains a control character.");
-    return String.fromCharCode(unit);
+    if (code >= 0xd800 && code <= 0xdfff) fail("Frame contains an unpaired surrogate.");
+    if (isControl(code)) fail("Frame contains a control character.");
+    return String.fromCharCode(code);
+  }
+
+  /** The unit named by a four-hex-digit escape; the backslash and marker are already consumed. */
+  private unicodeEscape(marker: string): number {
+    if (marker !== "u") fail("Frame is not valid JSON.");
+    const code = this.hex(this.pos);
+    if (code < 0) fail("Frame is not valid JSON.");
+    this.pos += 4;
+    return code;
   }
 
   /** The whole run of number-like characters, so 1e2, -0 and 0x1F are refused as one token. */

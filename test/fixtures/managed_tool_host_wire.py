@@ -257,7 +257,8 @@ def parse_frame(data: bytes) -> Any:
     if data[:3] == _BOM:
         fail("Frame starts with a byte order mark.")
     try:
-        text = data.decode("utf-8")
+        # utf-8-sig would strip a leading BOM, so the guard above is the only rule that refuses one.
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         fail("Frame is not valid UTF-8.")
     _prescan(text)
