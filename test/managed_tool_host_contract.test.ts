@@ -17,6 +17,8 @@ const BUNDLE_DIR = "contracts/managed-ats-tool-host/v1";
 const MODULE_DIR = "src/core/managed_tool_host";
 const SCHEMA_BASE = "https://schemas.aethersystems.net/managed-ats-tool-host/v1/";
 const LF = String.fromCharCode(10);
+/** Printable ASCII plus line endings (a Windows checkout may carry CRLF; digests parse the JSON first). */
+const printableAscii = (bytes: Uint8Array): boolean => bytes.every((byte) => byte === 10 || byte === 13 || (byte >= 32 && byte <= 126));
 
 // Coverage floors are named constants equal to the coverage that exists when
 // the fixture was frozen, never counts derived from the lists they guard.
@@ -233,7 +235,7 @@ test("the golden fixture pins its schema, canonical profile and clock skew", asy
   assert.equal(fixture.canonical_profile, "rfc8785/1");
   assert.equal(fixture.clock_skew_ms, host.CLOCK_SKEW_MS);
   const raw = await readFile(FIXTURE_PATH);
-  assert.equal(raw.every((byte) => byte === 10 || (byte >= 32 && byte <= 126)), true, "fixture must be printable ASCII plus LF");
+  assert.equal(printableAscii(raw), true, "fixture must be printable ASCII");
 });
 
 test("every test key derives its public key and is labelled not for production", async () => {
@@ -328,7 +330,7 @@ test("the schema bundle is closed, local, ASCII and pinned by its manifest", asy
   const problems: string[] = [];
   for (const entry of entries) {
     const raw = await readFile(`${BUNDLE_DIR}/${entry.file}`);
-    if (!raw.every((byte) => byte === 10 || (byte >= 32 && byte <= 126))) problems.push(`${entry.file}: not printable ASCII`);
+    if (!printableAscii(raw)) problems.push(`${entry.file}: not printable ASCII`);
     const document = JSON.parse(raw.toString("utf8")) as Doc;
     if (document["$schema"] !== "https://json-schema.org/draft/2020-12/schema") problems.push(`${entry.file}: not draft 2020-12`);
     if (document["$id"] !== SCHEMA_BASE + entry.file) problems.push(`${entry.file}: wrong $id`);
@@ -743,7 +745,7 @@ test("the managed tool host module performs no I/O, imports only what the brief 
   const problems: string[] = [];
   for (const name of modules) {
     const bytes = await readFile(`${MODULE_DIR}/${name}`);
-    if (!bytes.every((byte) => byte === 10 || (byte >= 32 && byte <= 126))) problems.push(`${name}: not printable ASCII plus LF`);
+    if (!printableAscii(bytes)) problems.push(`${name}: not printable ASCII`);
     const source = bytes.toString("utf8");
     for (const token of forbidden) if (source.includes(token)) problems.push(`${name}: reaches for ${token}`);
     for (const match of source.matchAll(/from "([^"]+)"/g)) {
