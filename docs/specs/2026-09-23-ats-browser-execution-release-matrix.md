@@ -70,13 +70,17 @@ fixture is lane W1-D.
   Python verifiers (`ats_contracts_golden_verify.py`,
   `ats_browser_order_verify.py`, `ats_contracts_v2_verify.py`) pass on the
   `/2` closure branch, and CI runs all three on Linux and Windows.
-- **Zero order tools registered.** `test/ats_no_order_tool.test.ts` reads 31
+- **Zero order tools registered.** `test/ats_no_order_tool.test.ts` reads 32
   tool, action and command registries, from the brain tool list and
-  CloudBrain's live advertisement to every command dispatcher. It finds none
-  of the order contracts' 17 operations, no order submit, commit, place or
-  cancel, and no approval. It also finds no import of the proposal or
-  browser-order validators outside `src/core/ats_contracts/`, and no MCP
-  server.
+  CloudBrain's live advertisement to every command dispatcher in
+  `src/commands`. It finds none of the order contracts' 17 operations, no
+  order, trade or position being submitted, committed, placed, cancelled,
+  executed, closed, routed or amended, no buy, sell, short or flatten, and no
+  approval. It also finds no import of the proposal or browser-order
+  validators outside `src/core/ats_contracts/`, and no MCP server. The
+  inventory covers what this CLI registers, advertises and dispatches; tools
+  offered by a user-configured MCP server or by Cloud's MCP broker are outside
+  it, and the CLI's `ToolExecutor` refuses any name outside `TOOLS`.
 - **Doctor refusal projection.** Not produced by this lane. The execution
   spec records the last observed projection: `paper_order_ready=false`,
   `provider_sandbox_ready=false`, `broker_live_ready=false`.

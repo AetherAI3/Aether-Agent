@@ -574,8 +574,12 @@ to accepted, never to another refusal.
 
 **Scope.** A passing fixture proves only that both sides agree on shapes and
 refusals. Nothing here registers an order tool, and
-`test/ats_no_order_tool.test.ts` proves no CLI registry exposes one. The G0
-release matrix, including the ATSv2 pins, is
+`test/ats_no_order_tool.test.ts` proves that none of the CLI's 32 tool, action
+and command registries exposes one. That inventory covers what this CLI
+registers, advertises and dispatches; tools offered by a user-configured MCP
+server or by Cloud's MCP broker are outside it, and the CLI's `ToolExecutor`
+refuses any name outside `TOOLS`. The G0 release matrix, including the ATSv2
+pins, is
 [`specs/2026-09-23-ats-browser-execution-release-matrix.md`](specs/2026-09-23-ats-browser-execution-release-matrix.md).
 
 ---

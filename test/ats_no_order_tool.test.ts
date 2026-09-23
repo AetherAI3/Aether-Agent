@@ -35,6 +35,11 @@ import { AGENT_CAPABILITIES_FALLBACK } from "../src/generated/agent_capabilities
 // a read that silently comes back empty or from the wrong place fails rather
 // than passing. The CLI hosts no MCP server; a tripwire below forces any
 // future one into this list.
+//
+// Scope: this inventories what THIS CLI registers, advertises and dispatches.
+// Tools offered by a user-configured MCP server or by Cloud's MCP broker are
+// outside it; the CLI only lists them, and its ToolExecutor refuses any name
+// outside TOOLS (proved at runtime below for every order operation).
 
 // --- What counts as an order operation ---------------------------------------------
 
@@ -42,14 +47,22 @@ function tokensOf(name: string): string[] {
   return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 }
 
-const ORDER_NOUNS: ReadonlySet<string> = new Set(["order", "orders", "trade", "trades"]);
-const ORDER_VERB = /^(submit|commit|place|cancel)/;
+/** What makes a connector or grant operation order-bearing, for CONTRACT_ORDER_NAMES. */
+const ORDER_BEARING: ReadonlySet<string> = new Set(["order", "orders"]);
+/** What an order-shaped name acts on, and the verbs that act on it. */
+const ORDER_NOUNS: ReadonlySet<string> = new Set(["order", "orders", "trade", "trades", "position", "positions"]);
+const ORDER_VERB = /^(submit|commit|place|cancel|execute|confirm|close|route|send|fill|open|amend|modify|replace|flatten)/;
+/** Trading verbs that are an order operation on their own, whatever follows them. Whole tokens only. */
+const TRADING_VERBS: ReadonlySet<string> = new Set([
+  "buy", "buys", "buying", "sell", "sells", "selling", "short", "shorting",
+  "flatten", "flattening", "liquidate", "liquidating", "liquidation",
+]);
 const APPROVAL = /^approv/;
 
 /** Every operation the order contracts name: the ten browser operations and the order-bearing connector and grant operations. */
 const CONTRACT_ORDER_NAMES: ReadonlySet<string> = new Set([
   ...BROWSER_ORDER_OPERATIONS,
-  ...[...NORMALIZED_OPERATIONS, ...GRANT_CAPABILITIES].filter((op) => tokensOf(op).some((token) => ORDER_NOUNS.has(token))),
+  ...[...NORMALIZED_OPERATIONS, ...GRANT_CAPABILITIES].filter((op) => tokensOf(op).some((token) => ORDER_BEARING.has(token))),
 ]);
 
 /** 10 browser operations, 5 order connector operations, 2 order grant capabilities. A constant, never derived. */
@@ -60,8 +73,9 @@ function orderLike(name: string): string | null {
   if (CONTRACT_ORDER_NAMES.has(name)) return "an order-contract operation";
   const tokens = tokensOf(name);
   if (tokens.some((token) => APPROVAL.test(token))) return "an approval";
+  if (tokens.some((token) => TRADING_VERBS.has(token))) return "a buy, sell, short, flatten or liquidation";
   if (tokens.some((token) => ORDER_VERB.test(token)) && tokens.some((token) => ORDER_NOUNS.has(token))) {
-    return "an order submit, commit, place or cancel";
+    return "an order, trade or position being submitted, committed, placed, cancelled, executed, closed, routed or amended";
   }
   return null;
 }
@@ -120,6 +134,25 @@ async function builtinSkillNames(): Promise<string[]> {
   return names;
 }
 
+/**
+ * Every subcommand any module in src/commands dispatches on: its case labels and
+ * comparisons against the parsed verb. Reads the whole directory, so a command
+ * module added later is swept the day it lands.
+ */
+async function commandDispatchNames(): Promise<string[]> {
+  const root = "src/commands";
+  const pattern = /(?:case |(?:sub|subcmd|subcommand|action|verb|command|cmd|args\[0\]|argv\[0\]|first|mode|op|operation) === )(?:"([^"]*)"|'([^']*)')/g;
+  const names: string[] = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+    for (const match of (await source(join(root, entry.name))).matchAll(pattern)) {
+      const name = match[1] ?? match[2] ?? "";
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
 const STUB_OBSERVER = { snapshot: async () => ({}), status: () => ({}) } as unknown as Parameters<typeof createBrowserVisionSkill>[0];
 
 interface Registry {
@@ -157,7 +190,7 @@ const REGISTRIES: readonly Registry[] = [
   {
     name: "headless_session.ts TOOL_NAMES",
     sentinel: "write_file",
-    read: async () => captured(between(await source("src/core/headless_session.ts"), "const TOOL_NAMES = new Set([", "]", "headless_session.ts"), QUOTED),
+    read: async () => captured(between(await source("src/core/headless_session.ts"), "const TOOL_NAMES = new Set([", "]);", "headless_session.ts"), QUOTED),
   },
   {
     name: "generated/agent_capabilities.ts AGENT_CAPABILITIES_FALLBACK tools and permissions",
@@ -248,6 +281,7 @@ const REGISTRIES: readonly Registry[] = [
   },
   { name: "goals.ts /goal subcommands", sentinel: "complete", read: async () => captured(await source("src/commands/goals.ts"), /case "([^"]*)":/g) },
   { name: "github.ts subcommands and actions", sentinel: "checks", read: async () => captured(await source("src/commands/github.ts"), /case "([^"]*)":/g) },
+  { name: "src/commands/*.ts subcommand dispatchers", sentinel: "enroll", read: commandDispatchNames },
   {
     name: "aether-ats-skills bin/aether-ats-skills.js commands",
     sentinel: "scan",
@@ -256,7 +290,7 @@ const REGISTRIES: readonly Registry[] = [
 ];
 
 /** The number of registries checked. A constant: removing one from the list fails, and adding one is a deliberate edit. */
-const REGISTRY_FLOOR = 31;
+const REGISTRY_FLOOR = 32;
 
 // --- The checks --------------------------------------------------------------------
 
@@ -265,9 +299,14 @@ test("the order-name check flags every contract operation and order-shaped name,
   for (const operation of BROWSER_ORDER_OPERATIONS) assert.ok(CONTRACT_ORDER_NAMES.has(operation), operation);
   const mustFlag = [
     ...CONTRACT_ORDER_NAMES, "place_order", "submitOrder", "cancel-order", "ats.orders.commit", "placeTrade",
+    "execute_order", "confirm_trade", "close_position", "route_order", "amendOrder", "replace-order", "open_position",
+    "buy", "sell_shares", "short", "flatten", "liquidate_all",
     "approve", "approve_order", "operator_approval",
   ];
-  const mustPass = ["git_commit", "git.commit", "commit", "cancel", "resume", "orders", "read_file", "aether.github.pr.create"];
+  const mustPass = [
+    "git_commit", "git.commit", "commit", "cancel", "resume", "orders", "positions", "open", "close", "execute", "send",
+    "shortcut", "read_file", "aether.github.pr.create",
+  ];
   assert.deepEqual(mustFlag.filter((name) => orderLike(name) === null), [], "an order operation went unflagged");
   assert.deepEqual(mustPass.filter((name) => orderLike(name) !== null), [], "a benign name was flagged");
 });
