@@ -4,14 +4,17 @@
 
 import { digestEquals, digestOf } from "./canonical.js";
 import { ORDER_SIDES, ORDER_TYPES, type OrderSide, type OrderType } from "./grant.js";
-import { choice, closed, digest, fail, ident, integer, list, minorUnits, nullable, pinned, schemaTag, timestamp } from "./primitives.js";
+import {
+  choice, closed, closedMaskedLabel, digest, equityTicker, fail, ident, integer, list, minorUnits, nullable, pinned,
+  schemaTag, timestamp,
+} from "./primitives.js";
 import {
   BROWSER_OPERATION_EFFECTS, BROWSER_ORDER_OPERATIONS, BROWSER_ORDER_RESULT_SCHEMA, BROWSER_REFUSAL_CODES,
   BROWSER_RESULT_STATUSES, SITE_MODES,
   type BrowserOrderOperation, type BrowserRefusalCode, type BrowserResultStatus, type SiteMode,
 } from "./browser_order.js";
 import {
-  MAX_TICKET_QUANTITY, TICKET_FIELDS, equitySymbol, maskedAccountLabel, positiveMinor, priceAgreesWithType,
+  MAX_TICKET_QUANTITY, TICKET_FIELDS, positiveMinor, priceAgreesWithType,
   signedMinor, siteOrigin, ticketShape, validateAdapterPin, validatePrincipal,
   type BrowserAdapterPin, type BrowserPrincipal, type BrowserTicket,
 } from "./browser_order_values.js";
@@ -167,7 +170,7 @@ function validateVerifySessionData(value: unknown, name: string): VerifySessionD
   const account = {
     site_origin: nullable(raw.site_origin, `${name} site origin`, siteOrigin),
     account_fingerprint: nullable(raw.account_fingerprint, `${name} account fingerprint`, digest),
-    masked_account_label: nullable(raw.masked_account_label, `${name} masked account label`, maskedAccountLabel),
+    masked_account_label: nullable(raw.masked_account_label, `${name} masked account label`, closedMaskedLabel),
     mode_evidence: nullable(raw.mode_evidence, `${name} mode evidence`, validateModeEvidence),
     trading_permission: nullable(raw.trading_permission, `${name} trading permission`, (v, n) => choice(v, TRADING_PERMISSIONS, n)),
   };
@@ -188,7 +191,7 @@ function validateMarketData(value: unknown, name: string): MarketData {
   if (bid === null && ask === null && last === null) fail(`${name} carries no price.`);
   if (bid !== null && ask !== null && bid > ask) fail(`${name} is a crossed quote.`);
   return Object.freeze({
-    symbol: equitySymbol(raw.symbol, `${name} symbol`),
+    symbol: equityTicker(raw.symbol, `${name} symbol`),
     currency: pinned(raw.currency, "USD", `${name} currency`),
     bid_minor: bid,
     ask_minor: ask,
@@ -274,7 +277,7 @@ function validateSiteOrder(value: unknown, name: string): SiteOrder {
   checkFillState(fills, name);
   return Object.freeze({
     site_order_id: ident(raw.site_order_id, `${name} site order id`),
-    symbol: equitySymbol(raw.symbol, `${name} symbol`),
+    symbol: equityTicker(raw.symbol, `${name} symbol`),
     side: choice(raw.side, ORDER_SIDES, `${name} side`),
     order_type: orderType,
     limit_price_minor: price,
@@ -302,7 +305,7 @@ function validatePosition(value: unknown, name: string): SitePosition {
   const quantity = integer(raw.quantity, `${name} quantity`, -MAX_POSITION_QUANTITY, MAX_POSITION_QUANTITY);
   if (quantity === 0) fail(`${name} quantity must not be zero; a flat position is absent.`);
   return Object.freeze({
-    symbol: equitySymbol(raw.symbol, `${name} symbol`),
+    symbol: equityTicker(raw.symbol, `${name} symbol`),
     quantity,
     average_cost_minor: nullable(raw.average_cost_minor, `${name} average cost`, positiveMinor),
   });
