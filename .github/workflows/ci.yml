@@ -72,6 +72,9 @@ jobs:
       - name: Verify independent Python ATS canonical bytes
         run: python test/fixtures/ats_contracts_golden_verify.py
 
+      - name: Verify independent Python Agent Browser order contract
+        run: python test/fixtures/ats_browser_order_verify.py
+
       # Emit the compact, machine-readable package summary on both release
       # platforms. The release-coherence suite binds the packet's named host
       # measurement to this same npm pack result, so a value from one runner
