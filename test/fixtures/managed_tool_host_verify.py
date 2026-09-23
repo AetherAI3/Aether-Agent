@@ -329,7 +329,11 @@ class Harness:
             base = self.accept[vector["base"]]
             if refusal(lambda: self.validate(base["kind"], base["document"], base.get("now"), self.context(base.get("context")))) is not None:
                 self.problem(f"{vector['id']}: control document refused")
-            ctx = self.context(vector.get("context", base.get("context")))
+            try:
+                ctx = self.context(vector.get("context", base.get("context")))
+            except w.ContractError as error:
+                self.problem(f"{vector['id']}: context documents refused: {error}")
+                continue
             now = vector.get("now", base.get("now"))
             patched = apply_patches(base["document"], vector["patches"])
             self.expect_refusal(vector["id"], lambda: self.validate(vector["kind"], patched, now, ctx), vector["expect"])
@@ -397,7 +401,15 @@ class Harness:
     def run(self) -> None:
         for section in (self.header, self.keys, self.schemas, self.canonical, self.primitives, self.derivations,
                         self.raw_frames, self.objects, self.cross):
-            section()
+            try:
+                section()
+            except Exception as error:  # a crash is itself a finding; record it and still run the other sections
+                self.problem(f"{section.__name__} section crashed: {type(error).__name__}: {error}")
+
+
+def ascii_line(text: str) -> str:
+    """Report as pure ASCII: a Windows console may be cp1252, and a failure must never crash its own report."""
+    return text.encode("ascii", "backslashreplace").decode("ascii")
 
 
 def main() -> int:
@@ -410,7 +422,7 @@ def main() -> int:
               f"cross {len(fixture['cross']['accept'])}+{len(fixture['cross']['reject'])}")
     if harness.failures:
         for failure in harness.failures:
-            print(f"FAIL {failure}")
+            print(ascii_line(f"FAIL {failure}"))
         print(f"FAIL: {len(harness.failures)} problem(s) across {harness.checked} checks ({counts}): the Python mirror disagrees with the fixture.")
         return 1
     print(f"OK: {harness.checked} managed tool host checks reproduced by an independent Python implementation ({counts}).")
