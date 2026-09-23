@@ -238,6 +238,28 @@ test("the golden fixture pins its schema, canonical profile and clock skew", asy
   assert.equal(printableAscii(raw), true, "fixture must be printable ASCII");
 });
 
+test("every vector id, name and key label is unique within its section", async () => {
+  const fixture = await loadFixture();
+  const d = fixture.derivations;
+  const sections: Readonly<Record<string, readonly string[]>> = {
+    keys: fixture.keys.map((key) => key.label),
+    canonical: fixture.canonical.map((row) => row.name),
+    account_scope: d.account_scope.map((row) => row.name),
+    account_scope_reject: d.account_scope_reject.map((row) => row.name),
+    binding: d.binding.map((row) => row.name),
+    binding_reject: d.binding_reject.map((row) => row.name),
+    arguments: d.arguments.map((row) => row.name),
+    arguments_reject: d.arguments_reject.map((row) => row.name),
+    raw: [...fixture.raw_accept, ...fixture.raw_reject].map((vector) => vector.id),
+    objects: [...fixture.accept, ...fixture.reject].map((vector) => vector.id),
+    cross: [...fixture.cross.accept, ...fixture.cross.reject].map((vector) => vector.id),
+  };
+  const repeated = Object.entries(sections).flatMap(([section, names]) =>
+    names.filter((name, index) => names.indexOf(name) !== index).map((name) => `${section}: ${name}`),
+  );
+  assert.deepEqual(repeated, []);
+});
+
 test("every test key derives its public key and is labelled not for production", async () => {
   const fixture = await loadFixture();
   const problems: string[] = [];

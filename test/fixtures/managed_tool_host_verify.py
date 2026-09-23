@@ -41,6 +41,7 @@ CROSS_REJECT_FLOORS = {
     "e1_canary": 9, "capability_receipt": 7,
 }
 SECTION_FLOORS = {"accept": 39, "cross_accept": 23, "raw_accept": 12, "raw_reject": 55, "primitives": 114, "canonical": 6}
+DERIVATION_SECTIONS = ("account_scope", "account_scope_reject", "binding", "binding_reject", "arguments", "arguments_reject")
 SELF_DIGESTS = {
     "device_proof": ("proof_digest", ("proof_digest", "cloud_signature"), o.DEVICE_PROOF_SCHEMA),
     "observer_receipt": ("receipt_digest", ("receipt_digest",), o.OBSERVER_RECEIPT_SCHEMA),
@@ -161,6 +162,18 @@ class Harness:
             count = len(fixture["cross"]["accept"]) if name == "cross_accept" else len(fixture[name])
             if count < floor:
                 self.problem(f"{name}: {count} vectors, floor {floor}")
+        derivations = fixture["derivations"]
+        sections = {
+            "keys": [key["label"] for key in fixture["keys"]],
+            "canonical": [row["name"] for row in fixture["canonical"]],
+            **{name: [row["name"] for row in derivations[name]] for name in DERIVATION_SECTIONS},
+            "raw": [vector["id"] for vector in fixture["raw_accept"] + fixture["raw_reject"]],
+            "objects": [vector["id"] for vector in fixture["accept"] + fixture["reject"]],
+            "cross": [vector["id"] for vector in fixture["cross"]["accept"] + fixture["cross"]["reject"]],
+        }
+        for section, names in sections.items():
+            for name in sorted({name for name in names if names.count(name) > 1}):
+                self.problem(f"{section}: {name} is not unique")
 
     def keys(self) -> None:
         for key in self.fixture["keys"]:
