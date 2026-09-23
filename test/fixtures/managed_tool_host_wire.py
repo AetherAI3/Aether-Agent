@@ -263,7 +263,9 @@ def parse_frame(data: bytes) -> Any:
         fail("Frame is not valid UTF-8.")
     _prescan(text)
     try:
-        return json.loads(text, object_pairs_hook=_pairs, parse_float=_not_json, parse_constant=_not_json, parse_int=int)
+        # strict=False: the pre-scan is the only rule that refuses a control character in a string.
+        return json.loads(text, object_pairs_hook=_pairs, parse_float=_not_json, parse_constant=_not_json, parse_int=int,
+                          strict=False)
     except _Duplicate:
         fail("Frame contains a duplicate object member.")
     except (_NotJson, json.JSONDecodeError):
