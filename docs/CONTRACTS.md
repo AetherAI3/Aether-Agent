@@ -167,6 +167,14 @@ argument. Neither proposal validation nor its digest is execution authority.
 | `aether.ats.operator-approval/1` | `OperatorApprovalReceiptV1` | 1 §11.6 |
 | `aether.ats.execution-receipt/1` | `ExecutionReceiptV1` | 1 §11.7 |
 
+**Frozen weakness, never executable.** The `/1` ticker check (`symbol()`)
+accepts URL-shaped strings such as `HTTPS://X`, and the `/1` masked-label check
+accepts other-script digits, confusable letters, direction overrides and
+zero-width characters. Both stay exactly as frozen so historical records keep
+validating. No `/1` document or chain may authorize an executable order; that
+takes the `/2` shapes and `verifyExecutableCommitAuthority()` in "Spec 1 `/2`
+closure" below.
+
 ### Canonicalization  ·  `rfc8785/1`
 
 A real RFC 8785 (JCS) implementation, in `src/core/ats_contracts/canonical.ts`.
@@ -468,6 +476,107 @@ takeover signal, session generation, persistent profile, origin allowlist or
 drift detection. ATSv2's execution controller still requires broker-API truth
 for a commit. Both are later gates in the source spec. ATSv2 lifts the Python
 validators into `ats-mcp` in its companion change.
+
+---
+
+## 5. Spec 1 `/2` closure: equity ticker and closed masked label (frozen)
+
+**What was weak.** The Spec 1 `/1` shapes (section 2) check tickers with
+`symbol()`, `^[A-Z0-9][A-Z0-9.^:=_/-]{0,39}$`, which accepts URL-shaped
+strings such as `HTTPS://X`. They check masked account labels with a
+control-character rule plus an ASCII-only five-digit-run rule, which accepts
+fullwidth or Arabic-Indic digits, confusable letters, direction overrides and
+zero-width characters. The execution spec
+([`specs/2026-09-23-ats-agent-browser-remaining-gates-v2.md`](specs/2026-09-23-ats-agent-browser-remaining-gates-v2.md),
+gate G0) requires closing both through a versioned change before those shapes
+are reused for an executable order.
+
+**What changed.** `/1` is frozen and keeps accepting exactly what it accepted.
+Six `/2` schemas carry the same fields as their `/1` counterparts; the only
+semantic change is the ticker or label check:
+
+| `/2` tag | Shape | Only change from `/1` |
+|---|---|---|
+| `aether.ats.model-order-proposal/2` | `ModelEquityOrderProposalV2` | `symbol` must pass `equityTicker()` |
+| `aether.ats.equity-order-intent/2` | `NormalizedEquityOrderIntentV2` | `symbol` must pass `equityTicker()` |
+| `aether.ats.operator-approval/2` | `OperatorApprovalReceiptV2` | `symbol` must pass `equityTicker()` |
+| `aether.ats.execution-receipt/2` | `ExecutionReceiptV2` | `symbol` must pass `equityTicker()` |
+| `aether.ats.delegated-trading-grant/2` | `DelegatedTradingGrantV2` | every `symbol_allowlist` entry must pass `equityTicker()` |
+| `aether.ats.account-binding/2` | `BrokerAccountBindingV2` | `masked_label` must pass `closedMaskedLabel()` |
+
+`equityTicker()` (`^[A-Z]{1,6}(?:[.-][A-Z]{1,4})?$`: `SPY`, `BRK.B`, `BRK-B`) and
+`closedMaskedLabel()` (ASCII letters and digits, space, `. - _ ( ) # *`, bullet
+and ellipsis, at most four consecutive digits) live in `primitives.ts`. They
+are the helpers `agent-browser-ats-order/1` introduced (section 4), lifted with
+byte-identical regexes and messages: the browser fixture and its Python mirror
+pass unchanged, and drifting either message fails named browser vectors. Each
+`/1` and `/2` validator pair shares one body parameterized by schema tag and
+check, so `/1` keeps its messages and evaluation order. `ATS_SPEC1_V2_SCHEMAS`
+lists the six tags beside `ATS_SPEC1_SCHEMAS`.
+
+**The order-review receipt keeps one version.** It carries no ticker and no
+masked label, and it cannot move between chains: its `intent_digest` is the
+digest of the intent including the intent's `schema_version`, and the approval
+binds the review by digest, so a review answers exactly the intent version it
+was minted for. The executable gate tells a `/2` chain from a `/1` chain by its
+four versioned members; a `/2` review would be a new tag with no semantic
+change.
+
+**Gate rule.** `verifyExecutableCommitAuthority()` is the only gate that may
+authorize an executable order. It admits a chain whose intent, approval,
+account binding and grant are all `/2`, and refuses anything else, before any
+other check, with the fixed `EXECUTABLE_CHAIN_REFUSAL`:
+
+> Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record.
+
+Past that check it runs `verifyCommitAuthority()`'s logic unchanged;
+`verifyExecutableApprovalChain()` does the same for `verifyApprovalChain()`
+over the intent and approval. Their inputs are typed as either version so a
+`/1` or mixed chain reaches the gate and is refused there, not only at compile
+time. The `/1` gates keep their signatures and stay version-blind, for
+historical records: **a `/1` chain is never executable**, however consistent.
+
+### Golden vectors and the Python mirror
+
+`test/fixtures/ats_contracts_v2_golden.json` is pure ASCII, sha256
+`837994a7dc3624e807eeef57e629648f0b8b19362c31ab4fa3958da6203d3544`. Every
+message in it is compared exactly in both languages. It holds:
+
+- canonical text and digest for one valid instance of each `/2` document;
+- 8 strict variants that must stay accepted by `/2` and by `/1`, because the
+  closure narrows and must not overreach;
+- 12 single-cause rejects: lowercase `spy` on each ticker-bearing document and
+  a label with five ASCII digits, each with its pinned `/1` refusal, plus each
+  `/2` validator given its `/1` tag;
+- 41 `frozen_weakness` entries that the `/1` validator ACCEPTS and `/2`
+  REFUSES: `HTTPS://X`, `A:B`, `X/Y`, `ABCDEFG`, `BRK.BBBBB`, `A^B` and `1ABC`
+  on each of the five ticker-bearing documents, and labels with a fullwidth
+  digit run, Arabic-Indic digits, a Cyrillic confusable letter, a
+  right-to-left override (U+202E), a zero-width space (U+200B) or a byte order
+  mark (U+FEFF);
+- 6 chain cases: the faithful `/2` chain; a `/1` intent, approval, binding or
+  grant in an otherwise `/2` chain; and an all-`/1` chain. Each passes the
+  version-blind gates, so the version rule is its only possible refusal.
+
+`test/fixtures/ats_contracts_v2_wire.py` mirrors the validators at `/1` and
+`/2` and both executable gates, borrowing the section 4 primitives and the
+section 2 JCS encoder; `ats_contracts_v2_verify.py` runs all 85 vectors, and CI
+runs it on Linux and Windows. The frozen `/1` label rule is written `[0-9]{5,}`
+in Python, because Python's regex digit class, unlike JavaScript's, matches
+fullwidth digits.
+
+Each guard was verified by breaking it in both languages. Swapping the strict
+ticker for `symbol()` in any one `/2` validator fails exactly that document's
+eight ticker vectors. Swapping the closed label for the `/1` label fails the
+six label weaknesses. Removing either gate's version check fails the
+mixed-chain cases. Deleting each target check flips every vector aimed at it
+to accepted, never to another refusal.
+
+**Scope.** A passing fixture proves only that both sides agree on shapes and
+refusals. Nothing here registers an order tool, and
+`test/ats_no_order_tool.test.ts` proves no CLI registry exposes one. The G0
+release matrix, including the ATSv2 pins, is
+[`specs/2026-09-23-ats-browser-execution-release-matrix.md`](specs/2026-09-23-ats-browser-execution-release-matrix.md).
 
 ---
 
