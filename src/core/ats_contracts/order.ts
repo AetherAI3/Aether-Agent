@@ -7,11 +7,9 @@
 // "produces an immutable review and pending-approval request. It never
 // commits."
 //
-// The fields a model is NOT allowed to choose are absent from the intent
-// rather than present-and-ignored — provider, account, grant, device and
-// runtime identity are injected by ATS (section 11.4). A model that tries to
-// name an account has nowhere to put it, which is a stronger guarantee than
-// stripping the field later.
+// This is an ATS-private, fully bound intent, not the model input. The model
+// may submit only ModelEquityOrderProposalV1 in proposal.ts; ATSv2 must inject
+// provider, account, grant, device and runtime identity after authentication.
 
 import {
   choice,

@@ -132,3 +132,4 @@ export const ATS_SPEC1_SCHEMAS = [
   "aether.ats.operator-approval/1",
   "aether.ats.execution-receipt/1",
 ] as const;
+export * from "./proposal.js";

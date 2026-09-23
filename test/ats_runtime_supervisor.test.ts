@@ -841,7 +841,9 @@ test("readiness is scoped, so a healthy runtime with no strategies is not 'ready
   // Each of these is false for its own reason, and none of them is hidden
   // behind the runtime being healthy.
   assert.equal(report.readiness.strategy_ready, false);
-  assert.equal(report.readiness.paper_ready, false);
+  assert.equal(report.readiness.paper_activation_prerequisites, false);
+  assert.equal(report.readiness.paper_order_ready, false);
+  assert.equal(report.readiness.provider_sandbox_ready, false);
   assert.equal(report.readiness.broker_live_ready, false);
   assert.match(report.axes.find(axis => axis.name === "Strategies")?.detail ?? "", /0 compiled/);
   assert.match(report.axes.find(axis => axis.name === "Execution")?.detail ?? "", /Requested paper; effective observe/);
@@ -875,10 +877,15 @@ test("paper readiness requires fresh probe evidence for every configured symbol"
   const partial = await buildAtsDoctorReport(input, deps);
   assert.equal(partial.readiness.runtime_ready, true);
   assert.equal(partial.readiness.strategy_ready, true);
-  assert.equal(partial.readiness.paper_ready, false);
+  assert.equal(partial.readiness.paper_activation_prerequisites, false);
   assert.equal(partial.axes.find(axis => axis.name === "Data")?.state, "degraded");
   await writeDataRecord(dataPath, recordFor(["AAPL", "MSFT"]));
   const complete = await buildAtsDoctorReport(input, deps);
-  assert.equal(complete.readiness.paper_ready, true);
+  assert.equal(complete.readiness.paper_activation_prerequisites, true);
+  assert.equal(complete.readiness.paper_order_ready, false);
+  assert.equal(complete.readiness.provider_sandbox_ready, false);
+  assert.equal(complete.schema, "aether.ats.doctor/2");
+  assert.match(renderAtsDoctorReport(complete), /paper activation prerequisites met/);
+  assert.match(renderAtsDoctorReport(complete), /ATS simulated paper orders not ready/);
   assert.equal(complete.axes.find(axis => axis.name === "Data")?.state, "ok");
 });
