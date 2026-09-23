@@ -680,3 +680,250 @@ release matrix, including the ATSv2 pins, is
   that vocabulary onto the event protocol above.
 - **CLI auth** (device flow + `aek_` PAT): the CLI↔platform auth contract; see
   `src/core/device.ts`.
+
+---
+
+## 5. Managed ATS tool host v1 (E1 schema bundle)
+
+Step 1 of the E1 landing order in
+[`specs/2026-09-22-managed-ats-tool-host-v1.md`](./specs/2026-09-22-managed-ats-tool-host-v1.md)
+(section 17): the common encoding and the closed schemas for trust, device
+proof, host-open proof, observer-channel receipt, runtime capability,
+registry, host lease, invocation, cancellation, result and workspace status.
+It adds no transport, no I/O and no Cloud call. No tool is registered, and
+nothing here grants execution authority.
+
+### What landed
+
+- `contracts/managed-ats-tool-host/v1/`: `common.schema.json` (`$defs` only,
+  `x-aether-schema-id` `aether.managed-tool-common/1`), the trust,
+  device-proof, host-open-proof, observer-channel-receipt, runtime-capability,
+  registry, host-lease, invocation, cancellation, result,
+  workspace-status-input and workspace-status schemas, and `manifest.json`
+  (`aether.managed-tool-schema-bundle/1`: one entry per file, sorted by file,
+  with its `schema_digest`). All are JSON Schema draft 2020-12 with `$id`
+  `https://schemas.aethersystems.net/managed-ats-tool-host/v1/<file>`,
+  every object closed with a full `required` list, and ASCII only. Every
+  `$ref` is document-local: each schema carries an identical copy of the
+  common definitions it uses (the test proves the copies match
+  `common.schema.json`), so a schema digest covers everything that validates
+  against it. The schemas document structure; the semantic rules below are
+  enforced by the validators.
+- `src/core/managed_tool_host/`: a closed validator for each object, the
+  strict frame lexer, digests and derivations, Ed25519 over raw 32-byte keys,
+  and the cross-object checks, exported from `index.ts`. Every refusal is a
+  `ToolHostContractError` whose fixed message names the field path, never
+  the value. Imports are limited to `node:crypto`,
+  `../ats_contracts/canonical.js` (the single RFC 8785 encoder) and sibling
+  files.
+- `test/fixtures/managed_tool_host_golden.json`,
+  `test/managed_tool_host_contract.test.ts` and the independent Python mirror
+  `test/fixtures/managed_tool_host_{wire,objects,cross,ed25519,verify}.py`,
+  which CI runs on Linux and Windows.
+
+### Decided encoding rules
+
+The spec leaves these implicit. The lead decided them, and both languages
+implement exactly this.
+
+1. Common digest: `sha256:` + hex(sha256(ASCII(schema_id) + LF +
+   JCS(object without its own digest or signature fields))). It covers
+   `proof_digest` (which omits both `proof_digest` and `cloud_signature`),
+   `receipt_digest`, `capability_digest`, `registry_digest`,
+   `invocation_digest`, `cancellation_digest`, `result_digest` and
+   `status_digest`. The trust document has no digest.
+2. Signatures are pure RFC 8032 Ed25519 (no prehash) over ASCII(schema_id) +
+   LF + JCS(object without the signature field only). The lease and the
+   device proof omit only `cloud_signature`, so the device-proof signature
+   binds `proof_digest`. The host-open `device_signature` signs
+   ASCII(`aether.managed-tool-host-open/1`) + LF + JCS of challenge,
+   device_proof_digest, agent_id, conversation_id, local_session_id,
+   session_generation and registry_digest. That prefix differs from the
+   proof object's own schema, `aether.managed-tool-host-open-proof/1`.
+3. `arguments_digest` uses the prefix `aether.managed-tool-arguments/1`.
+4. A schema digest uses the prefix `aether.schema/1` over the whole document.
+5. `common.schema.json` carries `x-aether-schema-id`
+   `aether.managed-tool-common/1` and holds `$defs` only.
+6. Timestamps match `YYYY-MM-DDTHH:MM:SS.mmmZ` exactly and must be real
+   Gregorian instants: years 0001 to 9999, hours 00 to 23, no leap second.
+   Both languages convert them to epoch milliseconds with explicit
+   days-from-civil arithmetic, never `Date.parse` or
+   `datetime.fromisoformat`.
+7. Integers are 0 to 2^53 - 1 unless a field is narrower: `session_generation`
+   and `sequence` are 1 to 2^53 - 1, `revocation_epoch` 0 to 2^53 - 1.
+8. Strings default to at most 256 Unicode scalar values (code points, not
+   UTF-16 units). Every Cc control (U+0000 to U+001F, U+007F to U+009F) and
+   every unpaired surrogate is refused anywhere, keys included.
+9. Set-like arrays (`supported_read_operations`, `dependencies`,
+   `data_classes`, `capabilities`, `evidence_refs`, and trust `keys` by
+   `key_id`) are strictly ascending by code point, with no duplicates. Tools
+   are strictly ascending by (name, version), with versions compared as
+   integers. An out-of-order array is refused, never reordered.
+   `diagnostics` keeps its order.
+10. Base64url is unpadded: exactly 43 characters for 32 bytes and 86 for 64.
+    It must be canonical (the unused low bits of the last character are
+    zero), so each byte string has exactly one spelling.
+11. Temporal checks take an explicit `now` in epoch milliseconds and allow
+    30 000 ms of skew either way. Pure-shape validators take no clock.
+12. Cross-object checks are separate exported functions (listed below).
+13. The raw frame lexer works on bytes. It refuses a UTF-8 byte order mark,
+    invalid UTF-8, frames over 262 144 bytes, nesting deeper than 16,
+    duplicate members (compared after unescaping), any number other than
+    `0` or `[1-9][0-9]*` up to 2^53 - 1 (so `-0`, `01`, `1.0`, `1e2` and `-1`
+    all fail lexically), and any control character or unpaired surrogate in
+    a string, raw or escaped. Arguments are further limited to depth 8.
+14. Every refusal is a `ToolHostContractError` with a fixed message. The
+    TypeScript and Python messages are byte-identical, and the vectors
+    compare them exactly.
+
+### Lane decisions awaiting review
+
+Where the spec and the list above were silent, this lane made the following
+choices. Each is pinned by vectors, so changing one requires a new fixture.
+
+- `cloud_origin_id` is a normalized lowercase https origin, the same value
+  the account-scope derivation uses: a dotted host, no IP literal, and no
+  path, query, fragment, credentials or explicit :443.
+- Every `device_id` (device proof, registry, lease, invocation, binding) must
+  use the `scdev_` namespace.
+- `channel_id` follows the ID grammar. The protocol name
+  `aether.ats.observer-channel/1` is exported as a constant but no field
+  carries it. `runtime_version` is 1 to 64 characters from U+0020 to
+  U+007E, and a diagnostic `code` matches `[A-Z][A-Z0-9_]{0,63}`.
+- Freshness: an object is refused when its start is more than 30 s after
+  `now`, or when `now` is at or past `expires_at` + 30 s. The cancellation
+  window runs from `lease.issued_at` - 30 s (inclusive) to `lease.expires_at`
+  + 30 s (exclusive).
+- Open JSON values (invocation arguments, and a result payload at most 15
+  levels deep inside its frame) allow only unsigned safe integers and use
+  the common string (256) and array (32) bounds. Invocation arguments are
+  also capped at 65 536 canonical bytes before the registered
+  `max_argument_bytes` applies.
+- Only the frozen E1 schemas have argument and payload validators
+  (`checkToolArguments`, `checkToolPayload`). Any other registered schema
+  fails closed. `assertE1CanaryRegistry` pins both E1 schema digests as well
+  as their IDs.
+- Three things go beyond clarification 12, implementing spec sections 4.2,
+  7, 8 and 10: `checkCapabilityReceipt`, the argument and payload
+  dispatchers, and the lease scope equalities in `checkLeaseBinding`
+  (account, agent, device, local session, generation, registry digest,
+  origin), which sit alongside the expiry bounds.
+- The 64 KiB workspace-status bound runs first, as a resource bound on the
+  serialized value. A status that is otherwise valid cannot exceed about
+  20 KB, so the vector for this bound always breaks a shape rule too.
+- The spec does not rank two defects in one frame. The TypeScript lexer
+  reports the first defect in document order, grammar and duplicate members
+  included. The Python mirror reports its pre-scan defects (depth, number
+  spelling, controls and surrogates) before grammar errors and duplicate
+  members, because `json.loads` runs after the pre-scan. Every raw reject
+  vector has exactly one defect, so the vectors hold both languages to the
+  same message, but a frame with two defects can be refused with different
+  messages.
+
+### Cross-object checks
+
+- `checkLeaseBinding`: scope and expiry against the registry, device proof
+  and trust document.
+- `checkInvocation`: scope against the lease, the lease's registry binding,
+  tool selection by (name, version), input schema identity, the registered
+  argument byte bound, the deadline against both the lease expiry and
+  `max_duration_ms`, and the deadline not yet passed at claim time.
+- `checkToolArguments` and `checkToolPayload`: dispatch to the frozen E1
+  input and output validators.
+- `checkCancellation`: the targeted call and its digest, lease fencing, and
+  the lease window.
+- `checkResult`: identity with the invocation, output schema identity when
+  succeeded, the registered `max_result_bytes`, and start and completion
+  times.
+- `assertE1CanaryRegistry` and `checkCapabilityReceipt`.
+
+### Golden vectors and the Python mirror
+
+`test/fixtures/managed_tool_host_golden.json` is 467 286 bytes. The sha256 of
+the committed LF blob is
+`d2384eab955469077a04979401c854d8e8966052d2dd85943be006b393540338`. The file
+is pure ASCII: non-ASCII values are stored as JSON backslash-u escapes. It
+holds:
+
+- 4 test keys, with seeds labelled NOT FOR PRODUCTION;
+- the 13 schema digests;
+- 6 canonical vectors and 114 primitive boundaries;
+- 16 derivation rows;
+- 12 accepted and 55 refused raw frames (large frames are small generator
+  specs);
+- 39 accept and 352 reject object vectors: trust 24, device proof 35,
+  host-open proof 19, observer receipt 21, runtime capability 24, registry
+  49, host lease 23, invocation 37, cancellation 13, result 51,
+  workspace-status input 5, workspace status 51;
+- 23 accept and 85 reject cross-object vectors.
+
+Object and cross-object reject vectors are resealed (digests and signatures
+recomputed) so that only the target defect remains. Vectors whose defect is
+the digest or signature itself are not resealed, and neither are
+unknown-field vectors, since a digest covers only the declared fields. The
+single-cause proof covers all 586 refusals in the fixture: 352 object, 85
+cross-object, 55 raw frame, 85 primitive and 9 derivation vectors. Each
+vector was run against a build whose `fail()` ignores exactly that vector's
+message, which deletes its target check. For the invalid UTF-8 vectors,
+deleting the check means decoding leniently. 539 vectors then flip to
+accepted. The other 47 carry an `exception` tag naming why they cannot flip:
+
+- type guards (17);
+- JSON grammar violations (16), which have no guard to delete. They are not
+  run this way, because ignoring the generic grammar message would also
+  remove the lexer's loop exits;
+- a key or tool lookup with no accept path (7);
+- unpaired surrogates that RFC 8785 cannot encode (3);
+- wrong-length signatures, which then fail verification (2);
+- seven dependencies from a six-member set (1);
+- the 64 KiB bound above (1).
+
+Two lexer details keep the raw frame vectors single-cause. Both decoders
+would strip a leading byte order mark, so the explicit guard, which runs
+first, is the only rule that refuses one. Every escape is decoded to its
+UTF-16 unit before the control and surrogate rules run on that unit, so a
+letter escape and a four-hex-digit escape of the same control character are
+refused by the same rule.
+
+`test/managed_tool_host_contract.test.ts` (18 tests) recomputes every digest
+and signature with node:crypto and the repo encoder, and compares every
+refusal message exactly. It also checks:
+
+- that vector ids, names and key labels are unique within each section,
+  since both harnesses look vectors up by id;
+- closed-field and enum parity between each schema document and the
+  validator's field lists;
+- that `grants_execution_authority` is required and `const: false` exactly
+  where the spec names it, `execution_authority` is `none` and
+  `orders_enabled` is false;
+- the manifest and the pinned E1 digests;
+- named coverage floors equal to the frozen counts;
+- a scan of the module for I/O, disallowed imports and non-ASCII bytes.
+
+The Python mirror shares no code with TypeScript. Its lexer is `json.loads`
+with duplicate and number hooks plus a pre-scan in document order. The
+pre-scan is the only rule for control characters inside strings, since
+`json.loads` runs with `strict=False`. The mirror's
+RFC 8785 encoder sorts keys by UTF-16 code unit. Its Ed25519 is pure RFC 8032
+and also refuses an S at or above the group order. `managed_tool_host_verify.py`
+reproduces all 719 checks and exits non-zero on any mismatch. It prints each
+failure as ASCII and records a crash inside a section as a failure, so a
+failing run on any console still names the vectors that caught it.
+
+A mutation matrix, run with a throwaway script outside the repository,
+deleted or inverted one guard at a time in a copy of the built module and of
+the Python mirror. It covered 43 guards in TypeScript and 46 in Python: the
+same 43, plus the mirror's UTF-16 key sort, its check that an Ed25519 S is
+below the group order, and a full match rather than a prefix match for
+regular expressions. All 89 mutations failed their suite, naming the vector
+aimed at that guard, and in 82 of them that vector was then accepted. The
+other seven are:
+
+- the 64 KiB bound in both languages (the tagged vector above);
+- the RFC 8785 key sort, which a canonical vector catches;
+- two derivation changes in both languages, the host-open signing prefix and
+  the integer version order. The accept vector built on each derivation is
+  refused as well.
+
+Three fixture mutations also fail both harnesses: dropping a vector below its
+floor, changing a stated reason, and repeating a vector id.
