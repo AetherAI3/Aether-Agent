@@ -51,15 +51,23 @@ function tokensOf(name: string): string[] {
 const ORDER_BEARING: ReadonlySet<string> = new Set(["order", "orders"]);
 /** What an order-shaped name acts on. `broker` covers broker_commit; `all` the bulk forms such as cancel_all. */
 const ORDER_NOUNS = ["orders", "order", "trades", "trade", "positions", "position", "tickets", "ticket", "broker", "all"] as const;
-/** What acts on an order noun, including order-type qualifiers (limit_order) and review steps (review_order). */
+/**
+ * What acts on an order noun, including order-type qualifiers (limit_order) and
+ * review steps (review_order). flatten is absent on purpose: it is a trading
+ * verb on its own (TRADING_VERBS), so listing it here would only shadow that rule.
+ */
 const ORDER_VERBS = [
   "submit", "commit", "place", "cancel", "execute", "confirm", "close", "route", "send", "fill", "open", "amend",
-  "modify", "replace", "flatten", "create", "new", "post", "make", "enter", "stage", "queue", "exit", "reduce",
-  "cover", "authoriz", "review", "preview", "limit", "market", "stop",
+  "modify", "replace", "create", "new", "post", "make", "enter", "stage", "queue", "exit", "reduce", "cover",
+  "authoriz", "review", "preview", "limit", "market", "stop",
 ] as const;
 const ORDER_NOUN_SET: ReadonlySet<string> = new Set(ORDER_NOUNS);
 const ORDER_VERB = new RegExp(`^(?:${ORDER_VERBS.join("|")})`);
-/** A verb run into its noun with no separator (placeorder, cancelall), in either order. */
+/**
+ * A verb run into its noun inside ONE token (placeorder, cancelall), in either
+ * order. Per token, never across separators, so a verb that happens to contain
+ * another (replace, preview) is still needed on its own.
+ */
 const JOINED = new RegExp(`(?:${ORDER_VERBS.join("|")})(?:${ORDER_NOUNS.join("|")})|(?:${ORDER_NOUNS.join("|")})(?:${ORDER_VERBS.join("|")})`);
 /** Trading verbs that are an order operation on their own, whatever follows them. Whole tokens only. */
 const TRADING_VERBS: ReadonlySet<string> = new Set([
@@ -88,7 +96,7 @@ function orderLike(name: string, ats = false): string | null {
   if (tokens.some((token) => ORDER_VERB.test(token)) && tokens.some((token) => ORDER_NOUN_SET.has(token))) {
     return "an order, trade, position or ticket being acted on";
   }
-  if (JOINED.test(tokens.join(""))) return "an order verb run into its noun";
+  if (tokens.some((token) => JOINED.test(token))) return "an order verb run into its noun";
   if (ats && tokens.some((token) => ATS_BARE_VERB.test(token))) return "a bare submit, place, commit or cancel in an ATS registry";
   return null;
 }
@@ -398,6 +406,10 @@ test("the order-name check flags every contract operation and order-shaped name,
     "submit_ticket", "cancel_all", "trade", "trading", "broker_commit", "exit_position", "authorize_order",
     "stop_order", "stage_order", "queue_order", "preview_order", "ats_broker_review_order", "reduce_position",
     "ticket_submit", "OrderPlace", "PLACE_ORDER", "placeorder", "submitorder", "cancelall", "orders/submit", "rebalance",
+    // One entry that only each rule element catches, so deleting any element fails this test.
+    // confirm_trade above is also a trade, so confirm_order is the one that pins the confirm verb.
+    "make_order", "enter_position", "cover_position", "send_order", "fill_order", "modify_order", "placetrade",
+    "confirm_order",
   ];
   const mustPass = [
     "git_commit", "git.commit", "commit", "cancel", "submit", "place", "resume", "orders", "positions", "open", "close",
@@ -639,7 +651,11 @@ async function walk(directory: string): Promise<string[]> {
 test("the comment stripper keeps every string, template and regex literal and fails closed", () => {
   const kept: ReadonlyArray<[string, string]> = [
     [`const glob = "src/**/*.ts"; call(); const end = "*/";`, "call();"],
+    // `src/**/` closes its own `/*`; a single-star glob does not, so only a string-aware stripper keeps call().
+    [`const glob = "src/*.ts"; call(); const end = "*/";`, "call();"],
     [`const url = "https://example.test/a"; call(); // trailing note`, "call();"],
+    // Read as a division, the regex's `/*` would open a comment that the later `*/` closes, swallowing call().
+    [`const re = /[/*]/; call(); const x = 1; /* note */`, "call();"],
     [`const re = /[/*]/; call(); const re2 = /\\/\\//;`, "call();"],
     [`const t = \`a \${"b//c"} /* text */ d\`; call();`, "call();"],
     [`const t = \`\${ { a: "}" }.a } x\`; call();`, "call();"],
@@ -678,6 +694,8 @@ test("the order-import check catches every way of reaching the validators, and n
     `const gate = verifyExecutableCommitAuthority;`,
     `run(verifyExecutableApprovalChain, verifyApprovalChain);`,
     `const glob = "src/**/*.ts"; import { x } from "../ats_contracts/proposal.js"; const end = "*/";`,
+    // A regex comment stripper reads this `/*` ... `*/` as one comment and loses the import between them.
+    `const glob = "src/*.ts"; import { x } from "../ats_contracts/proposal.js"; const end = "*/";`,
     `const re = /[/*]/; const gate = verifyCommitAuthority;`,
   ];
   const clean = [
