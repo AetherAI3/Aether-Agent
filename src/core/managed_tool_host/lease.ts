@@ -60,7 +60,7 @@ export function validateHostLease(value: unknown, trust: TrustDocumentV1, now: n
     cloud_signature: f("cloud_signature", bytes64),
   };
   lifetime(L, lease.issued_at, "issued_at", lease.expires_at, MAX_LEASE_LIFETIME_MS, "5 minutes");
-  verifyCloudSignature(L, HOST_LEASE_SCHEMA, lease as unknown as Raw, trust);
+  verifyCloudSignature(L, HOST_LEASE_SCHEMA, lease as unknown as Raw, trust, now);
   fresh(L, lease.issued_at, "issued_at", lease.expires_at, now);
   return Object.freeze(lease);
 }

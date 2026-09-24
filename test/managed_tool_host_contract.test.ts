@@ -4,13 +4,13 @@ import { createHash, createPrivateKey, createPublicKey, verify as verifySignatur
 import { readFile, readdir } from "node:fs/promises";
 import { canonicalJson } from "../src/core/ats_contracts/canonical.js";
 import * as host from "../src/core/managed_tool_host/index.js";
-import { base64url, epochMs, httpsOrigin, id, schemaId, text, timestamp } from "../src/core/managed_tool_host/primitives.js";
+import { base64url, epochMs, httpsOrigin, id, safeDisplay, schemaId, text, timestamp } from "../src/core/managed_tool_host/primitives.js";
 
 // Reproduces test/fixtures/managed_tool_host_golden.json, which the independent
 // Python mirror (test/fixtures/managed_tool_host_verify.py) also reproduces.
 // Digests and signatures are recomputed here with node:crypto and the repo's
 // RFC 8785 encoder, never read back from the module under test, and every
-// refusal message is compared exactly. See docs/CONTRACTS.md section 5.
+// refusal message is compared exactly. See docs/CONTRACTS.md section 6.
 
 const FIXTURE_PATH = "test/fixtures/managed_tool_host_golden.json";
 const BUNDLE_DIR = "contracts/managed-ats-tool-host/v1";
@@ -23,43 +23,47 @@ const printableAscii = (bytes: Uint8Array): boolean => bytes.every((byte) => byt
 // Coverage floors are named constants equal to the coverage that exists when
 // the fixture was frozen, never counts derived from the lists they guard.
 const REJECT_FLOORS: Readonly<Record<string, number>> = {
-  trust: 24, device_proof: 35, host_open_proof: 19, observer_receipt: 21, runtime_capability: 24, registry: 49,
-  host_lease: 23, invocation: 37, cancellation: 13, result: 51, workspace_status_input: 5, workspace_status: 51,
+  trust: 30, device_proof: 39, host_open_proof: 20, observer_receipt: 21, runtime_capability: 24, registry: 49,
+  host_lease: 24, invocation: 37, cancellation: 13, result: 59, workspace_status_input: 5, workspace_status: 57,
 };
 const CROSS_REJECT_FLOORS: Readonly<Record<string, number>> = {
-  lease_binding: 12, invocation: 20, tool_arguments: 4, cancellation: 8, result: 20, tool_payload: 5, e1_canary: 9, capability_receipt: 7,
+  lease_binding: 13, invocation: 21, tool_arguments: 4, cancellation: 8, result: 21, tool_payload: 5, e1_canary: 11,
+  host_open_binding: 9, capability_receipt: 7,
 };
-const ACCEPT_FLOOR = 39;
-const CROSS_ACCEPT_FLOOR = 23;
-const RAW_ACCEPT_FLOOR = 12;
-const RAW_REJECT_FLOOR = 55;
-const PRIMITIVE_FLOOR = 114;
+const ACCEPT_FLOOR = 45;
+const CROSS_ACCEPT_FLOOR = 26;
+const RAW_ACCEPT_FLOOR = 13;
+const RAW_REJECT_FLOOR = 56;
+const PRIMITIVE_FLOOR = 151;
 const CANONICAL_FLOOR = 6;
+/** sha256 of the fixture with any CR removed (the committed LF blob); docs/CONTRACTS.md states the same value. */
+const FIXTURE_SHA256 = "eea8337d0c4caf0fe167ef5c7a144468118d34ee79a24b811d67212243688f60";
 
 const COMMON_RULES = ["not_object", "schema_absent", "schema_wrong_version", "schema_other_object", "unknown_field", "missing_field"];
 /** The brief's required single-cause coverage, per object. */
 const REQUIRED_REJECT_RULES: Readonly<Record<string, readonly string[]>> = {
-  trust: [...COMMON_RULES, "keys_count_min", "keys_count_max", "keys_duplicate", "keys_order", "key_algorithm", "key_short", "key_long", "key_noncanonical", "lifetime_order", "lifetime_max", "not_yet_valid", "expired"],
-  device_proof: [...COMMON_RULES, "device_namespace", "lifetime_max", "proof_digest_includes_signature", "proof_digest_omits_key_id", "signature_other_key", "signature_excludes_digest", "signature_unknown_key", "epoch_negative", "not_yet_valid", "expired"],
-  host_open_proof: [...COMMON_RULES, "challenge_42", "challenge_44", "signature_other_key", "signature_proof_schema", "device_proof_digest_other", "generation_zero"],
+  trust: [...COMMON_RULES, "keys_count_min", "keys_count_max", "keys_duplicate", "keys_order", "key_algorithm", "key_short", "key_long", "key_noncanonical", "key_all_zero", "key_identity", "key_order_8", "key_y_p_plus_1", "key_negative_zero", "lifetime_order", "lifetime_max", "not_yet_valid", "expired"],
+  device_proof: [...COMMON_RULES, "device_namespace", "device_key_all_zero", "lifetime_max", "proof_digest_includes_signature", "proof_digest_omits_key_id", "signature_other_key", "signature_excludes_digest", "signature_unknown_key", "epoch_negative", "not_yet_valid", "expired", "trust_expired"],
+  host_open_proof: [...COMMON_RULES, "challenge_42", "challenge_44", "signature_other_key", "signature_proof_schema", "device_proof_digest_other", "generation_zero", "forged_small_order_key"],
   observer_receipt: [...COMMON_RULES, "lifetime_max", "authentication_other", "digest_tampered", "challenge_42", "expired"],
   runtime_capability: [...COMMON_RULES, "ops_extra", "ops_empty", "ops_other_version", "live_true", "lifetime_max", "attestation_self", "mode_live", "grants_true", "digest_tampered", "expired"],
   registry: [...COMMON_RULES, "tools_empty", "tools_33", "tools_unsorted", "tools_duplicate", "tool_name_uppercase", "tool_version_zero", "tool_version_65536", "tool_effect_write", "tool_dependency_outside_set", "tool_dependencies_empty", "tool_dependencies_7", "tool_data_class_outside_set", "tool_max_argument_bytes_below", "tool_max_argument_bytes_above", "tool_max_result_bytes_below", "tool_max_result_bytes_above", "tool_max_duration_ms_below", "tool_max_duration_ms_above", "lifetime_max", "grants_true", "tool_grants_true", "digest_tampered"],
-  host_lease: [...COMMON_RULES, "caps_extra", "caps_empty", "max_calls_zero", "max_calls_257", "lifetime_max", "grants_true", "signature_other_key", "signature_unknown_key", "expired"],
+  host_lease: [...COMMON_RULES, "caps_extra", "caps_empty", "max_calls_zero", "max_calls_257", "lifetime_max", "grants_true", "signature_other_key", "signature_unknown_key", "expired", "trust_expired"],
   invocation: [...COMMON_RULES, "nonce_42", "nonce_44", "sequence_zero", "deadline_equal", "deadline_before", "args_object_depth_9", "args_over_65536_bytes", "args_digest_other", "digest_tampered", "tool_version_zero", "tool_version_65536"],
   cancellation: [...COMMON_RULES, "reason_other", "digest_tampered"],
-  result: [...COMMON_RULES, "state_unknown", "replay_unknown", "retry_unknown", "succeeded_payload_null", "refused_payload", "cancelled_payload", "deadline_exceeded_payload", "interrupted_payload", "error_on_success", "error_missing", "retry_redeliver_fresh", "interrupted_not_unavailable", "interrupted_retry_none", "bounded_bytes_off_by_one", "bounded_bytes_over_max", "evidence_17", "evidence_unsorted", "evidence_duplicate", "grants_true", "digest_tampered"],
+  result: [...COMMON_RULES, "state_unknown", "replay_unknown", "retry_unknown", "succeeded_payload_null", "refused_payload", "cancelled_payload", "deadline_exceeded_payload", "interrupted_payload", "error_on_success", "error_missing", "retry_redeliver_fresh", "interrupted_not_unavailable", "interrupted_retry_none", "bounded_bytes_off_by_one", "bounded_bytes_over_max", "evidence_17", "evidence_unsorted", "evidence_duplicate", "grants_true", "digest_tampered", "error_message_rlo", "error_message_line_separator", "error_message_tag_characters", "cancelled_code_other", "deadline_exceeded_code_other", "refused_code_cancelled", "refused_code_deadline_exceeded", "succeeded_new_call_after_recovery"],
   workspace_status_input: ["non_empty"],
-  workspace_status: [...COMMON_RULES, "oversize", "execution_authority_operator", "orders_enabled_true", "grants_true", "strategies_execution_enabled", "executable_evidence_available", "memory_state", "writer_lease", "strategies_state", "strategies_compiler", "research_configuration", "last_probe", "browser_state", "runtime_state", "runtime_mode", "configured_gib_zero", "configured_gib_16385", "strategies_count_10001", "diagnostics_17", "diagnostic_code_lowercase", "diagnostic_severity_fatal", "binding_digest_other", "status_digest_tampered"],
+  workspace_status: [...COMMON_RULES, "oversize", "execution_authority_operator", "orders_enabled_true", "grants_true", "strategies_execution_enabled", "executable_evidence_available", "memory_state", "writer_lease", "strategies_state", "strategies_compiler", "research_configuration", "last_probe", "browser_state", "runtime_state", "runtime_mode", "configured_gib_zero", "configured_gib_16385", "strategies_count_10001", "diagnostics_17", "diagnostic_code_lowercase", "diagnostic_severity_fatal", "binding_digest_other", "status_digest_tampered", "diagnostic_summary_rlo", "diagnostic_summary_zero_width_space", "diagnostic_summary_byte_order_mark", "diagnostic_summary_line_separator", "diagnostic_summary_tag_characters"],
 };
 const REQUIRED_CROSS_RULES: Readonly<Record<string, readonly string[]>> = {
-  lease_binding: ["registry_agent_id", "registry_session_generation", "registry_digest", "device_proof_cloud_origin_id", "device_proof_device_id", "outlives_registry", "outlives_device_proof", "outlives_trust"],
-  invocation: ["lease_session_generation", "lease_revocation_epoch", "lease_agent_id", "registry_not_leased", "unknown_tool_version", "input_schema_id", "input_schema_digest", "arguments_over_registered_bytes", "deadline_after_lease", "deadline_over_max_duration", "deadline_passed"],
+  lease_binding: ["registry_agent_id", "registry_session_generation", "registry_digest", "device_proof_cloud_origin_id", "device_proof_device_id", "device_proof_revocation_epoch", "outlives_registry", "outlives_device_proof", "outlives_trust"],
+  invocation: ["lease_session_generation", "lease_revocation_epoch", "lease_agent_id", "registry_not_leased", "unknown_tool_version", "input_schema_id", "input_schema_digest", "arguments_over_registered_bytes", "probe_arguments_multibyte_over_registered_bytes", "deadline_after_lease", "deadline_over_max_duration", "deadline_passed"],
   tool_arguments: ["e1_arguments_not_empty", "unregistered_input_schema", "drifted_input_schema_digest"],
   cancellation: ["cloud_tool_call_id", "invocation_digest", "lease_session_generation", "before_lease_window", "after_lease_window"],
-  result: ["invocation_invocation_digest", "invocation_arguments_digest", "output_schema_id", "output_schema_digest", "bounded_bytes_over_registered", "started_before_invocation", "completed_in_future"],
+  result: ["invocation_invocation_digest", "invocation_arguments_digest", "output_schema_id", "output_schema_digest", "bounded_bytes_over_registered", "started_before_invocation", "completed_in_future", "succeeded_after_deadline"],
   tool_payload: ["binding_other_agent", "payload_orders_enabled", "drifted_output_schema_digest"],
-  e1_canary: ["two_tools", "tool_name", "tool_version", "input_schema_id", "input_schema_digest", "output_schema_id", "output_schema_digest", "dependencies_extra", "dependencies_missing"],
+  e1_canary: ["two_tools", "tool_name", "tool_version", "input_schema_id", "input_schema_digest", "output_schema_id", "output_schema_digest", "dependencies_extra", "dependencies_missing", "data_classes_browser_observation", "data_classes_missing"],
+  host_open_binding: ["challenge", "registry_digest", "registry_agent_id", "registry_local_session_id", "registry_session_generation", "lease_conversation_id", "lease_agent_id", "lease_local_session_id", "lease_session_generation"],
   capability_receipt: ["attestation_ref", "capability_digest", "receipt_runtime_build_digest", "challenge", "loaded_build"],
 };
 
@@ -72,13 +76,15 @@ interface Patch {
   readonly grid?: { readonly rows: number; readonly cols: number; readonly unit: string; readonly length: number; readonly pad?: number };
   readonly nest?: { readonly depth: number; readonly kind: "array" | "object"; readonly leaf: unknown };
 }
-interface Context { readonly trust?: string; readonly device_proof?: string; readonly binding?: Doc }
+/** unvalidated_device_proof hands a raw document straight to validateHostOpenProof, as a caller that skipped validation would. */
+interface Context { readonly trust?: string; readonly device_proof?: string; readonly unvalidated_device_proof?: Doc; readonly binding?: Doc }
 interface AcceptVector { readonly id: string; readonly kind: string; readonly document: unknown; readonly now?: number; readonly context?: Context; readonly expect: { readonly canonical_sha256: string } }
 interface RejectVector { readonly id: string; readonly kind: string; readonly base: string; readonly rule: string; readonly patches: readonly Patch[]; readonly expect: string; readonly now?: number; readonly context?: Context; readonly exception?: string }
-interface Expected { readonly challenge: string; readonly runtime_build_digest: string }
+interface Expected { readonly challenge: string; readonly runtime_build_digest?: string }
 interface CrossAccept { readonly id: string; readonly check: string; readonly inputs: Readonly<Record<string, string>>; readonly now: number; readonly expected?: Expected }
 interface CrossReject { readonly id: string; readonly check: string; readonly base: string; readonly patches: Readonly<Record<string, readonly Patch[]>>; readonly expect: string; readonly inputs?: Readonly<Record<string, string>>; readonly now?: number; readonly expected?: Expected; readonly exception?: string }
-interface Frame { readonly text?: string; readonly base64?: string; readonly generate?: { readonly string_member?: number; readonly nest?: number; readonly kind?: string } }
+interface FrameSpec { readonly string_member?: number; readonly key?: string; readonly unit?: string; readonly nest?: number; readonly kind?: string }
+interface Frame { readonly text?: string; readonly base64?: string; readonly generate?: FrameSpec }
 interface Fixture {
   readonly schema: string;
   readonly canonical_profile: string;
@@ -175,15 +181,13 @@ function refusal(action: () => unknown): string | null {
     action();
     return null;
   } catch (error) {
-    if (!(error instanceof host.ToolHostContractError)) return `not a ToolHostContractError: ${String(error)}`;
-    return error.message;
+    return error instanceof host.ToolHostContractError ? error.message : `not a ToolHostContractError: ${String(error)}`;
   }
 }
 
 // --- Validation by kind ----------------------------------------------------------
 
 interface Resolved { trust?: host.TrustDocumentV1; device_proof?: host.DeviceProofV1; binding?: host.WorkspaceStatusBinding }
-
 function need<T>(value: T | undefined, what: string): T {
   if (value === undefined) throw new Error(`vector is missing ${what}`);
   return value;
@@ -223,6 +227,7 @@ function resolveContext(fixture: Fixture, context: Context | undefined): Resolve
     const proof = acceptNamed(fixture, context.device_proof);
     resolved.device_proof = host.validateDeviceProof(proof.document, need(resolveContext(fixture, proof.context).trust, "trust"), need(proof.now, "now"));
   }
+  if (context?.unvalidated_device_proof) resolved.device_proof = context.unvalidated_device_proof as unknown as host.DeviceProofV1;
   if (context?.binding) resolved.binding = context.binding as unknown as host.WorkspaceStatusBinding;
   return resolved;
 }
@@ -238,22 +243,23 @@ test("the golden fixture pins its schema, canonical profile and clock skew", asy
   assert.equal(printableAscii(raw), true, "fixture must be printable ASCII");
 });
 
+test("the fixture's LF-normalized sha256 is pinned here and in docs/CONTRACTS.md", async () => {
+  const raw = await readFile(FIXTURE_PATH);
+  const normalized = raw.filter((byte) => byte !== 13);
+  assert.equal(createHash("sha256").update(normalized).digest("hex"), FIXTURE_SHA256, "fixture sha256 differs from the pinned value");
+  assert.ok((await readFile("docs/CONTRACTS.md", "utf8")).includes(FIXTURE_SHA256), "docs/CONTRACTS.md must state the fixture sha256");
+});
+
 test("every vector id, name and key label is unique within its section", async () => {
   const fixture = await loadFixture();
-  const d = fixture.derivations;
-  const sections: Readonly<Record<string, readonly string[]>> = {
+  const sections: Record<string, readonly string[]> = {
     keys: fixture.keys.map((key) => key.label),
     canonical: fixture.canonical.map((row) => row.name),
-    account_scope: d.account_scope.map((row) => row.name),
-    account_scope_reject: d.account_scope_reject.map((row) => row.name),
-    binding: d.binding.map((row) => row.name),
-    binding_reject: d.binding_reject.map((row) => row.name),
-    arguments: d.arguments.map((row) => row.name),
-    arguments_reject: d.arguments_reject.map((row) => row.name),
     raw: [...fixture.raw_accept, ...fixture.raw_reject].map((vector) => vector.id),
     objects: [...fixture.accept, ...fixture.reject].map((vector) => vector.id),
     cross: [...fixture.cross.accept, ...fixture.cross.reject].map((vector) => vector.id),
   };
+  for (const [name, rows] of Object.entries(fixture.derivations)) sections[name] = (rows as readonly { readonly name: string }[]).map((row) => row.name);
   const repeated = Object.entries(sections).flatMap(([section, names]) =>
     names.filter((name, index) => names.indexOf(name) !== index).map((name) => `${section}: ${name}`),
   );
@@ -486,6 +492,8 @@ test("primitive boundaries: timestamps, text, IDs, origins, base64url and schema
     base64url_32: (value) => base64url(value, "Value", 32),
     base64url_64: (value) => base64url(value, "Value", 64),
     schema_id: (value) => schemaId(value, "Value"),
+    safe_display: (value) => safeDisplay(value, "Value"),
+    ed25519_key: (value) => host.ed25519Key(value, "Value"),
   };
   const problems: string[] = [];
   fixture.primitives.forEach((entry, index) => {
@@ -545,7 +553,15 @@ function frameBytes(frame: Frame): Uint8Array {
   if (frame.text !== undefined) return Buffer.from(frame.text, "latin1");
   if (frame.base64 !== undefined) return Buffer.from(frame.base64, "base64");
   const spec = frame.generate;
-  if (spec?.string_member !== undefined) return Buffer.from(`{"k":"${"x".repeat(spec.string_member - 8)}"}`, "utf8");
+  if (spec?.string_member !== undefined) {
+    // {"<key>":"<unit repeated>"} of exactly string_member UTF-8 bytes.
+    const key = spec.key ?? "k";
+    const unit = spec.unit ?? "x";
+    const room = spec.string_member - Buffer.byteLength(`{"${key}":""}`, "utf8");
+    const size = Buffer.byteLength(unit, "utf8");
+    if (room < 0 || room % size !== 0) throw new Error("string_member does not divide into whole units");
+    return Buffer.from(`{"${key}":"${unit.repeat(room / size)}"}`, "utf8");
+  }
   if (spec?.nest !== undefined) {
     return Buffer.from(spec.kind === "array" ? "[".repeat(spec.nest) + "]".repeat(spec.nest) : `{"a":`.repeat(spec.nest) + "0" + "}".repeat(spec.nest), "utf8");
   }
@@ -671,10 +687,11 @@ function validateInputs(fixture: Fixture, refsByName: Readonly<Record<string, st
   const out: Inputs = {};
   if (raw["trust"] !== undefined) out["trust"] = host.validateTrustDocument(raw["trust"], now);
   const trust = out["trust"] as host.TrustDocumentV1 | undefined;
+  if (raw["device_proof"] !== undefined) out["device_proof"] = host.validateDeviceProof(raw["device_proof"], need(trust, "trust input"), now);
   for (const [name, value] of Object.entries(raw)) {
     switch (name) {
-      case "trust": break;
-      case "device_proof": out[name] = host.validateDeviceProof(value, need(trust, "trust input"), now); break;
+      case "trust": case "device_proof": break;
+      case "host_open": out[name] = host.validateHostOpenProof(value, need(out["device_proof"] as host.DeviceProofV1 | undefined, "device proof input")); break;
       case "lease": out[name] = host.validateHostLease(value, need(trust, "trust input"), now); break;
       case "registry": out[name] = host.validateRegistry(value, now); break;
       case "invocation": out[name] = host.validateInvocation(value); break;
@@ -698,7 +715,8 @@ function runCheck(check: string, inputs: Inputs, now: number, expected: Expected
     case "result": return host.checkResult(v("result"), v("invocation"), v("registry"), now);
     case "tool_payload": return host.checkToolPayload(v("result"), v("invocation"), v("registry"));
     case "e1_canary": return host.assertE1CanaryRegistry(v("registry"));
-    case "capability_receipt": return host.checkCapabilityReceipt(v("capability"), v("receipt"), need(expected, "expected"));
+    case "host_open_binding": return host.checkHostOpenBinding(v("host_open"), v("registry"), v("lease"), need(expected, "expected"));
+    case "capability_receipt": return host.checkCapabilityReceipt(v("capability"), v("receipt"), need(expected, "expected") as host.CapabilityExpectation);
     default: throw new Error(`unknown cross check ${check}`);
   }
 }
@@ -763,14 +781,15 @@ test("the managed tool host module performs no I/O, imports only what the brief 
   const modules = (await readdir(MODULE_DIR)).filter((name) => name.endsWith(".ts"));
   assert.ok(modules.includes("strict_json.ts") && modules.includes("cross.ts"), "module files missing from the scan");
   const allowed = new Set(["node:crypto", "../ats_contracts/canonical.js"]);
-  const forbidden = ["node:fs", "node:net", "node:http", "node:https", "node:tls", "node:dgram", "node:child_process", "node:worker_threads", "process.env", "fetch(", "require(", "import("];
+  const forbidden = ["node:fs", "node:net", "node:http", "node:https", "node:tls", "node:dgram", "node:child_process", "node:worker_threads", "process.", "fetch(", "require(", "import("];
   const problems: string[] = [];
   for (const name of modules) {
     const bytes = await readFile(`${MODULE_DIR}/${name}`);
     if (!printableAscii(bytes)) problems.push(`${name}: not printable ASCII`);
     const source = bytes.toString("utf8");
     for (const token of forbidden) if (source.includes(token)) problems.push(`${name}: reaches for ${token}`);
-    for (const match of source.matchAll(/from "([^"]+)"/g)) {
+    // Every static specifier: `from "x"`, `from 'x'` and bare side-effect imports such as `import "fs";`.
+    for (const match of source.matchAll(/\b(?:from|import)\s*["']([^"']+)["']/g)) {
       const specifier = match[1]!;
       if (!allowed.has(specifier) && !(specifier.startsWith("./") && specifier.endsWith(".js"))) problems.push(`${name}: imports ${specifier}`);
     }

@@ -3,13 +3,13 @@
 // Closed validators, golden-vector-pinned digests and Ed25519 checks for the
 // E1 schema bundle in contracts/managed-ats-tool-host/v1. Nothing here opens a
 // transport, performs I/O, registers a tool or grants execution authority.
-// Spec: docs/specs/2026-09-22-managed-ats-tool-host-v1.md. Guide: docs/CONTRACTS.md section 5.
+// Spec: docs/specs/2026-09-22-managed-ats-tool-host-v1.md. Guide: docs/CONTRACTS.md section 6.
 
 export * from "./vocabulary.js";
 export { ToolHostContractError } from "./errors.js";
 export { parseFrame } from "./strict_json.js";
 export {
-  accountScopeDigest, argumentsDigest, digestFor as commonDigest, ed25519PublicKey, ed25519Sign, ed25519Verify,
+  accountScopeDigest, argumentsDigest, digestFor as commonDigest, ed25519Key, ed25519PublicKey, ed25519Sign, ed25519Verify,
   preimage as digestPreimage, schemaDigest, workspaceBindingDigest, type WorkspaceStatusBinding,
 } from "./digest.js";
 export { validateTrustDocument, type TrustDocumentV1, type TrustKeyV1 } from "./trust.js";
@@ -21,6 +21,6 @@ export { validateCancellation, validateInvocation, type ToolCancellationV1, type
 export { validateResult, type ResultErrorV1, type ToolResultV1 } from "./result.js";
 export { validateWorkspaceStatus, validateWorkspaceStatusInput, type WorkspaceStatusV1 } from "./workspace_status.js";
 export {
-  assertE1CanaryRegistry, checkCancellation, checkCapabilityReceipt, checkInvocation, checkLeaseBinding, checkResult,
-  checkToolArguments, checkToolPayload, type CapabilityExpectation,
+  assertE1CanaryRegistry, checkCancellation, checkCapabilityReceipt, checkHostOpenBinding, checkInvocation, checkLeaseBinding,
+  checkResult, checkToolArguments, checkToolPayload, type CapabilityExpectation, type HostOpenExpectation,
 } from "./cross.js";

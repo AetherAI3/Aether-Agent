@@ -2,9 +2,10 @@
 
 Independent of Node's OpenSSL-backed implementation, so agreement on the
 golden signatures is evidence rather than a tautology. verify() follows RFC
-8032 section 5.1.7: both points must decode (y < p, and no x = 0 with the sign
-bit set), S must be below the group order L, and [S]B must equal R + [k]A.
-sign() exists only to self-check the fixture's test keys.
+8032 section 5.1.7, cofactorless: the key must not be weak (weak_key), both
+points must decode (y < p, and no x = 0 with the sign bit set), S must be below
+the group order L, and [S]B must equal R + [k]A. sign() exists only to
+self-check the fixture's test keys.
 """
 
 from __future__ import annotations
@@ -16,6 +17,24 @@ L = 2**252 + 27742317777372353535851937790883648493
 D = (-121665 * pow(121666, P - 2, P)) % P
 SQRT_M1 = pow(2, (P - 1) // 4, P)
 IDENTITY = (0, 1, 1, 0)
+# libsodium's small-order blocklist: every torsion point by y, plus y = p and y = p + 1.
+SMALL_ORDER = frozenset(bytes.fromhex(entry) for entry in (
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0100000000000000000000000000000000000000000000000000000000000000",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+))
+
+
+def weak_key(public: bytes) -> bool:
+    """A 32-byte encoding that is non-canonical (y >= p) or blocklisted, both judged with the sign bit masked."""
+    if len(public) != 32:
+        return False
+    masked = public[:31] + bytes([public[31] & 0x7F])
+    return int.from_bytes(masked, "little") >= P or masked in SMALL_ORDER
 
 
 def _inverse(x: int) -> int:
@@ -117,7 +136,7 @@ def sign(seed: bytes, message: bytes) -> bytes:
 
 
 def verify(public: bytes, message: bytes, signature: bytes) -> bool:
-    if len(public) != 32 or len(signature) != 64:
+    if len(public) != 32 or len(signature) != 64 or weak_key(public):
         return False
     point_a = _decompress(public)
     point_r = _decompress(signature[:32])

@@ -17,6 +17,7 @@ const SCHEMA_ID = new RegExp("^aether[.][a-z0-9.-]+/[1-9][0-9]*$");
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const DIAGNOSTIC_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const PRINTABLE_ASCII = /^[ -~]{1,64}$/;
+const DISPLAY = /^[ -~]*$/;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const TIMESTAMP = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})[.]([0-9]{3})Z$/;
 const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
@@ -195,7 +196,7 @@ function stringHygiene(value: string, path: string): void {
   if (hasControl(value)) fail(`${path} contains a control character.`);
 }
 
-/** Bounded display text; length counts Unicode scalar values, not UTF-16 units. */
+/** Bounded text; length counts Unicode scalar values, not UTF-16 units. */
 export function text(value: unknown, path: string, min: number, max: number): string {
   if (typeof value !== "string") fail(`${path} must be a string.`);
   stringHygiene(value, path);
@@ -204,7 +205,20 @@ export function text(value: unknown, path: string, min: number, max: number): st
   return value;
 }
 
-export const safeText: Check<string> = (value, path) => text(value, path, 1, MAX_STRING_SCALARS);
+/** 1 to 256 scalars with no Cc or unpaired surrogate: account_subject, which is hashed and never displayed. */
+export const boundedText: Check<string> = (value, path) => text(value, path, 1, MAX_STRING_SCALARS);
+
+/**
+ * aether.safe-display/1 (error.message, diagnostics[].summary): 1 to 256
+ * printable ASCII characters, U+0020 to U+007E. Nothing a model or terminal
+ * could render invisibly, and no Unicode table to drift between languages.
+ */
+export function safeDisplay(value: unknown, path: string): string {
+  if (typeof value !== "string") fail(`${path} must be a string.`);
+  if (!DISPLAY.test(value)) fail(`${path} must contain only printable ASCII characters.`);
+  if (value.length < 1 || value.length > MAX_STRING_SCALARS) fail(`${path} must be 1 to 256 characters.`);
+  return value;
+}
 
 /** Unpadded base64url of exactly 32 or 64 bytes, in its single canonical spelling. */
 export function base64url(value: unknown, path: string, bytes: 32 | 64): string {

@@ -33,6 +33,8 @@ export const WORKSPACE_STATUS_SCHEMA_DIGEST = "sha256:7b896662d6f34cc8da77c31b65
 export const E1_TOOL_NAME = "ats_workspace_status";
 export const E1_TOOL_VERSION = 1;
 export const E1_TOOL_DEPENDENCIES = ["ats_profile", "foreground_session", "verified_account"] as const;
+/** Spec 2.4: E1 cannot advertise browser observation. */
+export const E1_TOOL_DATA_CLASSES = ["ats_status", "local_status"] as const;
 
 export const MAX_FRAME_BYTES = 262_144;
 export const MAX_FRAME_DEPTH = 16;

@@ -5,7 +5,7 @@
 
 import { fail } from "./errors.js";
 import { canonicalBytes } from "./digest.js";
-import type { DeviceProofV1 } from "./device.js";
+import type { DeviceProofV1, HostOpenProofV1 } from "./device.js";
 import type { ObserverReceiptV1, RuntimeCapabilityV1 } from "./ats_channel.js";
 import type { ToolCancellationV1, ToolInvocationV1 } from "./invocation.js";
 import type { HostSessionLeaseV1 } from "./lease.js";
@@ -15,13 +15,16 @@ import type { ToolResultV1 } from "./result.js";
 import type { TrustDocumentV1 } from "./trust.js";
 import { validateWorkspaceStatus, validateWorkspaceStatusInput } from "./workspace_status.js";
 import {
-  CLOCK_SKEW_MS, E1_TOOL_DEPENDENCIES, E1_TOOL_NAME, E1_TOOL_VERSION, WORKSPACE_STATUS_INPUT_SCHEMA,
+  CLOCK_SKEW_MS, E1_TOOL_DATA_CLASSES, E1_TOOL_DEPENDENCIES, E1_TOOL_NAME, E1_TOOL_VERSION, WORKSPACE_STATUS_INPUT_SCHEMA,
   WORKSPACE_STATUS_INPUT_SCHEMA_DIGEST, WORKSPACE_STATUS_SCHEMA, WORKSPACE_STATUS_SCHEMA_DIGEST,
 } from "./vocabulary.js";
 
 function same(actual: unknown, expected: unknown, message: string): void {
   if (actual !== expected) fail(message);
 }
+
+const sameList = (actual: readonly string[], expected: readonly string[]): boolean =>
+  actual.length === expected.length && expected.every((entry, i) => actual[i] === entry);
 
 function toolFor(invocation: ToolInvocationV1, registry: ToolRegistryManifestV1, message: string): ToolEntryV1 {
   const tool = registry.tools.find((entry) => entry.name === invocation.tool_name && entry.version === invocation.tool_version);
@@ -32,13 +35,16 @@ function toolFor(invocation: ToolInvocationV1, registry: ToolRegistryManifestV1,
 const UNLISTED_INVOCATION = "Invocation names a tool the registry does not list.";
 const UNLISTED_RESULT = "Result names a tool the registry does not list.";
 
-/** A lease routes to exactly its registry's scope and device, and never outlives registry, device proof or keys. */
+/**
+ * A lease routes to exactly its registry's scope and device, is fenced by the
+ * device proof's revocation_epoch, and never outlives registry, device proof or keys.
+ */
 export function checkLeaseBinding(lease: HostSessionLeaseV1, registry: ToolRegistryManifestV1, deviceProof: DeviceProofV1, trust: TrustDocumentV1): void {
   for (const field of ["account_scope_digest", "agent_id", "device_id", "local_session_id", "session_generation"] as const) {
     same(lease[field], registry[field], `Host lease ${field} does not match the registry.`);
   }
   same(lease.registry_digest, registry.registry_digest, "Host lease registry_digest does not match the registry.");
-  for (const field of ["cloud_origin_id", "account_scope_digest", "device_id"] as const) {
+  for (const field of ["cloud_origin_id", "account_scope_digest", "device_id", "revocation_epoch"] as const) {
     same(lease[field], deviceProof[field], `Host lease ${field} does not match the device proof.`);
   }
   const expires = epochMs(lease.expires_at);
@@ -95,7 +101,11 @@ const RESULT_IDENTITY = [
   "invocation_digest", "arguments_digest",
 ] as const;
 
-/** A result answers exactly its invocation, under the registered output identity and size bound. */
+/**
+ * A result answers exactly its invocation, under the registered output
+ * identity and size bound. The deadline wins: a succeeded result may not
+ * complete later than deadline_at plus skew.
+ */
 export function checkResult(result: ToolResultV1, invocation: ToolInvocationV1, registry: ToolRegistryManifestV1, now: number): void {
   clock(now);
   for (const field of RESULT_IDENTITY) same(result[field], invocation[field], `Result ${field} does not match the invocation.`);
@@ -105,8 +115,12 @@ export function checkResult(result: ToolResultV1, invocation: ToolInvocationV1, 
     same(result.output_schema_digest, tool.output_schema_digest, "Result output_schema_digest does not match the registered tool.");
   }
   if (result.bounded_bytes > tool.max_result_bytes) fail("Result bounded_bytes exceeds the registered max_result_bytes.");
+  const completed = epochMs(result.completed_at);
   if (epochMs(result.started_at) < epochMs(invocation.issued_at) - CLOCK_SKEW_MS) fail("Result started_at is earlier than the invocation issued_at.");
-  if (epochMs(result.completed_at) > now + CLOCK_SKEW_MS) fail("Result completed_at is in the future.");
+  if (completed > now + CLOCK_SKEW_MS) fail("Result completed_at is in the future.");
+  if (result.state === "succeeded" && completed > epochMs(invocation.deadline_at) + CLOCK_SKEW_MS) {
+    fail("Result completed_at is later than the invocation deadline.");
+  }
 }
 
 /** A succeeded payload against the exact registered output schema, bound to the invocation's scope. */
@@ -125,7 +139,11 @@ export function checkToolPayload(result: ToolResultV1, invocation: ToolInvocatio
   });
 }
 
-/** The E1 canary manifest: exactly ats_workspace_status version 1 with the frozen section 11 schemas. */
+/**
+ * The E1 canary manifest: exactly ats_workspace_status version 1 with the
+ * frozen section 11 schemas, dependencies and data classes (spec 2.4: no
+ * browser observation).
+ */
 export function assertE1CanaryRegistry(registry: ToolRegistryManifestV1): void {
   if (registry.tools.length !== 1) fail("E1 canary registry must list exactly one tool.");
   const tool = registry.tools[0] as ToolEntryV1;
@@ -135,10 +153,8 @@ export function assertE1CanaryRegistry(registry: ToolRegistryManifestV1): void {
   if (tool.input_schema_digest !== WORKSPACE_STATUS_INPUT_SCHEMA_DIGEST) fail("E1 canary tool input_schema_digest must match the frozen schema.");
   if (tool.output_schema_id !== WORKSPACE_STATUS_SCHEMA) fail("E1 canary tool output_schema_id must be aether.ats.workspace-status/1.");
   if (tool.output_schema_digest !== WORKSPACE_STATUS_SCHEMA_DIGEST) fail("E1 canary tool output_schema_digest must match the frozen schema.");
-  const dependencies = tool.dependencies;
-  if (dependencies.length !== E1_TOOL_DEPENDENCIES.length || !E1_TOOL_DEPENDENCIES.every((entry, i) => dependencies[i] === entry)) {
-    fail("E1 canary tool dependencies must be ats_profile, foreground_session, verified_account.");
-  }
+  if (!sameList(tool.dependencies, E1_TOOL_DEPENDENCIES)) fail("E1 canary tool dependencies must be ats_profile, foreground_session, verified_account.");
+  if (!sameList(tool.data_classes, E1_TOOL_DATA_CLASSES)) fail("E1 canary tool data_classes must be ats_status, local_status.");
 }
 
 export interface CapabilityExpectation {
@@ -157,4 +173,24 @@ export function checkCapabilityReceipt(capability: RuntimeCapabilityV1, receipt:
   }
   same(receipt.challenge, expected.challenge, "Observer receipt challenge does not match the challenge sent.");
   same(capability.runtime_build_digest, expected.runtime_build_digest, "Runtime capability runtime_build_digest does not match the loaded build.");
+}
+
+export interface HostOpenExpectation {
+  /** The 43-character challenge Cloud issued for this host open. */
+  readonly challenge: string;
+}
+
+/**
+ * A host-open proof (validated against the device proof it names) opens
+ * exactly this registry's session and this lease's conversation, for the
+ * challenge Cloud issued.
+ */
+export function checkHostOpenBinding(hostOpen: HostOpenProofV1, registry: ToolRegistryManifestV1, lease: HostSessionLeaseV1, expected: HostOpenExpectation): void {
+  same(hostOpen.challenge, expected.challenge, "Host-open proof challenge does not match the challenge issued.");
+  for (const field of ["agent_id", "local_session_id", "session_generation", "registry_digest"] as const) {
+    same(hostOpen[field], registry[field], `Host-open proof ${field} does not match the registry.`);
+  }
+  for (const field of ["conversation_id", "agent_id", "local_session_id", "session_generation"] as const) {
+    same(hostOpen[field], lease[field], `Host-open proof ${field} does not match the host lease.`);
+  }
 }

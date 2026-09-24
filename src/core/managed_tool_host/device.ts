@@ -6,7 +6,7 @@
 // of the seven signed fields: a different prefix from the proof's own schema.
 
 import { fail } from "./errors.js";
-import { digestFor, ed25519Verify, omit, preimage } from "./digest.js";
+import { digestFor, ed25519Key, ed25519Verify, omit, preimage } from "./digest.js";
 import {
   bytes32, bytes64, clock, decodeBase64url, deviceId, digest, envelope, fieldOf, fresh, httpsOrigin, id, lifetime,
   matchDigest, positive53, timestamp, uint53, type Raw,
@@ -55,7 +55,7 @@ export function validateDeviceProof(value: unknown, trust: TrustDocumentV1, now:
     cloud_origin_id: f("cloud_origin_id", httpsOrigin),
     account_scope_digest: f("account_scope_digest", digest),
     device_id: f("device_id", deviceId),
-    device_public_key: f("device_public_key", bytes32),
+    device_public_key: f("device_public_key", ed25519Key),
     issued_at: f("issued_at", timestamp),
     expires_at: f("expires_at", timestamp),
     revocation_epoch: f("revocation_epoch", uint53),
@@ -65,7 +65,7 @@ export function validateDeviceProof(value: unknown, trust: TrustDocumentV1, now:
   };
   lifetime(DL, proof.issued_at, "issued_at", proof.expires_at, MAX_DEVICE_PROOF_LIFETIME_MS, "30 days");
   matchDigest(DL, "proof_digest", proof.proof_digest, digestFor(DEVICE_PROOF_SCHEMA, omit(proof, ["proof_digest", "cloud_signature"])));
-  verifyCloudSignature(DL, DEVICE_PROOF_SCHEMA, proof as unknown as Raw, trust);
+  verifyCloudSignature(DL, DEVICE_PROOF_SCHEMA, proof as unknown as Raw, trust, now);
   fresh(DL, proof.issued_at, "issued_at", proof.expires_at, now);
   return Object.freeze(proof);
 }

@@ -1,5 +1,5 @@
 // Refusals of the managed ATS tool host contract v1
-// (docs/specs/2026-09-22-managed-ats-tool-host-v1.md, docs/CONTRACTS.md section 5).
+// (docs/specs/2026-09-22-managed-ats-tool-host-v1.md, docs/CONTRACTS.md section 6).
 //
 // Every refusal is a ToolHostContractError whose message is fixed text naming
 // the object and field path. It never echoes the offending value: a refused

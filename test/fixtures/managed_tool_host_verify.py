@@ -6,7 +6,7 @@
 Runs every vector in managed_tool_host_golden.json through the independent
 mirror (managed_tool_host_wire, _objects, _cross and _ed25519: stdlib only,
 nothing shared with TypeScript) and requires identical canonical bytes,
-digests, signatures and refusal messages; see docs/CONTRACTS.md section 5.
+digests, signatures and refusal messages; see docs/CONTRACTS.md section 6.
 Exits non-zero on any mismatch and prints a one-line summary with counts.
 """
 
@@ -32,15 +32,17 @@ BUNDLE = HERE.parents[1] / "contracts" / "managed-ats-tool-host" / "v1"
 
 # Named floors equal to the coverage frozen with the fixture, never derived from it.
 REJECT_FLOORS = {
-    "trust": 24, "device_proof": 35, "host_open_proof": 19, "observer_receipt": 21, "runtime_capability": 24,
-    "registry": 49, "host_lease": 23, "invocation": 37, "cancellation": 13, "result": 51,
-    "workspace_status_input": 5, "workspace_status": 51,
+    "trust": 30, "device_proof": 39, "host_open_proof": 20, "observer_receipt": 21, "runtime_capability": 24,
+    "registry": 49, "host_lease": 24, "invocation": 37, "cancellation": 13, "result": 59,
+    "workspace_status_input": 5, "workspace_status": 57,
 }
 CROSS_REJECT_FLOORS = {
-    "lease_binding": 12, "invocation": 20, "tool_arguments": 4, "cancellation": 8, "result": 20, "tool_payload": 5,
-    "e1_canary": 9, "capability_receipt": 7,
+    "lease_binding": 13, "invocation": 21, "tool_arguments": 4, "cancellation": 8, "result": 21, "tool_payload": 5,
+    "e1_canary": 11, "host_open_binding": 9, "capability_receipt": 7,
 }
-SECTION_FLOORS = {"accept": 39, "cross_accept": 23, "raw_accept": 12, "raw_reject": 55, "primitives": 114, "canonical": 6}
+SECTION_FLOORS = {"accept": 45, "cross_accept": 26, "raw_accept": 13, "raw_reject": 56, "primitives": 151, "canonical": 6}
+# sha256 of the fixture with any CR removed (the committed LF blob); the TypeScript test pins the same value.
+FIXTURE_SHA256 = "eea8337d0c4caf0fe167ef5c7a144468118d34ee79a24b811d67212243688f60"
 DERIVATION_SECTIONS = ("account_scope", "account_scope_reject", "binding", "binding_reject", "arguments", "arguments_reject")
 SELF_DIGESTS = {
     "device_proof": ("proof_digest", ("proof_digest", "cloud_signature"), o.DEVICE_PROOF_SCHEMA),
@@ -63,10 +65,13 @@ def b64url(data: bytes) -> str:
 
 
 def refusal(action: Callable[[], Any]) -> str | None:
+    """The refusal message, None when accepted; any other exception is reported against this vector alone."""
     try:
         action()
     except w.ContractError as error:
         return str(error)
+    except Exception as error:  # a crash is a finding for this vector, not a reason to stop the section
+        return f"not a ContractError: {type(error).__name__}: {error}"
     return None
 
 
@@ -126,6 +131,8 @@ class Harness:
         if spec and "device_proof" in spec:
             proof = self.accept[spec["device_proof"]]
             resolved["device_proof"] = o.validate_device_proof(proof["document"], self.context(proof.get("context"))["trust"], proof["now"])
+        if spec and "unvalidated_device_proof" in spec:
+            resolved["device_proof"] = spec["unvalidated_device_proof"]  # a caller that skipped validation
         if spec and "binding" in spec:
             resolved["binding"] = spec["binding"]
         return resolved
@@ -158,6 +165,8 @@ class Harness:
         raw = FIXTURE.read_bytes()
         if any(b > 126 or (b < 32 and b not in (10, 13)) for b in raw):
             self.problem("fixture is not printable ASCII")
+        if hashlib.sha256(raw.replace(bytes([13]), b"")).hexdigest() != FIXTURE_SHA256:
+            self.problem("fixture sha256 differs from the pinned value")
         for name, floor in SECTION_FLOORS.items():
             count = len(fixture["cross"]["accept"]) if name == "cross_accept" else len(fixture[name])
             if count < floor:
@@ -230,6 +239,8 @@ class Harness:
             "base64url_32": lambda value: w.base64url(value, "Value", 32),
             "base64url_64": lambda value: w.base64url(value, "Value", 64),
             "schema_id": lambda value: w.schema_id(value, "Value"),
+            "safe_display": lambda value: w.safe_display(value, "Value"),
+            "ed25519_key": lambda value: o.ed25519_key(value, "Value"),
         }
         for index, entry in enumerate(self.fixture["primitives"]):
             check = checks[entry["check"]]
@@ -275,7 +286,13 @@ class Harness:
             return base64.b64decode(frame["base64"])
         spec = frame["generate"]
         if "string_member" in spec:
-            return ('{"k":"' + "x" * (spec["string_member"] - 8) + '"}').encode("utf-8")
+            # {"<key>":"<unit repeated>"} of exactly string_member UTF-8 bytes.
+            key, unit = spec.get("key", "k"), spec.get("unit", "x")
+            room = spec["string_member"] - len(('{"' + key + '":""}').encode("utf-8"))
+            size = len(unit.encode("utf-8"))
+            if room < 0 or room % size:
+                raise ValueError("string_member does not divide into whole units")
+            return ('{"' + key + '":"' + unit * (room // size) + '"}').encode("utf-8")
         depth = spec["nest"]
         return ("[" * depth + "]" * depth if spec["kind"] == "array" else '{"a":' * depth + "0" + "}" * depth).encode("utf-8")
 
@@ -359,11 +376,13 @@ class Harness:
         out: dict = {}
         if "trust" in raw:
             out["trust"] = o.validate_trust_document(raw["trust"], now)
+        if "device_proof" in raw:
+            out["device_proof"] = o.validate_device_proof(raw["device_proof"], out["trust"], now)
         for name, value in raw.items():
-            if name == "trust":
+            if name in ("trust", "device_proof"):
                 continue
             out[name] = {
-                "device_proof": lambda: o.validate_device_proof(value, out["trust"], now),
+                "host_open": lambda: o.validate_host_open_proof(value, out["device_proof"]),
                 "lease": lambda: o.validate_host_lease(value, out["trust"], now),
                 "registry": lambda: o.validate_registry(value, now),
                 "invocation": lambda: o.validate_invocation(value),
@@ -384,6 +403,7 @@ class Harness:
             "result": lambda: c.check_result(v["result"], v["invocation"], v["registry"], now),
             "tool_payload": lambda: c.check_tool_payload(v["result"], v["invocation"], v["registry"]),
             "e1_canary": lambda: c.assert_e1_canary_registry(v["registry"]),
+            "host_open_binding": lambda: c.check_host_open_binding(v["host_open"], v["registry"], v["lease"], expected),
             "capability_receipt": lambda: c.check_capability_receipt(v["capability"], v["receipt"], expected),
         }[check]()
 

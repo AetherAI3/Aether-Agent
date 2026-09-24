@@ -1,14 +1,15 @@
 // ToolResultV1 (spec section 10): the terminal record of one call. A
 // succeeded result carries payload and output schema identity and no error;
-// every other state carries an error and none of the three. The registered
-// output schema, max_result_bytes and invocation identity are checkResult and
-// checkToolPayload (cross.ts).
+// every other state carries an error and none of the three. cancelled and
+// deadline_exceeded carry their own error code, which refused never uses. The
+// registered output schema, max_result_bytes, deadline and invocation identity
+// are checkResult and checkToolPayload (cross.ts).
 
 import { fail } from "./errors.js";
 import { canonicalBytes, digestFor, omit } from "./digest.js";
 import {
   closed, constant, digest, envelope, epochMs, fieldOf, id, jsonValue, matchDigest, nullable, oneOf, positive53, range,
-  safeText, schemaId, stringSet, timestamp, toolName, toolVersion, uint53, type Json,
+  safeDisplay, schemaId, stringSet, timestamp, toolName, toolVersion, uint53, type Json,
 } from "./primitives.js";
 import {
   FAILURE_CODES, MAX_EVIDENCE_REFS, MAX_PAYLOAD_DEPTH, MAX_RESULT_BYTES, REDACTION_PROFILE, REPLAY_STATUSES,
@@ -57,7 +58,7 @@ const L = "Result";
 
 function resultError(value: unknown, path: string): ResultErrorV1 {
   const f = fieldOf(closed(value, path, RESULT_ERROR_FIELDS), `${path}.`);
-  return Object.freeze({ code: f("code", oneOf(FAILURE_CODES)), message: f("message", safeText) });
+  return Object.freeze({ code: f("code", oneOf(FAILURE_CODES)), message: f("message", safeDisplay) });
 }
 
 function outputAgreesWithState(result: ToolResultV1): void {
@@ -70,6 +71,17 @@ function outputAgreesWithState(result: ToolResultV1): void {
   if (!succeeded && result.error === null) fail(`${L} error must be non-null unless state is succeeded.`);
 }
 
+function codeAgreesWithState(result: ToolResultV1): void {
+  const code = result.error?.code;
+  if (result.state === "cancelled" && code !== "TOOL_CANCELLED") fail(`${L} state cancelled requires error.code TOOL_CANCELLED.`);
+  if (result.state === "deadline_exceeded" && code !== "TOOL_DEADLINE_EXCEEDED") {
+    fail(`${L} state deadline_exceeded requires error.code TOOL_DEADLINE_EXCEEDED.`);
+  }
+  if (result.state === "refused" && (code === "TOOL_CANCELLED" || code === "TOOL_DEADLINE_EXCEEDED")) {
+    fail(`${L} state refused must not use error.code TOOL_CANCELLED or TOOL_DEADLINE_EXCEEDED.`);
+  }
+}
+
 function replayAgreesWithRetry(result: ToolResultV1): void {
   if (result.retry_class === "redeliver_stored_result" && result.replay_status !== "stored_redelivery") {
     fail(`${L} retry_class redeliver_stored_result requires replay_status stored_redelivery.`);
@@ -79,6 +91,9 @@ function replayAgreesWithRetry(result: ToolResultV1): void {
     if (result.retry_class !== "new_call_after_recovery") {
       fail(`${L} replay_status interrupted_before_result requires retry_class new_call_after_recovery.`);
     }
+  }
+  if (result.state === "succeeded" && result.retry_class === "new_call_after_recovery") {
+    fail(`${L} state succeeded must not use retry_class new_call_after_recovery.`);
   }
 }
 
@@ -118,6 +133,7 @@ export function validateResult(value: unknown): ToolResultV1 {
     result_digest: f("result_digest", digest),
   };
   outputAgreesWithState(result);
+  codeAgreesWithState(result);
   replayAgreesWithRetry(result);
   if (epochMs(result.completed_at) < epochMs(result.started_at)) fail(`${L} completed_at must not be earlier than started_at.`);
   if (result.bounded_bytes !== (result.payload === null ? 0 : canonicalBytes(result.payload))) {

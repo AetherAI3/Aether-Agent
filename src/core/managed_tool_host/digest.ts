@@ -9,7 +9,9 @@
 import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
 import { canonicalJson } from "../ats_contracts/canonical.js";
 import { fail } from "./errors.js";
-import { closed, deviceId, digest, httpsOrigin, id, jsonValue, object, positive53, safeText } from "./primitives.js";
+import {
+  boundedText, bytes32, closed, decodeBase64url, deviceId, digest, httpsOrigin, id, jsonValue, object, positive53, type Check,
+} from "./primitives.js";
 import {
   ACCOUNT_SCOPE_SCHEMA, ARGUMENTS_SCHEMA, MAX_ARGUMENT_DEPTH, SCHEMA_DIGEST_SCHEMA, WORKSPACE_BINDING_FIELDS,
   WORKSPACE_BINDING_SCHEMA,
@@ -71,7 +73,7 @@ export function workspaceBindingDigest(binding: unknown): string {
 /** account_scope_digest (spec section 4). The raw subject is used only for this local derivation. */
 export function accountScopeDigest(cloudOriginId: unknown, accountSubject: unknown): string {
   const origin = httpsOrigin(cloudOriginId, "Account scope cloud_origin_id");
-  const subject = safeText(accountSubject, "Account scope account_subject");
+  const subject = boundedText(accountSubject, "Account scope account_subject");
   return digestFor(ACCOUNT_SCOPE_SCHEMA, { cloud_origin_id: origin, account_subject: subject });
 }
 
@@ -84,12 +86,43 @@ export function schemaDigest(document: unknown): string {
   return digestFor(SCHEMA_DIGEST_SCHEMA, object(document, "Schema document"));
 }
 
+/** libsodium's small-order blocklist: every torsion point by y, plus y = p and y = p + 1. */
+const SMALL_ORDER = [
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0100000000000000000000000000000000000000000000000000000000000000",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+  "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+].map((hex) => Buffer.from(hex, "hex"));
+
+/** A 32-byte encoding that is non-canonical (y >= p = 2^255 - 19) or blocklisted, both judged with the sign bit masked. */
+function isWeakKey(key: Uint8Array): boolean {
+  if (key.length !== 32) return false;
+  const y = Buffer.from(key);
+  y[31] = (y[31] ?? 0) & 0x7f;
+  // y >= p exactly when byte 31 is 0x7f, bytes 1 to 30 are 0xff and byte 0 is at least 0xed.
+  if (y[31] === 0x7f && (y[0] ?? 0) >= 0xed && y.subarray(1, 31).every((byte) => byte === 0xff)) return true;
+  return SMALL_ORDER.some((entry) => entry.equals(y));
+}
+
+/** A trust or device key: 43 base64url characters naming a canonical point that is not small-order. */
+export const ed25519Key: Check<string> = (value, path) => {
+  const encoded = bytes32(value, path);
+  if (isWeakKey(decodeBase64url(encoded))) fail(`${path} is not a valid Ed25519 public key.`);
+  return encoded;
+};
+
 const SPKI_ED25519 = Buffer.from("302a300506032b6570032100", "hex");
 const PKCS8_ED25519 = Buffer.from("302e020100300506032b657004220420", "hex");
 
-/** Raw 32-byte public key, message, 64-byte signature. Any malformed input verifies false. */
+/**
+ * Pure RFC 8032 Ed25519 (OpenSSL): cofactorless, S below the group order, and
+ * a key that is canonical and not small-order. Any malformed input verifies false.
+ */
 export function ed25519Verify(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): boolean {
-  if (publicKey.length !== 32 || signature.length !== 64) return false;
+  if (publicKey.length !== 32 || signature.length !== 64 || isWeakKey(publicKey)) return false;
   try {
     const key = createPublicKey({ key: Buffer.concat([SPKI_ED25519, publicKey]), format: "der", type: "spki" });
     return verify(null, message, key, signature);

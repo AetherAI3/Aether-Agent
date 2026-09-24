@@ -16,7 +16,7 @@ from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import managed_tool_host_wire as w  # noqa: E402
-from managed_tool_host_ed25519 import verify as ed25519_verify  # noqa: E402
+from managed_tool_host_ed25519 import verify as ed25519_verify, weak_key  # noqa: E402
 
 TRUST_SCHEMA = "aether.managed-tool-trust/1"
 DEVICE_PROOF_SCHEMA = "aether.managed-tool-device-proof/1"
@@ -133,7 +133,7 @@ def workspace_binding_digest(binding: Any) -> str:
 
 def account_scope_digest(cloud_origin_id: Any, account_subject: Any) -> str:
     origin = w.https_origin(cloud_origin_id, "Account scope cloud_origin_id")
-    subject = w.safe_text(account_subject, "Account scope account_subject")
+    subject = w.bounded_text(account_subject, "Account scope account_subject")
     return w.digest_for(ACCOUNT_SCOPE_SCHEMA, {"cloud_origin_id": origin, "account_subject": subject})
 
 
@@ -147,9 +147,17 @@ def schema_digest(document: Any) -> str:
 
 # --- Trust, device proof, host-open proof ------------------------------------------------------
 
+def ed25519_key(value: Any, path: str) -> Any:
+    """A trust or device key: canonical point encoding, not in libsodium's small-order blocklist."""
+    encoded = w.bytes32(value, path)
+    if weak_key(w.decode_base64url(encoded)):
+        w.fail(f"{path} is not a valid Ed25519 public key.")
+    return encoded
+
+
 def _trust_key(value: Any, path: str) -> dict:
     return _fields(w.closed(value, path, TRUST_KEY_FIELDS), path + ".", [
-        ("key_id", w.ident), ("algorithm", w.constant("Ed25519")), ("public_key", w.bytes32),
+        ("key_id", w.ident), ("algorithm", w.constant("Ed25519")), ("public_key", ed25519_key),
     ])
 
 
@@ -168,7 +176,9 @@ def validate_trust_document(value: Any, now: int) -> dict:
     return trust
 
 
-def verify_cloud_signature(label: str, schema: str, signed: dict, trust: dict) -> None:
+def verify_cloud_signature(label: str, schema: str, signed: dict, trust: dict, now: int) -> None:
+    if now >= w.epoch_ms(trust["expires_at"]) + w.CLOCK_SKEW_MS:
+        w.fail(f"{label} trust document has expired.")
     key = next((entry for entry in trust["keys"] if entry.get("key_id") == signed.get("signature_key_id")), None)
     if key is None:
         w.fail(f"{label} signature_key_id names no trusted key.")
@@ -183,14 +193,14 @@ def validate_device_proof(value: Any, trust: dict, now: int) -> dict:
     raw = w.envelope(value, label, DEVICE_PROOF_SCHEMA, DEVICE_PROOF_FIELDS)
     proof = _top(raw, label, [
         ("cloud_origin_id", w.https_origin), ("account_scope_digest", w.digest), ("device_id", w.device_id),
-        ("device_public_key", w.bytes32), ("issued_at", w.timestamp), ("expires_at", w.timestamp),
+        ("device_public_key", ed25519_key), ("issued_at", w.timestamp), ("expires_at", w.timestamp),
         ("revocation_epoch", w.uint53), ("signature_key_id", w.ident), ("proof_digest", w.digest),
         ("cloud_signature", w.bytes64),
     ])
     w.lifetime(label, proof.get("issued_at"), "issued_at", proof.get("expires_at"), 2592000000, "30 days")
     w.match_digest(label, "proof_digest", proof.get("proof_digest"),
                    w.digest_for(DEVICE_PROOF_SCHEMA, w.omit(proof, ("proof_digest", "cloud_signature"))))
-    verify_cloud_signature(label, DEVICE_PROOF_SCHEMA, proof, trust)
+    verify_cloud_signature(label, DEVICE_PROOF_SCHEMA, proof, trust, now)
     w.fresh(label, proof.get("issued_at"), "issued_at", proof.get("expires_at"), now)
     return proof
 
@@ -299,7 +309,7 @@ def validate_host_lease(value: Any, trust: dict, now: int) -> dict:
         ("signature_key_id", w.ident), ("cloud_signature", w.bytes64),
     ])
     w.lifetime(label, lease.get("issued_at"), "issued_at", lease.get("expires_at"), 300000, "5 minutes")
-    verify_cloud_signature(label, HOST_LEASE_SCHEMA, lease, trust)
+    verify_cloud_signature(label, HOST_LEASE_SCHEMA, lease, trust, now)
     w.fresh(label, lease.get("issued_at"), "issued_at", lease.get("expires_at"), now)
     return lease
 
@@ -349,7 +359,7 @@ def validate_cancellation(value: Any) -> dict:
 
 def _result_error(value: Any, path: str) -> dict:
     return _fields(w.closed(value, path, RESULT_ERROR_FIELDS), path + ".", [
-        ("code", w.one_of(FAILURE_CODES)), ("message", w.safe_text),
+        ("code", w.one_of(FAILURE_CODES)), ("message", w.safe_display),
     ])
 
 
@@ -366,6 +376,18 @@ def _output_agrees_with_state(result: dict) -> None:
         w.fail("Result error must be non-null unless state is succeeded.")
 
 
+def _code_agrees_with_state(result: dict) -> None:
+    error = result.get("error")
+    code = error.get("code") if isinstance(error, dict) else None
+    state = result.get("state")
+    if state == "cancelled" and code != "TOOL_CANCELLED":
+        w.fail("Result state cancelled requires error.code TOOL_CANCELLED.")
+    if state == "deadline_exceeded" and code != "TOOL_DEADLINE_EXCEEDED":
+        w.fail("Result state deadline_exceeded requires error.code TOOL_DEADLINE_EXCEEDED.")
+    if state == "refused" and code in ("TOOL_CANCELLED", "TOOL_DEADLINE_EXCEEDED"):
+        w.fail("Result state refused must not use error.code TOOL_CANCELLED or TOOL_DEADLINE_EXCEEDED.")
+
+
 def _replay_agrees_with_retry(result: dict) -> None:
     if result.get("retry_class") == "redeliver_stored_result" and result.get("replay_status") != "stored_redelivery":
         w.fail("Result retry_class redeliver_stored_result requires replay_status stored_redelivery.")
@@ -374,6 +396,8 @@ def _replay_agrees_with_retry(result: dict) -> None:
             w.fail("Result replay_status interrupted_before_result requires state unavailable.")
         if result.get("retry_class") != "new_call_after_recovery":
             w.fail("Result replay_status interrupted_before_result requires retry_class new_call_after_recovery.")
+    if result.get("state") == "succeeded" and result.get("retry_class") == "new_call_after_recovery":
+        w.fail("Result state succeeded must not use retry_class new_call_after_recovery.")
 
 
 def validate_result(value: Any) -> dict:
@@ -394,6 +418,7 @@ def validate_result(value: Any) -> dict:
         ("result_digest", w.digest),
     ])
     _output_agrees_with_state(result)
+    _code_agrees_with_state(result)
     _replay_agrees_with_retry(result)
     if w.epoch_ms(result.get("completed_at")) < w.epoch_ms(result.get("started_at")):
         w.fail(f"{label} completed_at must not be earlier than started_at.")
@@ -434,7 +459,7 @@ _RUNTIME = _section(("state", "effective_execution_mode"), {
     "state": w.one_of(RUNTIME_STATES), "effective_execution_mode": w.one_of(EXECUTION_MODES),
 })
 _DIAGNOSTIC = _section(("code", "severity", "summary"), {
-    "code": w.diagnostic_code, "severity": w.one_of(DIAGNOSTIC_SEVERITIES), "summary": w.safe_text,
+    "code": w.diagnostic_code, "severity": w.one_of(DIAGNOSTIC_SEVERITIES), "summary": w.safe_display,
 })
 
 

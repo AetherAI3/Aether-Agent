@@ -1,14 +1,17 @@
 // ManagedToolTrustV1 (spec section 4.1): the Cloud verification keys served
 // at /.well-known/aether-managed-tool-host-v1.json, usable only until
-// expires_at. The document itself carries no digest.
+// expires_at, checked again each time a key verifies. The document itself
+// carries no digest.
 
 import { fail } from "./errors.js";
-import { ed25519Verify, omit, preimage } from "./digest.js";
+import { ed25519Key, ed25519Verify, omit, preimage } from "./digest.js";
 import {
-  array, bytes32, clock, closed, compareCodePoints, constant, decodeBase64url, envelope, fieldOf, fresh, id, items,
+  array, clock, closed, compareCodePoints, constant, decodeBase64url, envelope, epochMs, fieldOf, fresh, id, items,
   lifetime, strictlyAscending, timestamp, type Raw,
 } from "./primitives.js";
-import { MAX_TRUST_KEYS, MAX_TRUST_LIFETIME_MS, TRUST_FIELDS, TRUST_KEY_FIELDS, TRUST_SCHEMA } from "./vocabulary.js";
+import {
+  CLOCK_SKEW_MS, MAX_TRUST_KEYS, MAX_TRUST_LIFETIME_MS, TRUST_FIELDS, TRUST_KEY_FIELDS, TRUST_SCHEMA,
+} from "./vocabulary.js";
 
 export interface TrustKeyV1 {
   readonly key_id: string;
@@ -30,7 +33,7 @@ function trustKey(value: unknown, path: string): TrustKeyV1 {
   return Object.freeze({
     key_id: f("key_id", id),
     algorithm: f("algorithm", constant("Ed25519" as const)),
-    public_key: f("public_key", bytes32),
+    public_key: f("public_key", ed25519Key),
   });
 }
 
@@ -52,11 +55,13 @@ export function validateTrustDocument(value: unknown, now: number): TrustDocumen
 }
 
 /**
- * Verify a Cloud-signed object: signature_key_id must name a trusted key, and
- * cloud_signature must verify over the schema ID, LF, then RFC 8785 of the
+ * Verify a Cloud-signed object at `now`: the trust document must not have
+ * expired (expires_at plus skew), signature_key_id must name a trusted key,
+ * and cloud_signature must verify over the schema ID, LF, then RFC 8785 of the
  * object without cloud_signature.
  */
-export function verifyCloudSignature(label: string, schema: string, signed: Raw, trust: TrustDocumentV1): void {
+export function verifyCloudSignature(label: string, schema: string, signed: Raw, trust: TrustDocumentV1, now: number): void {
+  if (now >= epochMs(trust.expires_at) + CLOCK_SKEW_MS) fail(`${label} trust document has expired.`);
   const key = trust.keys.find((entry) => entry.key_id === signed["signature_key_id"]);
   if (!key) fail(`${label} signature_key_id names no trusted key.`);
   const message = preimage(schema, omit(signed, ["cloud_signature"]));

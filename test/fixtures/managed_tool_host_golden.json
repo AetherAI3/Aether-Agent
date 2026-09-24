@@ -1,7 +1,7 @@
 {
   "schema": "aether.managed-tool-host-golden/1",
   "canonical_profile": "rfc8785/1",
-  "note": "Golden vectors for docs/specs/2026-09-22-managed-ats-tool-host-v1.md (docs/CONTRACTS.md section 5). Every key below is TEST ONLY and NOT FOR PRODUCTION. Reject vectors are single-cause unless they carry an exception reason.",
+  "note": "Golden vectors for docs/specs/2026-09-22-managed-ats-tool-host-v1.md (docs/CONTRACTS.md section 6). Every key below is TEST ONLY and NOT FOR PRODUCTION. Reject vectors are single-cause unless they carry an exception reason.",
   "clock_skew_ms": 30000,
   "keys": [
     {
@@ -340,16 +340,6 @@
     },
     {
       "check": "text",
-      "value": "left\u202eright\u200b",
-      "ok": true
-    },
-    {
-      "check": "text",
-      "value": "\u00e9\ufeff",
-      "ok": true
-    },
-    {
-      "check": "text",
       "value": "",
       "expect": "Value must be 1 to 256 characters."
     },
@@ -425,6 +415,127 @@
     },
     {
       "check": "text",
+      "value": null,
+      "expect": "Value must be a string.",
+      "exception": "type_guard"
+    },
+    {
+      "check": "safe_display",
+      "value": "a",
+      "ok": true
+    },
+    {
+      "check": "safe_display",
+      "value": " ",
+      "ok": true
+    },
+    {
+      "check": "safe_display",
+      "value": "~",
+      "ok": true
+    },
+    {
+      "check": "safe_display",
+      "value": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+      "ok": true
+    },
+    {
+      "check": "safe_display",
+      "value": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+      "ok": true
+    },
+    {
+      "check": "safe_display",
+      "value": "The ATS profile is not verified.",
+      "ok": true
+    },
+    {
+      "check": "safe_display",
+      "value": "\u001f",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "\u007f",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "a\nb",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "a\tb",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "\u00a0",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "\u00e9",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "OK \u202edeliaf",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "a\u200bb",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "\ufeffa",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "a\u2028b",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "a\u2029b",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "Runtime degraded\udb40\udc01\udb40\udc69\udb40\udc67\udb40\udc6e\udb40\udc6f\udb40\udc72\udb40\udc65\udb40\udc20\udb40\udc70\udb40\udc72\udb40\udc65\udb40\udc76\udb40\udc69\udb40\udc6f\udb40\udc75\udb40\udc73\udb40\udc20\udb40\udc69\udb40\udc6e\udb40\udc73\udb40\udc74\udb40\udc72\udb40\udc75\udb40\udc63\udb40\udc74\udb40\udc69\udb40\udc6f\udb40\udc6e\udb40\udc73",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "\ud83d\ude00",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "a\ud800",
+      "expect": "Value must contain only printable ASCII characters."
+    },
+    {
+      "check": "safe_display",
+      "value": "",
+      "expect": "Value must be 1 to 256 characters."
+    },
+    {
+      "check": "safe_display",
+      "value": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+      "expect": "Value must be 1 to 256 characters."
+    },
+    {
+      "check": "safe_display",
+      "value": 5,
+      "expect": "Value must be a string."
+    },
+    {
+      "check": "safe_display",
       "value": null,
       "expect": "Value must be a string.",
       "exception": "type_guard"
@@ -728,6 +839,81 @@
       "check": "schema_id",
       "value": "aether.a_b/1",
       "expect": "Value must be a schema ID."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "ZvFkv3L67pvZXlHmV0gr5LoNDpaJCyVfSo0niox6Rvg",
+      "ok": true
+    },
+    {
+      "check": "ed25519_key",
+      "value": "IiTsmStRV-PPsndvKsh0u4w1q90mmOS0f1WdiWm4fes",
+      "ok": true
+    },
+    {
+      "check": "ed25519_key",
+      "value": "uWyN5F8qnI8a81ZYoMZC1ufp6IRz7KQgPeA1Ku_rDaY",
+      "ok": true
+    },
+    {
+      "check": "ed25519_key",
+      "value": "hxNSiqzNZYQE-vgelf4mb7q1yXw3G4RnJuIzhoyNVZ4",
+      "ok": true
+    },
+    {
+      "check": "ed25519_key",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "JuiVj8KyJ7BFw_SJ8u-Y8NXfrAXTxjM5sTgCiG1T_AU",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3o",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "7P_______________________________________38",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "7f_______________________________________38",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "7v_______________________________________38",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "_________________________________________38",
+      "expect": "Value is not a valid Ed25519 public key."
+    },
+    {
+      "check": "ed25519_key",
+      "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+      "expect": "Value must be 43 unpadded base64url characters."
     }
   ],
   "derivations": {
@@ -983,6 +1169,16 @@
       "canonical_sha256": "sha256:e253904929e164dde47f2c44426868811920b6ca5db93d02fbb4c8e190e527b8"
     },
     {
+      "id": "exactly_262144_bytes_multibyte",
+      "frame": {
+        "generate": {
+          "string_member": 262144,
+          "unit": "\u00e9"
+        }
+      },
+      "canonical_sha256": "sha256:1f9aaa7d84c3c42d9411fe499bfe30ed4895e85fa372c37b1dc80558674582f5"
+    },
+    {
       "id": "top_level_array",
       "frame": {
         "text": "[1,2]"
@@ -1039,6 +1235,17 @@
       "frame": {
         "generate": {
           "string_member": 262145
+        }
+      },
+      "expect": "Frame exceeds 262144 bytes."
+    },
+    {
+      "id": "oversize_multibyte",
+      "frame": {
+        "generate": {
+          "string_member": 262145,
+          "key": "kk",
+          "unit": "\u00e9"
         }
       },
       "expect": "Frame exceeds 262144 bytes."
@@ -1574,6 +1781,31 @@
       }
     },
     {
+      "id": "trust.late",
+      "kind": "trust",
+      "document": {
+        "schema": "aether.managed-tool-trust/1",
+        "generated_at": "2026-10-13T13:00:00.000Z",
+        "expires_at": "2026-10-14T12:00:00.000Z",
+        "keys": [
+          {
+            "key_id": "cloudkey-2026-09-a",
+            "algorithm": "Ed25519",
+            "public_key": "ZvFkv3L67pvZXlHmV0gr5LoNDpaJCyVfSo0niox6Rvg"
+          },
+          {
+            "key_id": "cloudkey-2026-09-b",
+            "algorithm": "Ed25519",
+            "public_key": "IiTsmStRV-PPsndvKsh0u4w1q90mmOS0f1WdiWm4fes"
+          }
+        ]
+      },
+      "now": 1791900000000,
+      "expect": {
+        "canonical_sha256": "sha256:5e4286ba9133434cfa0f2dff7b5abe0687507c2cfdc13e47af3234e01a6ad989"
+      }
+    },
+    {
       "id": "device_proof.main",
       "kind": "device_proof",
       "document": {
@@ -1619,6 +1851,30 @@
       },
       "expect": {
         "canonical_sha256": "sha256:e6379a60156d6928e77c5b3c547fd4dd869b1abab6c051492fbb596b2f2fe853"
+      }
+    },
+    {
+      "id": "device_proof.trust_expiry_edge",
+      "kind": "device_proof",
+      "document": {
+        "schema": "aether.managed-tool-device-proof/1",
+        "cloud_origin_id": "https://cloud.aether.example",
+        "account_scope_digest": "sha256:01e3defaa1020ba888becc8d6ae29f860b45e64315d733bf7e84b5920352f496",
+        "device_id": "scdev_7f3a9c21e4b84d0f",
+        "device_public_key": "uWyN5F8qnI8a81ZYoMZC1ufp6IRz7KQgPeA1Ku_rDaY",
+        "issued_at": "2026-09-18T14:00:00.000Z",
+        "expires_at": "2026-10-13T14:00:00.000Z",
+        "revocation_epoch": 2,
+        "signature_key_id": "cloudkey-2026-09-a",
+        "proof_digest": "sha256:a7ab6ef8cb421192d37f553ecc245b33976c1673bf49168caad3a0e9e64f104f",
+        "cloud_signature": "OVTqafsQr5uekVQ9rzrwYSvDeOsBgBQLulcLRYS05VF4LDHR1jDS1BIHzyIjHpac2yMFlpPKRFqu4pxjf9FtAw"
+      },
+      "now": 1790251229999,
+      "context": {
+        "trust": "trust.main"
+      },
+      "expect": {
+        "canonical_sha256": "sha256:ac1bb478f33fedbc8cdce79aa8d751a54f077451b9297f0b73e9768bcaad2b09"
       }
     },
     {
@@ -2631,6 +2887,40 @@
       }
     },
     {
+      "id": "host_lease.trust_expiry_edge",
+      "kind": "host_lease",
+      "document": {
+        "schema": "aether.managed-tool-host-lease/1",
+        "lease_id": "lease_20260923_0005",
+        "host_session_id": "hsess_20260923_0001",
+        "cloud_origin_id": "https://cloud.aether.example",
+        "account_scope_digest": "sha256:01e3defaa1020ba888becc8d6ae29f860b45e64315d733bf7e84b5920352f496",
+        "agent_id": "agent_ats_workspace01",
+        "device_id": "scdev_7f3a9c21e4b84d0f",
+        "local_session_id": "lsess_20260923_0001",
+        "session_generation": 3,
+        "revocation_epoch": 2,
+        "conversation_id": "conv_20260923_0001",
+        "registry_digest": "sha256:daa9cb2da2a86e066f84a02c3a700a61caad79c5deddc97b89e958b215acb5b7",
+        "issued_at": "2026-09-24T11:59:30.000Z",
+        "expires_at": "2026-09-24T12:01:30.000Z",
+        "max_calls": 16,
+        "capabilities": [
+          "local_read_tools"
+        ],
+        "grants_execution_authority": false,
+        "signature_key_id": "cloudkey-2026-09-a",
+        "cloud_signature": "2f82Q38NL8ktKiAenb8qoYuZzdWhdDw0-hLNLJIJ1gVrQYxh-H2UyfXdAksxb2jDQwe8SPGjA5G-SpUYxJYVCQ"
+      },
+      "now": 1790251229999,
+      "context": {
+        "trust": "trust.main"
+      },
+      "expect": {
+        "canonical_sha256": "sha256:07d8d44c64ab95eccc97fa4a78209797f283502caca340f686392a6447427965"
+      }
+    },
+    {
       "id": "host_open_proof.main",
       "kind": "host_open_proof",
       "document": {
@@ -3128,10 +3418,10 @@
           {
             "code": "MEMORY_WRITER_LOST",
             "severity": "warning",
-            "summary": "Caf\u00e9 memory writer \ud83d\udcc8 lease was lost."
+            "summary": "The memory writer lease was lost."
           }
         ],
-        "status_digest": "sha256:0a991b5fa5522c8c5a449214a2991459ce34ff80b55377e38d8bbf73c107d3f4"
+        "status_digest": "sha256:152f47e23c95d90af93f1dba25ee597dfd893a8b2ec1191ccf8a987bf09521d1"
       },
       "context": {
         "binding": {
@@ -3143,7 +3433,7 @@
         }
       },
       "expect": {
-        "canonical_sha256": "sha256:da68c511fcf5ef4b476a0e87e8b805864d980812b81713a05103eb0a73d75c17"
+        "canonical_sha256": "sha256:63dbc3a57a876c8fe2896b23d95d8d15e2ac704f7d582ee29361aa23fe4adb8c"
       }
     },
     {
@@ -3185,7 +3475,7 @@
           {
             "code": "DXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
             "severity": "info",
-            "summary": "\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+            "summary": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
           },
           {
             "code": "DIAG_1",
@@ -3263,7 +3553,7 @@
             "summary": "Diagnostic 15."
           }
         ],
-        "status_digest": "sha256:e0de0edcc0cf7bf83b64de09ac153c60a9715ec3883d81fe8c152c6e5c6a50fd"
+        "status_digest": "sha256:aae10f3de547259175e352f8f5a22b9be8f8f26f800241827ab29a4e3d0a1c68"
       },
       "context": {
         "binding": {
@@ -3275,7 +3565,7 @@
         }
       },
       "expect": {
-        "canonical_sha256": "sha256:a2c4b02436ebdc802490dbb08b5adf1cb4b56b39d32f015ec5b2ec7f781f0ca0"
+        "canonical_sha256": "sha256:b558fd8bd4a6a09ab5531741d73089e6313ac612ee85a0596d789e60c40c873c"
       }
     },
     {
@@ -3441,7 +3731,7 @@
         "output_schema_digest": null,
         "error": {
           "code": "TOOL_CANCELLED",
-          "message": "Annul\u00e9 before a result was stored."
+          "message": "Cancelled before a result was stored."
         },
         "evidence_refs": [],
         "replay_status": "fresh",
@@ -3451,10 +3741,10 @@
         "bounded_bytes": 0,
         "redaction_profile": "aether.safe-display/1",
         "grants_execution_authority": false,
-        "result_digest": "sha256:690fd3c66651048bd5087d0b93e235502a5973751966d56ec08e7e8e6534809d"
+        "result_digest": "sha256:7e00d52cee9a4a2bb5678de0eb170276a27b16868691400d83b5a51975ef4bf4"
       },
       "expect": {
-        "canonical_sha256": "sha256:e9fdb8fb277f3f38d62008aa8c46f4383a62581c45c826d83cfc97e07ea1687e"
+        "canonical_sha256": "sha256:638142ead7ebe20f0b24888913b1f2d81948231c107d9e7078de9115ef2e55ff"
       }
     },
     {
@@ -3567,7 +3857,7 @@
         "output_schema_digest": null,
         "error": {
           "code": "TOOL_DELIVERY_UNAVAILABLE",
-          "message": "\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+          "message": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
         },
         "evidence_refs": [
           "evidence.ref.0000",
@@ -3594,10 +3884,10 @@
         "bounded_bytes": 0,
         "redaction_profile": "aether.safe-display/1",
         "grants_execution_authority": false,
-        "result_digest": "sha256:b0b247d748e6c4bc9ac8cc7b9946cfa7147d3ff504d68ab16db63ed4b89e6448"
+        "result_digest": "sha256:1025ba22a02e5318c5d2968bae3a6de8adbc219c267fc3845c481dc408359530"
       },
       "expect": {
-        "canonical_sha256": "sha256:e110d0fd69c5887b52b1c61d5174ebb61d4641c76e577e6e76050acfab61416d"
+        "canonical_sha256": "sha256:092df615819e5f256e4ef4a7a0c8c7da816f3b4bbdb41beb1e7f1775ea4dd380"
       }
     },
     {
@@ -3844,6 +4134,179 @@
       },
       "expect": {
         "canonical_sha256": "sha256:cb23c3afd6790ca20055729ab7d8ec19eaa4810a71b582aaa9c9ba06b8805051"
+      }
+    },
+    {
+      "id": "result.payload_multibyte",
+      "kind": "result",
+      "document": {
+        "schema": "aether.managed-tool-result/1",
+        "result_id": "res_20260923_multibyte",
+        "request_id": "req_20260923_0001",
+        "cloud_tool_call_id": "call_20260923_0001",
+        "lease_id": "lease_20260923_0001",
+        "host_session_id": "hsess_20260923_0001",
+        "local_session_id": "lsess_20260923_0001",
+        "session_generation": 3,
+        "revocation_epoch": 2,
+        "run_id": "run_20260923_0001",
+        "tool_name": "ats_workspace_status",
+        "tool_version": 1,
+        "input_schema_id": "aether.ats.workspace-status-input/1",
+        "input_schema_digest": "sha256:04e0d3206904490a99a80e0aad06771b050e9bb63b0a66205ff6aad43108e87b",
+        "invocation_digest": "sha256:8875c33cbd3dc9c79bdecc77be81a9bdaf9618a8a656e46c77c1212612698e77",
+        "arguments_digest": "sha256:2f6d65ae3c4e94db2f6ad405f50762fb9849987b74798383f6162de0b7389210",
+        "state": "succeeded",
+        "payload": {
+          "note": "ready \ud83d\ude00"
+        },
+        "output_schema_id": "aether.ats.workspace-status/1",
+        "output_schema_digest": "sha256:7b896662d6f34cc8da77c31b65cb60cdbf1018919f32a98327c239353489b7ef",
+        "error": null,
+        "evidence_refs": [
+          "evidence.ats.status.0001",
+          "evidence.memory.0001"
+        ],
+        "replay_status": "fresh",
+        "retry_class": "none",
+        "started_at": "2026-09-23T14:00:10.500Z",
+        "completed_at": "2026-09-23T14:00:11.200Z",
+        "bounded_bytes": 21,
+        "redaction_profile": "aether.safe-display/1",
+        "grants_execution_authority": false,
+        "result_digest": "sha256:0ef67827d314527c8d1debcd209e9c9a82583dcfdb7141b9f464f9a517692d46"
+      },
+      "expect": {
+        "canonical_sha256": "sha256:a124c9936741a9483eacdea02ffb04d44d26ec4e526c1d7963e5a1c8603690eb"
+      }
+    },
+    {
+      "id": "result.completed_deadline_edge",
+      "kind": "result",
+      "document": {
+        "schema": "aether.managed-tool-result/1",
+        "result_id": "res_20260923_deadline_edge",
+        "request_id": "req_20260923_0001",
+        "cloud_tool_call_id": "call_20260923_0001",
+        "lease_id": "lease_20260923_0001",
+        "host_session_id": "hsess_20260923_0001",
+        "local_session_id": "lsess_20260923_0001",
+        "session_generation": 3,
+        "revocation_epoch": 2,
+        "run_id": "run_20260923_0001",
+        "tool_name": "ats_workspace_status",
+        "tool_version": 1,
+        "input_schema_id": "aether.ats.workspace-status-input/1",
+        "input_schema_digest": "sha256:04e0d3206904490a99a80e0aad06771b050e9bb63b0a66205ff6aad43108e87b",
+        "invocation_digest": "sha256:8875c33cbd3dc9c79bdecc77be81a9bdaf9618a8a656e46c77c1212612698e77",
+        "arguments_digest": "sha256:2f6d65ae3c4e94db2f6ad405f50762fb9849987b74798383f6162de0b7389210",
+        "state": "succeeded",
+        "payload": {
+          "schema": "aether.ats.workspace-status/1",
+          "observed_at": "2026-09-23T14:00:11.000Z",
+          "binding_digest": "sha256:eab63a08f0a2e0c60404b78664466a522290cbe65d3e45075b6ed838abfe17c3",
+          "local": {
+            "memory": {
+              "state": "ready",
+              "configured_gib": 8,
+              "writer_lease": "held"
+            },
+            "strategies": {
+              "state": "scanned",
+              "count": 12,
+              "compiler": "native_ats",
+              "execution_enabled": false
+            }
+          },
+          "data": {
+            "research_configuration": "configured",
+            "last_probe": "fresh",
+            "executable_evidence": "unavailable"
+          },
+          "browser": {
+            "state": "unavailable"
+          },
+          "runtime": {
+            "state": "ready",
+            "effective_execution_mode": "paper"
+          },
+          "execution_authority": "none",
+          "orders_enabled": false,
+          "grants_execution_authority": false,
+          "diagnostics": [
+            {
+              "code": "BROWSER_OBSERVER_UNAVAILABLE",
+              "severity": "info",
+              "summary": "Browser observation is not part of the E1 canary."
+            },
+            {
+              "code": "MEMORY_WRITER_HELD",
+              "severity": "info",
+              "summary": "The memory writer lease is held by this session."
+            }
+          ],
+          "status_digest": "sha256:bd06f08de80303fa2412d6d201114eff80b42679f752f2b7f5ea693d62610f35"
+        },
+        "output_schema_id": "aether.ats.workspace-status/1",
+        "output_schema_digest": "sha256:7b896662d6f34cc8da77c31b65cb60cdbf1018919f32a98327c239353489b7ef",
+        "error": null,
+        "evidence_refs": [
+          "evidence.ats.status.0001",
+          "evidence.memory.0001"
+        ],
+        "replay_status": "fresh",
+        "retry_class": "none",
+        "started_at": "2026-09-23T14:00:10.500Z",
+        "completed_at": "2026-09-23T14:00:50.000Z",
+        "bounded_bytes": 969,
+        "redaction_profile": "aether.safe-display/1",
+        "grants_execution_authority": false,
+        "result_digest": "sha256:968ca2802539c1db0d0997893c7e16b735a03f3a4f4fe5d1bb489e9abf7a15e5"
+      },
+      "expect": {
+        "canonical_sha256": "sha256:822c9603aa4017202842115ecd6df2f5562283d6f2d03a4d8eda853018730b44"
+      }
+    },
+    {
+      "id": "result.deadline_exceeded_late",
+      "kind": "result",
+      "document": {
+        "schema": "aether.managed-tool-result/1",
+        "result_id": "res_20260923_deadline_exceeded_late",
+        "request_id": "req_20260923_0001",
+        "cloud_tool_call_id": "call_20260923_0001",
+        "lease_id": "lease_20260923_0001",
+        "host_session_id": "hsess_20260923_0001",
+        "local_session_id": "lsess_20260923_0001",
+        "session_generation": 3,
+        "revocation_epoch": 2,
+        "run_id": "run_20260923_0001",
+        "tool_name": "ats_workspace_status",
+        "tool_version": 1,
+        "input_schema_id": "aether.ats.workspace-status-input/1",
+        "input_schema_digest": "sha256:04e0d3206904490a99a80e0aad06771b050e9bb63b0a66205ff6aad43108e87b",
+        "invocation_digest": "sha256:8875c33cbd3dc9c79bdecc77be81a9bdaf9618a8a656e46c77c1212612698e77",
+        "arguments_digest": "sha256:2f6d65ae3c4e94db2f6ad405f50762fb9849987b74798383f6162de0b7389210",
+        "state": "deadline_exceeded",
+        "payload": null,
+        "output_schema_id": null,
+        "output_schema_digest": null,
+        "error": {
+          "code": "TOOL_DEADLINE_EXCEEDED",
+          "message": "The call deadline passed before the tool finished."
+        },
+        "evidence_refs": [],
+        "replay_status": "fresh",
+        "retry_class": "none",
+        "started_at": "2026-09-23T14:00:10.500Z",
+        "completed_at": "2026-09-23T14:00:55.000Z",
+        "bounded_bytes": 0,
+        "redaction_profile": "aether.safe-display/1",
+        "grants_execution_authority": false,
+        "result_digest": "sha256:42c28a1bd46a2a9f15420fec32fd27c8329b3d39ff16977c5b88926079b76dff"
+      },
+      "expect": {
+        "canonical_sha256": "sha256:253090f5345e7da8f70952a1a501c0dc16fef49d1d062e0ae08c67ce3a9fa578"
       }
     }
   ],
@@ -4182,6 +4645,108 @@
         }
       ],
       "expect": "Trust document keys[0].public_key is not canonical base64url."
+    },
+    {
+      "id": "trust.key_all_zero",
+      "kind": "trust",
+      "base": "trust.main",
+      "rule": "key_all_zero",
+      "patches": [
+        {
+          "path": [
+            "keys",
+            0,
+            "public_key"
+          ],
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "expect": "Trust document keys[0].public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "trust.key_identity",
+      "kind": "trust",
+      "base": "trust.main",
+      "rule": "key_identity",
+      "patches": [
+        {
+          "path": [
+            "keys",
+            0,
+            "public_key"
+          ],
+          "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "expect": "Trust document keys[0].public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "trust.key_order_8",
+      "kind": "trust",
+      "base": "trust.main",
+      "rule": "key_order_8",
+      "patches": [
+        {
+          "path": [
+            "keys",
+            0,
+            "public_key"
+          ],
+          "value": "JuiVj8KyJ7BFw_SJ8u-Y8NXfrAXTxjM5sTgCiG1T_AU"
+        }
+      ],
+      "expect": "Trust document keys[0].public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "trust.key_y_p_plus_1",
+      "kind": "trust",
+      "base": "trust.main",
+      "rule": "key_y_p_plus_1",
+      "patches": [
+        {
+          "path": [
+            "keys",
+            0,
+            "public_key"
+          ],
+          "value": "7v_______________________________________38"
+        }
+      ],
+      "expect": "Trust document keys[0].public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "trust.key_negative_zero",
+      "kind": "trust",
+      "base": "trust.main",
+      "rule": "key_negative_zero",
+      "patches": [
+        {
+          "path": [
+            "keys",
+            0,
+            "public_key"
+          ],
+          "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA"
+        }
+      ],
+      "expect": "Trust document keys[0].public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "trust.key_y_max",
+      "kind": "trust",
+      "base": "trust.main",
+      "rule": "key_y_max",
+      "patches": [
+        {
+          "path": [
+            "keys",
+            0,
+            "public_key"
+          ],
+          "value": "_________________________________________38"
+        }
+      ],
+      "expect": "Trust document keys[0].public_key is not a valid Ed25519 public key."
     },
     {
       "id": "trust.key_id_short",
@@ -4780,6 +5345,96 @@
       "expect": "Device proof device_public_key must be 43 unpadded base64url characters."
     },
     {
+      "id": "device_proof.device_key_all_zero",
+      "kind": "device_proof",
+      "base": "device_proof.main",
+      "rule": "device_key_all_zero",
+      "patches": [
+        {
+          "path": [
+            "device_public_key"
+          ],
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "path": [
+            "proof_digest"
+          ],
+          "value": "sha256:dd721a663e488ce9dae323932760f241ac76a3c4abcfbb3d95122845be6830ef"
+        },
+        {
+          "path": [
+            "cloud_signature"
+          ],
+          "value": "iwMoI2H1ie8zLcQW9sx1hqEGNQudnk9n8pbfOVwy16nBFyWlC6Cx14MIyyGJQ7grOatikI_Lz4-3n0DZeD22BQ"
+        }
+      ],
+      "expect": "Device proof device_public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "device_proof.device_key_order_8_other",
+      "kind": "device_proof",
+      "base": "device_proof.main",
+      "rule": "device_key_order_8_other",
+      "patches": [
+        {
+          "path": [
+            "device_public_key"
+          ],
+          "value": "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3o"
+        },
+        {
+          "path": [
+            "proof_digest"
+          ],
+          "value": "sha256:a36ce1df88cff016dbe8a01d1db29ad95ca97efa94e64968c3880a7a22c49b63"
+        },
+        {
+          "path": [
+            "cloud_signature"
+          ],
+          "value": "ziYSEnTydDCJNGpQG-dd-hM8c-U8bU6onB4gDfPkb1FDvsgxogXZ8xGPP_DuHzjAI7dFS94JTVdcNZVcPDr1AQ"
+        }
+      ],
+      "expect": "Device proof device_public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "device_proof.device_key_y_p_plus_1",
+      "kind": "device_proof",
+      "base": "device_proof.main",
+      "rule": "device_key_y_p_plus_1",
+      "patches": [
+        {
+          "path": [
+            "device_public_key"
+          ],
+          "value": "7v_______________________________________38"
+        },
+        {
+          "path": [
+            "proof_digest"
+          ],
+          "value": "sha256:f795547a352824f914249c15180536abfffb04f7f1a8e6e0b460003e23757b40"
+        },
+        {
+          "path": [
+            "cloud_signature"
+          ],
+          "value": "pubbXd9dix-ahBjyAPrYosB1B49CuS_qOOMf2G1qLjB2QFiHTvhNzubxrIsRw7I-nRnxXHHGHwpg44eeaczfCA"
+        }
+      ],
+      "expect": "Device proof device_public_key is not a valid Ed25519 public key."
+    },
+    {
+      "id": "device_proof.trust_expired",
+      "kind": "device_proof",
+      "base": "device_proof.main",
+      "rule": "trust_expired",
+      "patches": [],
+      "expect": "Device proof trust document has expired.",
+      "now": 1790251230000
+    },
+    {
       "id": "device_proof.epoch_negative",
       "kind": "device_proof",
       "base": "device_proof.main",
@@ -5142,7 +5797,10 @@
       "rule": "expired",
       "patches": [],
       "expect": "Device proof has expired.",
-      "now": 1791900030000
+      "now": 1791900030000,
+      "context": {
+        "trust": "trust.late"
+      }
     },
     {
       "id": "host_open_proof.not_object",
@@ -5482,6 +6140,48 @@
       ],
       "expect": "Host-open proof device_signature must be 86 unpadded base64url characters.",
       "exception": "signature_bytes"
+    },
+    {
+      "id": "host_open_proof.forged_small_order_key",
+      "kind": "host_open_proof",
+      "base": "host_open_proof.main",
+      "rule": "forged_small_order_key",
+      "patches": [
+        {
+          "path": [
+            "device_proof_digest"
+          ],
+          "value": "sha256:dd721a663e488ce9dae323932760f241ac76a3c4abcfbb3d95122845be6830ef"
+        },
+        {
+          "path": [
+            "conversation_id"
+          ],
+          "value": "conv_forged_0001"
+        },
+        {
+          "path": [
+            "device_signature"
+          ],
+          "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "expect": "Host-open proof device_signature does not verify.",
+      "context": {
+        "unvalidated_device_proof": {
+          "schema": "aether.managed-tool-device-proof/1",
+          "cloud_origin_id": "https://cloud.aether.example",
+          "account_scope_digest": "sha256:01e3defaa1020ba888becc8d6ae29f860b45e64315d733bf7e84b5920352f496",
+          "device_id": "scdev_7f3a9c21e4b84d0f",
+          "device_public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "issued_at": "2026-09-18T14:00:00.000Z",
+          "expires_at": "2026-10-13T14:00:00.000Z",
+          "revocation_epoch": 2,
+          "signature_key_id": "cloudkey-2026-09-a",
+          "proof_digest": "sha256:dd721a663e488ce9dae323932760f241ac76a3c4abcfbb3d95122845be6830ef",
+          "cloud_signature": "iwMoI2H1ie8zLcQW9sx1hqEGNQudnk9n8pbfOVwy16nBFyWlC6Cx14MIyyGJQ7grOatikI_Lz4-3n0DZeD22BQ"
+        }
+      }
     },
     {
       "id": "observer_receipt.not_object",
@@ -8733,6 +9433,15 @@
       "now": 1790172210000
     },
     {
+      "id": "host_lease.trust_expired",
+      "kind": "host_lease",
+      "base": "host_lease.trust_expiry_edge",
+      "rule": "trust_expired",
+      "patches": [],
+      "expect": "Host lease trust document has expired.",
+      "now": 1790251230000
+    },
+    {
       "id": "invocation.not_object",
       "kind": "invocation",
       "base": "invocation.e1",
@@ -10202,7 +10911,7 @@
           "path": [
             "result_digest"
           ],
-          "value": "sha256:a44eaa64b5c56d4fdb31969f6499a42ff19eb63a48bf9d7e9e43b9698b0c2e4e"
+          "value": "sha256:5f37a6977e6d5d568762d553e16dab3830258a6d1e1ba2dd93db659fd4d693b8"
         }
       ],
       "expect": "Result payload must be null unless state is succeeded."
@@ -10557,13 +11266,13 @@
             "error",
             "message"
           ],
-          "value": "\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+          "value": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
         },
         {
           "path": [
             "result_digest"
           ],
-          "value": "sha256:e4c2694264a0bd75ac23488c0db8504b22467c1d9a8df72f398dceeb721c7827"
+          "value": "sha256:112938bf67035c7f8068d2d93c2e2b099ee545205827c4e5cad3858c596658a3"
         }
       ],
       "expect": "Result error.message must be 1 to 256 characters."
@@ -10588,7 +11297,7 @@
           "value": "sha256:89efc8f5afbc5e21ff43657cce75f3ee0e7e9dfb10d9c68cc7f03dfaf44f07de"
         }
       ],
-      "expect": "Result error.message contains a control character."
+      "expect": "Result error.message must contain only printable ASCII characters."
     },
     {
       "id": "result.error_message_nul",
@@ -10610,7 +11319,7 @@
           "value": "sha256:23daef8dd8af64deafbc7beec024d2c6b694d467f722745f1cc5e1a226ff7e78"
         }
       ],
-      "expect": "Result error.message contains a control character."
+      "expect": "Result error.message must contain only printable ASCII characters."
     },
     {
       "id": "result.error_message_surrogate",
@@ -10626,8 +11335,183 @@
           "value": "bad \udc00"
         }
       ],
-      "expect": "Result error.message contains an unpaired surrogate.",
+      "expect": "Result error.message must contain only printable ASCII characters.",
       "exception": "jcs_refuses"
+    },
+    {
+      "id": "result.error_message_rlo",
+      "kind": "result",
+      "base": "result.refused",
+      "rule": "error_message_rlo",
+      "patches": [
+        {
+          "path": [
+            "error",
+            "message"
+          ],
+          "value": "OK \u202edeliaf"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:e4571209a52818221cef94f57e7ad437f7141b45b01321f4a9c6939baea477a3"
+        }
+      ],
+      "expect": "Result error.message must contain only printable ASCII characters."
+    },
+    {
+      "id": "result.error_message_line_separator",
+      "kind": "result",
+      "base": "result.refused",
+      "rule": "error_message_line_separator",
+      "patches": [
+        {
+          "path": [
+            "error",
+            "message"
+          ],
+          "value": "a\u2028b"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:cef2cc689ae71b01ecfdd0d9bc77bf78886e49a50fbad1d06f47f5cad786cfdd"
+        }
+      ],
+      "expect": "Result error.message must contain only printable ASCII characters."
+    },
+    {
+      "id": "result.error_message_tag_characters",
+      "kind": "result",
+      "base": "result.refused",
+      "rule": "error_message_tag_characters",
+      "patches": [
+        {
+          "path": [
+            "error",
+            "message"
+          ],
+          "value": "Runtime degraded\udb40\udc01\udb40\udc69\udb40\udc67\udb40\udc6e\udb40\udc6f\udb40\udc72\udb40\udc65\udb40\udc20\udb40\udc70\udb40\udc72\udb40\udc65\udb40\udc76\udb40\udc69\udb40\udc6f\udb40\udc75\udb40\udc73\udb40\udc20\udb40\udc69\udb40\udc6e\udb40\udc73\udb40\udc74\udb40\udc72\udb40\udc75\udb40\udc63\udb40\udc74\udb40\udc69\udb40\udc6f\udb40\udc6e\udb40\udc73"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:91cacdcb6a54b9f94ebfb3d0e9b787f038d984f35c6e3faede3b9de57e107ddb"
+        }
+      ],
+      "expect": "Result error.message must contain only printable ASCII characters."
+    },
+    {
+      "id": "result.cancelled_code_other",
+      "kind": "result",
+      "base": "result.cancelled",
+      "rule": "cancelled_code_other",
+      "patches": [
+        {
+          "path": [
+            "error",
+            "code"
+          ],
+          "value": "TOOL_DEPENDENCY_UNAVAILABLE"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:d6a81fde05d8af6bbac3ccac49899d8fe573aebfada66942afadde0811681125"
+        }
+      ],
+      "expect": "Result state cancelled requires error.code TOOL_CANCELLED."
+    },
+    {
+      "id": "result.deadline_exceeded_code_other",
+      "kind": "result",
+      "base": "result.deadline_exceeded",
+      "rule": "deadline_exceeded_code_other",
+      "patches": [
+        {
+          "path": [
+            "error",
+            "code"
+          ],
+          "value": "TOOL_CANCELLED"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:34dbaeda33553e4b7acc17d3854e81c0cbf184f054c5dacb2c8530f9fa4e3950"
+        }
+      ],
+      "expect": "Result state deadline_exceeded requires error.code TOOL_DEADLINE_EXCEEDED."
+    },
+    {
+      "id": "result.refused_code_cancelled",
+      "kind": "result",
+      "base": "result.refused",
+      "rule": "refused_code_cancelled",
+      "patches": [
+        {
+          "path": [
+            "error",
+            "code"
+          ],
+          "value": "TOOL_CANCELLED"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:feb415da13f59bb7c030a69f101a5e72020785264b8ed4854535c94a5a1e33d1"
+        }
+      ],
+      "expect": "Result state refused must not use error.code TOOL_CANCELLED or TOOL_DEADLINE_EXCEEDED."
+    },
+    {
+      "id": "result.refused_code_deadline_exceeded",
+      "kind": "result",
+      "base": "result.refused",
+      "rule": "refused_code_deadline_exceeded",
+      "patches": [
+        {
+          "path": [
+            "error",
+            "code"
+          ],
+          "value": "TOOL_DEADLINE_EXCEEDED"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:5f3ab7da1f671bbf8968ff9ddd3f91e810fc07106886dda53256c6e082343b82"
+        }
+      ],
+      "expect": "Result state refused must not use error.code TOOL_CANCELLED or TOOL_DEADLINE_EXCEEDED."
+    },
+    {
+      "id": "result.succeeded_new_call_after_recovery",
+      "kind": "result",
+      "base": "result.succeeded",
+      "rule": "succeeded_new_call_after_recovery",
+      "patches": [
+        {
+          "path": [
+            "retry_class"
+          ],
+          "value": "new_call_after_recovery"
+        },
+        {
+          "path": [
+            "result_digest"
+          ],
+          "value": "sha256:299943cf8332d1d8621f97d82f68ba23e668ff12876bd7bd5ac768b8ba482b20"
+        }
+      ],
+      "expect": "Result state succeeded must not use retry_class new_call_after_recovery."
     },
     {
       "id": "result.error_message_not_string",
@@ -12209,13 +13093,13 @@
             0,
             "summary"
           ],
-          "value": "\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8\ud83d\udcc8ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+          "value": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
         },
         {
           "path": [
             "status_digest"
           ],
-          "value": "sha256:4d26ce13771f5b67ec00a7eaf6281937e0e79b8e7784e401aa88af6350f18268"
+          "value": "sha256:53a5578de18ce926a72280346f1a02fb63035eda55cc974351922e441c3ac2c0"
         }
       ],
       "expect": "Workspace status diagnostics[0].summary must be 1 to 256 characters."
@@ -12241,7 +13125,7 @@
           "value": "sha256:8687a3dc69a563b6559c93c9825906a7e2b0131a44d211633c743715b4fafa32"
         }
       ],
-      "expect": "Workspace status diagnostics[0].summary contains a control character."
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
     },
     {
       "id": "workspace_status.diagnostic_summary_carriage_return",
@@ -12264,7 +13148,7 @@
           "value": "sha256:7a9c5cd7b5f87117f9e9f6bd2d6eb1b0e16ee06a71679cefa641e55d58254039"
         }
       ],
-      "expect": "Workspace status diagnostics[0].summary contains a control character."
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
     },
     {
       "id": "workspace_status.diagnostic_summary_c1_csi",
@@ -12287,7 +13171,7 @@
           "value": "sha256:5e45b4835117e91626c9c9d5f33b51bf1065e59fb9eaa1d0d852add5dfeee71e"
         }
       ],
-      "expect": "Workspace status diagnostics[0].summary contains a control character."
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
     },
     {
       "id": "workspace_status.diagnostic_summary_surrogate",
@@ -12304,8 +13188,146 @@
           "value": "x\udbff"
         }
       ],
-      "expect": "Workspace status diagnostics[0].summary contains an unpaired surrogate.",
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters.",
       "exception": "jcs_refuses"
+    },
+    {
+      "id": "workspace_status.diagnostic_summary_rlo",
+      "kind": "workspace_status",
+      "base": "workspace_status.main",
+      "rule": "diagnostic_summary_rlo",
+      "patches": [
+        {
+          "path": [
+            "diagnostics",
+            0,
+            "summary"
+          ],
+          "value": "OK \u202edeliaf"
+        },
+        {
+          "path": [
+            "status_digest"
+          ],
+          "value": "sha256:0297598f90366426e0261944d0dbc6681e4a9472654505d2f84f7a9fe1fdd3ed"
+        }
+      ],
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
+    },
+    {
+      "id": "workspace_status.diagnostic_summary_zero_width_space",
+      "kind": "workspace_status",
+      "base": "workspace_status.main",
+      "rule": "diagnostic_summary_zero_width_space",
+      "patches": [
+        {
+          "path": [
+            "diagnostics",
+            0,
+            "summary"
+          ],
+          "value": "a\u200bb"
+        },
+        {
+          "path": [
+            "status_digest"
+          ],
+          "value": "sha256:1a5feed96b5bbfae55bce77f6afa59ad297e2709df1fd4eea3a293a325945c75"
+        }
+      ],
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
+    },
+    {
+      "id": "workspace_status.diagnostic_summary_byte_order_mark",
+      "kind": "workspace_status",
+      "base": "workspace_status.main",
+      "rule": "diagnostic_summary_byte_order_mark",
+      "patches": [
+        {
+          "path": [
+            "diagnostics",
+            0,
+            "summary"
+          ],
+          "value": "\ufeffok"
+        },
+        {
+          "path": [
+            "status_digest"
+          ],
+          "value": "sha256:23b4455196997046af556f5ed0efa8d7fb0c08c0f342edf2936c913e1dd1f8db"
+        }
+      ],
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
+    },
+    {
+      "id": "workspace_status.diagnostic_summary_line_separator",
+      "kind": "workspace_status",
+      "base": "workspace_status.main",
+      "rule": "diagnostic_summary_line_separator",
+      "patches": [
+        {
+          "path": [
+            "diagnostics",
+            0,
+            "summary"
+          ],
+          "value": "a\u2028b"
+        },
+        {
+          "path": [
+            "status_digest"
+          ],
+          "value": "sha256:271f7847e5be36408120c8a2aea339419b05511eccc80243c2e3b94c06075b35"
+        }
+      ],
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
+    },
+    {
+      "id": "workspace_status.diagnostic_summary_tag_characters",
+      "kind": "workspace_status",
+      "base": "workspace_status.main",
+      "rule": "diagnostic_summary_tag_characters",
+      "patches": [
+        {
+          "path": [
+            "diagnostics",
+            0,
+            "summary"
+          ],
+          "value": "Runtime degraded\udb40\udc01\udb40\udc69\udb40\udc67\udb40\udc6e\udb40\udc6f\udb40\udc72\udb40\udc65\udb40\udc20\udb40\udc70\udb40\udc72\udb40\udc65\udb40\udc76\udb40\udc69\udb40\udc6f\udb40\udc75\udb40\udc73\udb40\udc20\udb40\udc69\udb40\udc6e\udb40\udc73\udb40\udc74\udb40\udc72\udb40\udc75\udb40\udc63\udb40\udc74\udb40\udc69\udb40\udc6f\udb40\udc6e\udb40\udc73"
+        },
+        {
+          "path": [
+            "status_digest"
+          ],
+          "value": "sha256:3848e7f9e58ea3abbeb20433f6e41e1442c26c2c73148dd433eb69c57ac0a137"
+        }
+      ],
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
+    },
+    {
+      "id": "workspace_status.diagnostic_summary_latin1",
+      "kind": "workspace_status",
+      "base": "workspace_status.main",
+      "rule": "diagnostic_summary_latin1",
+      "patches": [
+        {
+          "path": [
+            "diagnostics",
+            0,
+            "summary"
+          ],
+          "value": "caf\u00e9"
+        },
+        {
+          "path": [
+            "status_digest"
+          ],
+          "value": "sha256:2f66177be80cfeb87e472ad06f27ac30ef6ecd06114b02e2f32b2f65bebe0526"
+        }
+      ],
+      "expect": "Workspace status diagnostics[0].summary must contain only printable ASCII characters."
     },
     {
       "id": "workspace_status.diagnostic_detail",
@@ -12618,6 +13640,26 @@
         "now": 1790171981200
       },
       {
+        "id": "result.completed_deadline_edge",
+        "check": "result",
+        "inputs": {
+          "result": "result.completed_deadline_edge",
+          "invocation": "invocation.e1",
+          "registry": "registry.e1"
+        },
+        "now": 1790172050000
+      },
+      {
+        "id": "result.deadline_exceeded_late",
+        "check": "result",
+        "inputs": {
+          "result": "result.deadline_exceeded_late",
+          "invocation": "invocation.e1",
+          "registry": "registry.e1"
+        },
+        "now": 1790172055000
+      },
+      {
         "id": "tool_payload.succeeded",
         "check": "tool_payload",
         "inputs": {
@@ -12656,6 +13698,21 @@
         "expected": {
           "challenge": "Gekn7iVISwKWwpxTzXHAZDi621rOgM3SvDN9IO_OlOM",
           "runtime_build_digest": "sha256:20a6dc324b56ee98ade3c495ed7970b1ccc94f54ca8eaa9d2497f47732e7c312"
+        }
+      },
+      {
+        "id": "host_open_binding.main",
+        "check": "host_open_binding",
+        "inputs": {
+          "trust": "trust.main",
+          "device_proof": "device_proof.main",
+          "host_open": "host_open_proof.main",
+          "registry": "registry.e1",
+          "lease": "host_lease.e1"
+        },
+        "now": 1790172015000,
+        "expected": {
+          "challenge": "vzLZ0a8Ch2L0vqN5pWFloyYXudAN6dHE3piLBhw8mGA"
         }
       }
     ],
@@ -12945,6 +14002,34 @@
           ]
         },
         "expect": "Host lease device_id does not match the device proof."
+      },
+      {
+        "id": "lease_binding.device_proof_revocation_epoch",
+        "check": "lease_binding",
+        "base": "lease_binding.e1",
+        "patches": {
+          "device_proof": [
+            {
+              "path": [
+                "revocation_epoch"
+              ],
+              "value": 3
+            },
+            {
+              "path": [
+                "proof_digest"
+              ],
+              "value": "sha256:fe40efa5186fa638d9031b7ee589972472dc1e36418f1009c6624a502bdc1473"
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "vLX-Av_6QMqRyejcJy78u9y6OIh2MiBnp7-qRtv3vrpS-sMeBXVN84nQj-BRb0g4EYfqEWfNcYOJWT9SQbIADg"
+            }
+          ]
+        },
+        "expect": "Host lease revocation_epoch does not match the device proof."
       },
       {
         "id": "lease_binding.outlives_registry",
@@ -13402,6 +14487,37 @@
                 "invocation_digest"
               ],
               "value": "sha256:c61e82a7f74685128683e6724ae96b8e298cb88af6386519855cd049e9d58af8"
+            }
+          ]
+        },
+        "expect": "Invocation arguments exceed the registered max_argument_bytes."
+      },
+      {
+        "id": "invocation.probe_arguments_multibyte_over_registered_bytes",
+        "check": "invocation",
+        "base": "invocation.probe",
+        "patches": {
+          "invocation": [
+            {
+              "path": [
+                "arguments"
+              ],
+              "value": {
+                "limit": 5,
+                "window": "session-wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\u00e9"
+              }
+            },
+            {
+              "path": [
+                "arguments_digest"
+              ],
+              "value": "sha256:9836b61adfa78cf370fb1676dc5efc5bc8ab56c676575b091824ea14a42e98c2"
+            },
+            {
+              "path": [
+                "invocation_digest"
+              ],
+              "value": "sha256:bb01d288fee5beaeaa364f7890d582f23ad4d37fcf3c7248838ff7f89c5fc847"
             }
           ]
         },
@@ -14201,6 +15317,29 @@
         "now": 1790171981199
       },
       {
+        "id": "result.succeeded_after_deadline",
+        "check": "result",
+        "base": "result.succeeded",
+        "patches": {
+          "result": [
+            {
+              "path": [
+                "completed_at"
+              ],
+              "value": "2026-09-23T14:00:50.001Z"
+            },
+            {
+              "path": [
+                "result_digest"
+              ],
+              "value": "sha256:5a4a4dbb97d48b8ba7576d5fb67289be4dc48502a14c308ef2ed1e604cdcfeef"
+            }
+          ]
+        },
+        "expect": "Result completed_at is later than the invocation deadline.",
+        "now": 1790172050001
+      },
+      {
         "id": "tool_payload.binding_other_agent",
         "check": "tool_payload",
         "base": "tool_payload.succeeded",
@@ -14646,6 +15785,288 @@
           ]
         },
         "expect": "E1 canary tool dependencies must be ats_profile, foreground_session, verified_account."
+      },
+      {
+        "id": "e1_canary.data_classes_browser_observation",
+        "check": "e1_canary",
+        "base": "e1_canary.e1",
+        "patches": {
+          "registry": [
+            {
+              "path": [
+                "tools",
+                0,
+                "data_classes"
+              ],
+              "value": [
+                "ats_status",
+                "local_status",
+                "untrusted_browser_observation"
+              ]
+            },
+            {
+              "path": [
+                "registry_digest"
+              ],
+              "value": "sha256:e64073c4bbe9d5216796c86da5ac3651a290f4c7c63f4e9f7b960c951fcb9385"
+            }
+          ]
+        },
+        "expect": "E1 canary tool data_classes must be ats_status, local_status."
+      },
+      {
+        "id": "e1_canary.data_classes_missing",
+        "check": "e1_canary",
+        "base": "e1_canary.e1",
+        "patches": {
+          "registry": [
+            {
+              "path": [
+                "tools",
+                0,
+                "data_classes"
+              ],
+              "value": [
+                "local_status"
+              ]
+            },
+            {
+              "path": [
+                "registry_digest"
+              ],
+              "value": "sha256:5f0106851328c0ae7ad6ad008923ee90da40fc7b59281b157542ace8ba126900"
+            }
+          ]
+        },
+        "expect": "E1 canary tool data_classes must be ats_status, local_status."
+      },
+      {
+        "id": "host_open_binding.challenge",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {},
+        "expect": "Host-open proof challenge does not match the challenge issued.",
+        "expected": {
+          "challenge": "Yz0uxOBoFRUM18ZIDv1QmerVaH4Ms5iz_Y25fzIvspE"
+        }
+      },
+      {
+        "id": "host_open_binding.registry_digest",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "registry": [
+            {
+              "path": [
+                "registry_id"
+              ],
+              "value": "reg_20260923_0009"
+            },
+            {
+              "path": [
+                "registry_digest"
+              ],
+              "value": "sha256:5980045e1ef5eb4eab91fdd8aba4e43f53b3a0073d8d4d55abf8597bbda53633"
+            }
+          ]
+        },
+        "expect": "Host-open proof registry_digest does not match the registry."
+      },
+      {
+        "id": "host_open_binding.registry_agent_id",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "host_open": [
+            {
+              "path": [
+                "agent_id"
+              ],
+              "value": "agent_ats_workspace02"
+            },
+            {
+              "path": [
+                "device_signature"
+              ],
+              "value": "Rm2xQZgL5r-II7RLyNFjyY2mi_lttq-gxwdiDS-Dw9cc1t7kPGOhIPAg_W4BFNorCREuykmIbm6eBJvKkPOuDw"
+            }
+          ],
+          "lease": [
+            {
+              "path": [
+                "agent_id"
+              ],
+              "value": "agent_ats_workspace02"
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "PZMNVf9HAvjc4sVIrhhHAJRHzuYKEuMBpuzX163yXV9g_bkOQRGX3qbc_J-xYexnIxDmU4AxDF6EiJpolQekBw"
+            }
+          ]
+        },
+        "expect": "Host-open proof agent_id does not match the registry."
+      },
+      {
+        "id": "host_open_binding.registry_local_session_id",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "host_open": [
+            {
+              "path": [
+                "local_session_id"
+              ],
+              "value": "lsess_20260923_0009"
+            },
+            {
+              "path": [
+                "device_signature"
+              ],
+              "value": "UUxGVuUdyMhD5BO38nnagyr5EqClJpcwR1-P_YAUpbv9EZZeVh__D-JlrdMOF-Q-oX-itn1Z07REcv1kk_ooDA"
+            }
+          ],
+          "lease": [
+            {
+              "path": [
+                "local_session_id"
+              ],
+              "value": "lsess_20260923_0009"
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "hEMBRsArKZgGeK3q6HANethL38Z3oafvrzy49-S7NwzpF9-oVSdRVSgDQuPhJzPuIgxEc0B1QAZw6327m6axBQ"
+            }
+          ]
+        },
+        "expect": "Host-open proof local_session_id does not match the registry."
+      },
+      {
+        "id": "host_open_binding.registry_session_generation",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "host_open": [
+            {
+              "path": [
+                "session_generation"
+              ],
+              "value": 4
+            },
+            {
+              "path": [
+                "device_signature"
+              ],
+              "value": "s5nnAoZqTA06MCOuE5CI6ZKkUlZSTJakjjPKVCcv-vau7vMLKvlZjPFm4RNKbWgsrI2B_grop16dfCMv1va3DQ"
+            }
+          ],
+          "lease": [
+            {
+              "path": [
+                "session_generation"
+              ],
+              "value": 4
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "mVrIEbsBn3THMR20_Ph1zc17LSjzoVli4qU6bMKQIZLmVLYM_uRKzP4m-5X_xUvpG0vo9Rn01HW6ptttU5T8DA"
+            }
+          ]
+        },
+        "expect": "Host-open proof session_generation does not match the registry."
+      },
+      {
+        "id": "host_open_binding.lease_conversation_id",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "lease": [
+            {
+              "path": [
+                "conversation_id"
+              ],
+              "value": "conv_20260923_0009"
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "-emjXEIWboxms47dLrawkgRtLSQXweqCLVFeLpsOxJFwnCEHmtywzcKaCYhRjEHUy_XZPozfMDwsy5_yukjgDw"
+            }
+          ]
+        },
+        "expect": "Host-open proof conversation_id does not match the host lease."
+      },
+      {
+        "id": "host_open_binding.lease_agent_id",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "lease": [
+            {
+              "path": [
+                "agent_id"
+              ],
+              "value": "agent_ats_workspace02"
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "PZMNVf9HAvjc4sVIrhhHAJRHzuYKEuMBpuzX163yXV9g_bkOQRGX3qbc_J-xYexnIxDmU4AxDF6EiJpolQekBw"
+            }
+          ]
+        },
+        "expect": "Host-open proof agent_id does not match the host lease."
+      },
+      {
+        "id": "host_open_binding.lease_local_session_id",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "lease": [
+            {
+              "path": [
+                "local_session_id"
+              ],
+              "value": "lsess_20260923_0009"
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "hEMBRsArKZgGeK3q6HANethL38Z3oafvrzy49-S7NwzpF9-oVSdRVSgDQuPhJzPuIgxEc0B1QAZw6327m6axBQ"
+            }
+          ]
+        },
+        "expect": "Host-open proof local_session_id does not match the host lease."
+      },
+      {
+        "id": "host_open_binding.lease_session_generation",
+        "check": "host_open_binding",
+        "base": "host_open_binding.main",
+        "patches": {
+          "lease": [
+            {
+              "path": [
+                "session_generation"
+              ],
+              "value": 4
+            },
+            {
+              "path": [
+                "cloud_signature"
+              ],
+              "value": "mVrIEbsBn3THMR20_Ph1zc17LSjzoVli4qU6bMKQIZLmVLYM_uRKzP4m-5X_xUvpG0vo9Rn01HW6ptttU5T8DA"
+            }
+          ]
+        },
+        "expect": "Host-open proof session_generation does not match the host lease."
       },
       {
         "id": "capability_receipt.attestation_ref",

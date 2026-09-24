@@ -1,6 +1,6 @@
 """Independent Python mirror of the managed tool host wire rules (stdlib only).
 
-docs/CONTRACTS.md section 5. Imports nothing from the TypeScript side or from
+docs/CONTRACTS.md section 6. Imports nothing from the TypeScript side or from
 any other mirror: this module carries its own strict frame lexer, RFC 8785
 encoder, digests and closed-shape checks. Refusal messages are byte-identical
 to src/core/managed_tool_host, so every golden vector proves both languages
@@ -459,8 +459,23 @@ def text(value: Any, path: str, low: int, high: int) -> Any:
     return value
 
 
-def safe_text(value: Any, path: str) -> Any:
+def bounded_text(value: Any, path: str) -> Any:
+    """1 to 256 scalars with no Cc or unpaired surrogate: account_subject, which is hashed and never displayed."""
     return text(value, path, 1, MAX_STRING_SCALARS)
+
+
+_DISPLAY = re.compile("[ -~]*")
+
+
+def safe_display(value: Any, path: str) -> Any:
+    """aether.safe-display/1 (error.message, diagnostics[].summary): 1 to 256 characters, U+0020 to U+007E only."""
+    if not isinstance(value, str):
+        fail(f"{path} must be a string.")
+    if not _DISPLAY.fullmatch(value):
+        fail(f"{path} must contain only printable ASCII characters.")
+    if not 1 <= len(value) <= MAX_STRING_SCALARS:
+        fail(f"{path} must be 1 to 256 characters.")
+    return value
 
 
 def base64url(value: Any, path: str, size: int) -> Any:

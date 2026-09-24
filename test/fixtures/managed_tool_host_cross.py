@@ -18,6 +18,7 @@ import managed_tool_host_wire as w  # noqa: E402
 UNLISTED_INVOCATION = "Invocation names a tool the registry does not list."
 UNLISTED_RESULT = "Result names a tool the registry does not list."
 E1_DEPENDENCIES = ["ats_profile", "foreground_session", "verified_account"]
+E1_DATA_CLASSES = ["ats_status", "local_status"]
 INVOCATION_SCOPE = ("lease_id", "host_session_id", "session_generation", "revocation_epoch", "cloud_origin_id",
                     "account_scope_digest", "agent_id", "device_id", "local_session_id", "conversation_id")
 RESULT_IDENTITY = ("request_id", "cloud_tool_call_id", "lease_id", "host_session_id", "local_session_id",
@@ -41,7 +42,7 @@ def check_lease_binding(lease: dict, registry: dict, device_proof: dict, trust: 
     for field in ("account_scope_digest", "agent_id", "device_id", "local_session_id", "session_generation"):
         _same(lease[field], registry[field], f"Host lease {field} does not match the registry.")
     _same(lease["registry_digest"], registry["registry_digest"], "Host lease registry_digest does not match the registry.")
-    for field in ("cloud_origin_id", "account_scope_digest", "device_id"):
+    for field in ("cloud_origin_id", "account_scope_digest", "device_id", "revocation_epoch"):
         _same(lease[field], device_proof[field], f"Host lease {field} does not match the device proof.")
     expires = w.epoch_ms(lease["expires_at"])
     if expires > w.epoch_ms(registry["expires_at"]):
@@ -98,10 +99,13 @@ def check_result(result: dict, invocation: dict, registry: dict, now: int) -> No
         _same(result["output_schema_digest"], tool["output_schema_digest"], "Result output_schema_digest does not match the registered tool.")
     if result["bounded_bytes"] > tool["max_result_bytes"]:
         w.fail("Result bounded_bytes exceeds the registered max_result_bytes.")
+    completed = w.epoch_ms(result["completed_at"])
     if w.epoch_ms(result["started_at"]) < w.epoch_ms(invocation["issued_at"]) - w.CLOCK_SKEW_MS:
         w.fail("Result started_at is earlier than the invocation issued_at.")
-    if w.epoch_ms(result["completed_at"]) > now + w.CLOCK_SKEW_MS:
+    if completed > now + w.CLOCK_SKEW_MS:
         w.fail("Result completed_at is in the future.")
+    if result["state"] == "succeeded" and completed > w.epoch_ms(invocation["deadline_at"]) + w.CLOCK_SKEW_MS:
+        w.fail("Result completed_at is later than the invocation deadline.")
 
 
 def check_tool_payload(result: dict, invocation: dict, registry: dict) -> None:
@@ -131,6 +135,8 @@ def assert_e1_canary_registry(registry: dict) -> None:
         w.fail("E1 canary tool output_schema_digest must match the frozen schema.")
     if list(tool["dependencies"]) != E1_DEPENDENCIES:
         w.fail("E1 canary tool dependencies must be ats_profile, foreground_session, verified_account.")
+    if list(tool["data_classes"]) != E1_DATA_CLASSES:
+        w.fail("E1 canary tool data_classes must be ats_status, local_status.")
 
 
 def check_capability_receipt(capability: dict, receipt: dict, expected: dict) -> None:
@@ -140,3 +146,11 @@ def check_capability_receipt(capability: dict, receipt: dict, expected: dict) ->
         _same(capability[field], receipt[field], f"Runtime capability {field} does not match the observer receipt.")
     _same(receipt["challenge"], expected["challenge"], "Observer receipt challenge does not match the challenge sent.")
     _same(capability["runtime_build_digest"], expected["runtime_build_digest"], "Runtime capability runtime_build_digest does not match the loaded build.")
+
+
+def check_host_open_binding(host_open: dict, registry: dict, lease: dict, expected: dict) -> None:
+    _same(host_open["challenge"], expected["challenge"], "Host-open proof challenge does not match the challenge issued.")
+    for field in ("agent_id", "local_session_id", "session_generation", "registry_digest"):
+        _same(host_open[field], registry[field], f"Host-open proof {field} does not match the registry.")
+    for field in ("conversation_id", "agent_id", "local_session_id", "session_generation"):
+        _same(host_open[field], lease[field], f"Host-open proof {field} does not match the host lease.")

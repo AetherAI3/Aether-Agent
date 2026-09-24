@@ -7,7 +7,7 @@ import { fail } from "./errors.js";
 import { bindingDigestOf, canonicalBytesIfEncodable, digestFor, omit, type WorkspaceStatusBinding } from "./digest.js";
 import {
   array, closed, constant, diagnosticCode, digest, envelope, fieldOf, isPlainObject, items, matchDigest, nullable, oneOf,
-  range, safeText, timestamp, type Check,
+  range, safeDisplay, timestamp, type Check,
 } from "./primitives.js";
 import {
   BROWSER_STATES, COMPILER_STATES, DIAGNOSTIC_SEVERITIES, EXECUTION_MODES, MAX_CONFIGURED_GIB, MAX_DIAGNOSTICS,
@@ -89,7 +89,7 @@ const runtime = section<WorkspaceStatusV1["runtime"]>(WORKSPACE_RUNTIME_FIELDS, 
 const diagnostic = section<WorkspaceStatusV1["diagnostics"][number]>(WORKSPACE_DIAGNOSTIC_FIELDS, {
   code: diagnosticCode,
   severity: oneOf(DIAGNOSTIC_SEVERITIES),
-  summary: safeText,
+  summary: safeDisplay,
 });
 
 export function validateWorkspaceStatus(value: unknown, binding: WorkspaceStatusBinding): WorkspaceStatusV1 {
