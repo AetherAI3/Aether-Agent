@@ -626,8 +626,12 @@ matches fullwidth digits.
 
 Each guard was verified by breaking it in both languages:
 - Swapping the strict ticker for `symbol()` in any one `/2` validator fails
-  exactly that document's eight ticker vectors.
-- Swapping the closed label for the `/1` label fails the six label weaknesses.
+  that document's eight ticker vectors, the raw-document check of each
+  retagged copy of it, and any member case that copy alone breaks. Nothing
+  else fails.
+- Swapping the closed label for the `/1` label fails the six label
+  weaknesses, the `optionalBindingV2()` check, and the retagged binding's
+  raw-document check and member case. Nothing else fails.
 - Removing either gate's version check changes the mixed-chain cases to the
   member refusal, because re-validation then rejects the `/1` tag. Removing
   it together with the re-validation flips them to accepted.
