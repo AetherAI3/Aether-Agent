@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aethersystems.net/managed-ats-tool-host/v1/observer-channel-receipt.schema.json",
+  "x-aether-schema-id": "aether.ats.observer-channel-receipt/1",
+  "title": "ObserverChannelReceiptV1",
+  "description": "ATS answer over the private authenticated observer channel aether.ats.observer-channel/1. receipt_digest follows the common digest rule. Lifetime at most 60 seconds. The private credential never appears in this object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "receipt_id",
+    "channel_id",
+    "runtime_id",
+    "runtime_version",
+    "runtime_build_digest",
+    "challenge",
+    "capability_digest",
+    "issued_at",
+    "expires_at",
+    "authentication",
+    "receipt_digest"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "aether.ats.observer-channel-receipt/1"
+    },
+    "receipt_id": {
+      "$ref": "#/$defs/id"
+    },
+    "channel_id": {
+      "$ref": "#/$defs/id"
+    },
+    "runtime_id": {
+      "$ref": "#/$defs/id"
+    },
+    "runtime_version": {
+      "$ref": "#/$defs/runtime_version"
+    },
+    "runtime_build_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "challenge": {
+      "$ref": "#/$defs/base64url_32"
+    },
+    "capability_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "issued_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "authentication": {
+      "type": "string",
+      "const": "ats_mcp_private_credential"
+    },
+    "receipt_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "runtime_version": {
+      "type": "string",
+      "pattern": "^[ -~]{1,64}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "base64url_32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$"
+    }
+  }
+}

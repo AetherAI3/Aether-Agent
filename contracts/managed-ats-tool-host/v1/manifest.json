@@ -1,0 +1,70 @@
+{
+  "schema": "aether.managed-tool-schema-bundle/1",
+  "entries": [
+    {
+      "file": "cancellation.schema.json",
+      "schema_id": "aether.managed-tool-cancellation/1",
+      "schema_digest": "sha256:206d4f8cd709c05c42cfd0eb0ed82c0412af4ca4b2d1ebd34ac0c1aea0448c23"
+    },
+    {
+      "file": "common.schema.json",
+      "schema_id": "aether.managed-tool-common/1",
+      "schema_digest": "sha256:8c602e61b22897b391ff8d565e86f38e9ded57b6352d9feb55f7c2aed35c45c8"
+    },
+    {
+      "file": "device-proof.schema.json",
+      "schema_id": "aether.managed-tool-device-proof/1",
+      "schema_digest": "sha256:27e149526586e988bfd9f49c9e8fef1de77c2f337c36fee9acc2a4871f6ff54b"
+    },
+    {
+      "file": "host-lease.schema.json",
+      "schema_id": "aether.managed-tool-host-lease/1",
+      "schema_digest": "sha256:38f36e6a2aea233856b23776b1c5cfa05b0aa6c7b52e02358f81e1a1efc316eb"
+    },
+    {
+      "file": "host-open-proof.schema.json",
+      "schema_id": "aether.managed-tool-host-open-proof/1",
+      "schema_digest": "sha256:74c17cf473c6dfe35f38cdf498d0d22e8a549020c8b26d64c3728e2e3f292964"
+    },
+    {
+      "file": "invocation.schema.json",
+      "schema_id": "aether.managed-tool-invocation/1",
+      "schema_digest": "sha256:b0132f653b7c7e5d73988ad18a067bab9dac860974b810acea727738842ca696"
+    },
+    {
+      "file": "observer-channel-receipt.schema.json",
+      "schema_id": "aether.ats.observer-channel-receipt/1",
+      "schema_digest": "sha256:f406f0afda326e82b585070261550dbfcaaca71866b2a818c28cce16ba7816f8"
+    },
+    {
+      "file": "registry.schema.json",
+      "schema_id": "aether.managed-tool-registry/1",
+      "schema_digest": "sha256:bd2e37bd1273b8bca7fbdcc49428532896bda2d7ab7a467c2495f42ec54fb560"
+    },
+    {
+      "file": "result.schema.json",
+      "schema_id": "aether.managed-tool-result/1",
+      "schema_digest": "sha256:ef18b6e84bade0d2ab9294b634ef02ed95679785148e73b7eee442caf020719a"
+    },
+    {
+      "file": "runtime-capability.schema.json",
+      "schema_id": "aether.ats.runtime-capability/1",
+      "schema_digest": "sha256:0682f5e0b26fd59dee4fb8ea51a3e23f0cdfb3332364a41d3d84e7602d5fae3b"
+    },
+    {
+      "file": "trust.schema.json",
+      "schema_id": "aether.managed-tool-trust/1",
+      "schema_digest": "sha256:f71b631f5dbb417129220c1d57cb08aaeb9259bc4057cee5b9b3ce0ba1fcb2a0"
+    },
+    {
+      "file": "workspace-status-input.schema.json",
+      "schema_id": "aether.ats.workspace-status-input/1",
+      "schema_digest": "sha256:04e0d3206904490a99a80e0aad06771b050e9bb63b0a66205ff6aad43108e87b"
+    },
+    {
+      "file": "workspace-status.schema.json",
+      "schema_id": "aether.ats.workspace-status/1",
+      "schema_digest": "sha256:7b896662d6f34cc8da77c31b65cb60cdbf1018919f32a98327c239353489b7ef"
+    }
+  ]
+}
