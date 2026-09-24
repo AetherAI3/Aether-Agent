@@ -6,8 +6,10 @@ import {
   ATS_SPEC1_SCHEMAS,
   ATS_SPEC1_V2_SCHEMAS,
   EXECUTABLE_CHAIN_REFUSAL,
+  EXECUTABLE_MEMBER_REFUSAL,
   canonicalJson,
   digestOf,
+  optionalBindingV2,
   validateAccountBinding,
   validateAccountBindingV2,
   validateExecutionReceipt,
@@ -29,6 +31,7 @@ import {
   type ChainVerdict,
   type CommitAuthorityRequest,
   type ExecutableCommitAuthorityRequest,
+  type GrantUsage,
   type NormalizedEquityOrderIntentV1,
   type OperatorApprovalReceiptV1,
 } from "../src/core/ats_contracts/index.js";
@@ -54,13 +57,25 @@ interface Reject {
   readonly v1_expect?: string;
 }
 interface Frozen extends Reject { readonly v1_schema_version: string }
+/**
+ * version: valid documents; the version rule is the only refusal.
+ * member:  raw, never-validated documents and inputs; re-validation is the only refusal.
+ * branch:  valid /2 documents reaching one refusal branch of the shared logic.
+ */
 interface ChainCase {
   readonly name: string;
   readonly case: string;
+  readonly category: "version" | "member" | "branch";
+  readonly raw: boolean;
   readonly members: { readonly intent: string; readonly review: string; readonly approval: string; readonly binding: string; readonly grant: string };
+  readonly now?: string;
+  readonly now_ms?: number;
+  readonly usage?: unknown;
+  readonly resulting_position_notional_minor?: number;
   readonly approval_chain_expect: string | null;
   readonly commit_expect: string | null;
 }
+type DocumentTable = Readonly<Record<string, { readonly document: Record<string, unknown>; readonly canonical_digest: string }>>;
 interface Fixture {
   readonly schema_version: string;
   readonly canonical_profile: string;
@@ -72,7 +87,9 @@ interface Fixture {
     readonly now: string;
     readonly usage: unknown;
     readonly resulting_position_notional_minor: number;
-    readonly documents: Readonly<Record<string, { readonly document: Record<string, unknown>; readonly canonical_digest: string }>>;
+    readonly refusals: { readonly version: string; readonly member: string };
+    readonly documents: DocumentTable;
+    readonly raw_documents: DocumentTable;
     readonly cases: readonly ChainCase[];
   };
 }
@@ -125,7 +142,18 @@ const FROZEN_LABEL_CASES = [
   "right_to_left_override", "zero_width_space", "byte_order_mark",
 ] as const;
 const REJECTED_LABEL_CASES = ["five_ascii_digits"] as const;
-const CHAIN_CASES = ["all_v2", "intent_v1", "approval_v1", "binding_v1", "grant_v1", "all_v1"] as const;
+const VERSION_CASES = ["all_v2", "intent_v1", "approval_v1", "binding_v1", "grant_v1", "all_v1"] as const;
+const MEMBER_CASES = [
+  "retagged_v1_chain", "retagged_v1_binding", "retagged_v1_grant", "unvalidated_intent", "unvalidated_review",
+  "unvalidated_approval", "unvalidated_usage", "unvalidated_clock", "unvalidated_position",
+] as const;
+/**
+ * Distinct refusal messages the branch cases pin, each reproduced by both
+ * languages: one per reachable refusal branch of the shared chain and commit
+ * logic. Three branches are unreachable through a validated chain and are
+ * documented in docs/CONTRACTS.md instead.
+ */
+const BRANCH_MESSAGE_FLOOR = 50;
 const MIN_ACCEPTS = 8;
 
 async function loadFixture(): Promise<Fixture> {
@@ -216,7 +244,12 @@ test("every coverage category is present", async () => {
     for (const value of REJECTED_LABEL_CASES) if (!has(fixture.rejects, tag, "label", value)) missing.push(`${tag} label reject ${value}`);
   }
   for (const tag of ATS_SPEC1_V2_SCHEMAS) if (!has(fixture.rejects, tag, "schema_tag", "v1_tag")) missing.push(`${tag} /1 tag reject`);
-  for (const value of CHAIN_CASES) if (!fixture.chains.cases.some((entry) => entry.case === value)) missing.push(`chain case ${value}`);
+  const hasChain = (id: string, category: ChainCase["category"]) =>
+    fixture.chains.cases.some((entry) => entry.case === id && entry.category === category);
+  for (const id of VERSION_CASES) if (!hasChain(id, "version")) missing.push(`version chain case ${id}`);
+  for (const id of MEMBER_CASES) if (!hasChain(id, "member")) missing.push(`member chain case ${id}`);
+  const branchMessages = new Set(fixture.chains.cases.filter((entry) => entry.category === "branch").map((entry) => entry.commit_expect));
+  if (branchMessages.size < BRANCH_MESSAGE_FLOOR) missing.push(`branch messages fell to ${branchMessages.size}`);
   if (fixture.accepts.length < MIN_ACCEPTS) missing.push(`accepts fell to ${fixture.accepts.length}`);
   assert.deepEqual(missing, []);
 });
@@ -305,46 +338,54 @@ test("every frozen /1 weakness is accepted by /1 and refused by /2 for its state
   assert.deepEqual(problems, []);
 });
 
-// --- The executable chain gate ---------------------------------------------------
+// --- The executable chain gates --------------------------------------------------
 
-interface Members {
-  readonly intent: ExecutableCommitAuthorityRequest["intent"];
-  readonly review: ExecutableCommitAuthorityRequest["review"];
-  readonly approval: ExecutableCommitAuthorityRequest["approval"];
-  readonly binding: ExecutableCommitAuthorityRequest["binding"];
-  readonly grant: ExecutableCommitAuthorityRequest["grant"];
-}
+test("optionalBindingV2 admits no binding, or a /2 binding with a closed-charset label", async () => {
+  const fixture = await loadFixture();
+  const binding = baseOf(fixture, "aether.ats.account-binding/2");
+  assert.equal(optionalBindingV2(null), null);
+  assert.equal(digestOf(optionalBindingV2(binding)), digestOf(validateAccountBindingV2(binding)));
+  const override = fixture.frozen_weakness.find((entry) => entry.case === "right_to_left_override");
+  assert.ok(override, "the direction-override label vector must stay in the fixture");
+  assert.throws(() => optionalBindingV2(applyPatches(binding, override.patches)), { message: override.expect });
+  assert.throws(
+    () => optionalBindingV2(retag(binding, "aether.ats.account-binding/1")),
+    { message: "Account binding must declare schema aether.ats.account-binding/2." },
+  );
+});
 
 function atOwnVersion(document: Record<string, unknown>): unknown {
   const tag = String(document["schema_version"]);
   return validatorFor({ ...V1_VALIDATORS, ...V2_VALIDATORS }, tag)(document);
 }
 
-function membersOf(fixture: Fixture, chain: ChainCase): Members {
-  const load = (key: string) => {
-    const entry = fixture.chains.documents[key];
-    assert.ok(entry, `${chain.name}: missing chain document ${key}`);
-    return atOwnVersion(entry.document);
-  };
+function chainDocument(fixture: Fixture, key: string): Record<string, unknown> {
+  const entry = fixture.chains.documents[key] ?? fixture.chains.raw_documents[key];
+  assert.ok(entry, `missing chain document ${key}`);
+  return structuredClone(entry.document);
+}
+
+/**
+ * The request a chain case describes. A raw case hands the gates the parsed
+ * JSON untouched, exactly as a caller that skipped validation would; every
+ * other case hands them what the validators return.
+ */
+function requestOf(fixture: Fixture, chain: ChainCase): ExecutableCommitAuthorityRequest {
+  const load = (key: string) => (chain.raw ? chainDocument(fixture, key) : atOwnVersion(chainDocument(fixture, key)));
+  const usage = structuredClone(chain.usage ?? fixture.chains.usage);
   return {
-    intent: load(chain.members.intent) as Members["intent"],
-    review: load(chain.members.review) as Members["review"],
-    approval: load(chain.members.approval) as Members["approval"],
-    binding: load(chain.members.binding) as Members["binding"],
-    grant: load(chain.members.grant) as Members["grant"],
+    now: chain.now_ms ?? Date.parse(chain.now ?? fixture.chains.now),
+    usage: (chain.raw ? usage : validateGrantUsage(usage)) as GrantUsage,
+    resultingPositionNotionalMinor: chain.resulting_position_notional_minor ?? fixture.chains.resulting_position_notional_minor,
+    intent: load(chain.members.intent) as ExecutableCommitAuthorityRequest["intent"],
+    review: load(chain.members.review) as ExecutableCommitAuthorityRequest["review"],
+    approval: load(chain.members.approval) as ExecutableCommitAuthorityRequest["approval"],
+    binding: load(chain.members.binding) as ExecutableCommitAuthorityRequest["binding"],
+    grant: load(chain.members.grant) as ExecutableCommitAuthorityRequest["grant"],
   };
 }
 
-function requestOf(fixture: Fixture, members: Members): ExecutableCommitAuthorityRequest {
-  return {
-    now: Date.parse(fixture.chains.now),
-    usage: validateGrantUsage(fixture.chains.usage),
-    resultingPositionNotionalMinor: fixture.chains.resulting_position_notional_minor,
-    ...members,
-  };
-}
-
-/** The version-blind /1 gates. They never read a schema tag, so they are the control for every chain case. */
+/** The version-blind /1 gates. They never read a tag or re-validate, so they are the control for every case. */
 function versionBlind(request: ExecutableCommitAuthorityRequest): { chain: string | null; commit: string | null } {
   const intent = request.intent as NormalizedEquityOrderIntentV1;
   const approval = request.approval as OperatorApprovalReceiptV1;
@@ -354,16 +395,31 @@ function versionBlind(request: ExecutableCommitAuthorityRequest): { chain: strin
   };
 }
 
-test("the fixed refusal is the one the fixture pins", async () => {
+function executable(request: ExecutableCommitAuthorityRequest): { chain: string | null; commit: string | null } {
+  return {
+    chain: reasonOf(verifyExecutableApprovalChain(request.intent, request.review, request.approval, request.now)),
+    commit: reasonOf(verifyExecutableCommitAuthority(request)),
+  };
+}
+
+test("the fixed refusals are the ones the fixture pins", async () => {
   const fixture = await loadFixture();
+  assert.equal(fixture.chains.refusals.version, EXECUTABLE_CHAIN_REFUSAL);
+  assert.equal(fixture.chains.refusals.member, EXECUTABLE_MEMBER_REFUSAL);
+  const problems: string[] = [];
   for (const chain of fixture.chains.cases) {
+    const fixed = chain.category === "version" ? EXECUTABLE_CHAIN_REFUSAL : chain.category === "member" ? EXECUTABLE_MEMBER_REFUSAL : null;
+    if (fixed === null) continue;
     for (const expected of [chain.approval_chain_expect, chain.commit_expect]) {
-      if (expected !== null) assert.equal(expected, EXECUTABLE_CHAIN_REFUSAL, chain.name);
+      if (expected !== null && expected !== fixed) problems.push(`${chain.case}: pins ${JSON.stringify(expected)}`);
     }
+    if (chain.category === "member" && chain.commit_expect !== fixed) problems.push(`${chain.case}: the commit gate must refuse it`);
+    if (chain.raw !== (chain.category === "member")) problems.push(`${chain.case}: only member cases are raw`);
   }
+  assert.deepEqual(problems, []);
 });
 
-test("chain documents validate at their own version and reproduce their digests", async () => {
+test("chain documents validate at their own version and reproduce their digests; raw ones never validate", async () => {
   const fixture = await loadFixture();
   const problems: string[] = [];
   for (const [key, entry] of Object.entries(fixture.chains.documents)) {
@@ -371,50 +427,56 @@ test("chain documents validate at their own version and reproduce their digests"
     if (message !== null) problems.push(`${key}: refused: ${message}`);
     else if (digestOf(atOwnVersion(entry.document)) !== entry.canonical_digest) problems.push(`${key}: digest drifted`);
   }
+  for (const [key, entry] of Object.entries(fixture.chains.raw_documents)) {
+    if (digestOf(entry.document) !== entry.canonical_digest) problems.push(`${key}: digest drifted`);
+    if (messageOf(() => atOwnVersion(entry.document)) === null) problems.push(`${key}: validates at its own tag, so it is not raw`);
+    if (key.startsWith("retagged_v1_")) {
+      // A real retag: the content is /1-valid, only its tag claims /2.
+      const tag = String(entry.document["schema_version"]);
+      const v1Tag = V1_OF[tag];
+      if (v1Tag === undefined) problems.push(`${key}: is not tagged /2`);
+      else {
+        const v1Message = messageOf(() => validatorFor(V1_VALIDATORS, v1Tag)(retag(entry.document, v1Tag)));
+        if (v1Message !== null) problems.push(`${key}: its content is not /1-valid: ${v1Message}`);
+      }
+    }
+  }
   assert.deepEqual(problems, []);
 });
 
-test("the executable gates accept only the all-/2 chain, and every other case fails solely on its version", async () => {
+test("version and member cases fail only on their stated rule: the version-blind gates accept every one", async () => {
   const fixture = await loadFixture();
   const problems: string[] = [];
-  for (const chain of fixture.chains.cases) {
-    const request = requestOf(fixture, membersOf(fixture, chain));
-    // Single-cause control: the version-blind gates accept every case, so the
-    // version rule is the only thing left that can refuse it.
+  for (const chain of fixture.chains.cases.filter((entry) => entry.category !== "branch")) {
+    const request = requestOf(fixture, chain);
     const blind = versionBlind(request);
     if (blind.chain !== null || blind.commit !== null) {
-      problems.push(`${chain.name}: not single-cause; the version-blind gates refuse it: ${blind.chain ?? blind.commit}`);
+      problems.push(`${chain.case}: not single-cause; the version-blind gates refuse it: ${blind.chain ?? blind.commit}`);
     }
-    const chainReason = reasonOf(verifyExecutableApprovalChain(request.intent, request.review, request.approval, request.now));
-    if (chainReason !== chain.approval_chain_expect) {
-      problems.push(`${chain.name}: approval chain expected ${JSON.stringify(chain.approval_chain_expect)}, got ${JSON.stringify(chainReason)}`);
+    const verdict = executable(request);
+    if (verdict.chain !== chain.approval_chain_expect) {
+      problems.push(`${chain.case}: approval chain expected ${JSON.stringify(chain.approval_chain_expect)}, got ${JSON.stringify(verdict.chain)}`);
     }
-    const commitReason = reasonOf(verifyExecutableCommitAuthority(request));
-    if (commitReason !== chain.commit_expect) {
-      problems.push(`${chain.name}: commit expected ${JSON.stringify(chain.commit_expect)}, got ${JSON.stringify(commitReason)}`);
+    if (verdict.commit !== chain.commit_expect) {
+      problems.push(`${chain.case}: commit expected ${JSON.stringify(chain.commit_expect)}, got ${JSON.stringify(verdict.commit)}`);
     }
   }
   assert.deepEqual(problems, []);
 });
 
-test("beyond the version rule the executable gate has exactly the /1 gate's semantics", async () => {
+test("every branch case reaches its pinned refusal identically through the version-blind and the executable gates", async () => {
   const fixture = await loadFixture();
-  const faithful = fixture.chains.cases.find((entry) => entry.case === "all_v2");
-  assert.ok(faithful);
-  const request = requestOf(fixture, membersOf(fixture, faithful));
-  const spent = validateOperatorApprovalV2({
-    ...fixture.chains.documents[faithful.members.approval]!.document,
-    consumed_at: "2026-09-22T14:30:40Z",
-  });
-  const variants: ReadonlyArray<[string, ExecutableCommitAuthorityRequest]> = [
-    ["position cap exceeded", { ...request, resultingPositionNotionalMinor: 900_000 }],
-    ["approval already spent", { ...request, approval: spent }],
-    ["intent expired", { ...request, now: Date.parse("2026-09-22T14:33:01Z") }],
-    ["daily orders exhausted", { ...request, usage: validateGrantUsage({ notional_today_minor: 0, orders_today: 10, open_orders: 0 }) }],
-  ];
-  for (const [label, variant] of variants) {
-    const executable = reasonOf(verifyExecutableCommitAuthority(variant));
-    assert.notEqual(executable, null, `${label}: the executable gate accepted it`);
-    assert.equal(executable, versionBlind(variant).commit, `${label}: the gates disagree`);
+  const problems: string[] = [];
+  for (const chain of fixture.chains.cases.filter((entry) => entry.category === "branch")) {
+    const request = requestOf(fixture, chain);
+    for (const [gate, verdict] of [["version-blind", versionBlind(request)], ["executable", executable(request)]] as const) {
+      if (verdict.chain !== chain.approval_chain_expect) {
+        problems.push(`${chain.case}: ${gate} approval chain expected ${JSON.stringify(chain.approval_chain_expect)}, got ${JSON.stringify(verdict.chain)}`);
+      }
+      if (verdict.commit !== chain.commit_expect) {
+        problems.push(`${chain.case}: ${gate} commit expected ${JSON.stringify(chain.commit_expect)}, got ${JSON.stringify(verdict.commit)}`);
+      }
+    }
   }
+  assert.deepEqual(problems, []);
 });

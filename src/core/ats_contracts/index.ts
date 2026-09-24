@@ -50,6 +50,7 @@ export {
   connectorStatusLine,
   isCapabilityExpired,
   optionalBinding,
+  optionalBindingV2,
   redactBindingForExport,
   validateAccountBinding,
   validateAccountBindingV2,
@@ -111,6 +112,7 @@ export {
 
 export {
   EXECUTABLE_CHAIN_REFUSAL,
+  EXECUTABLE_MEMBER_REFUSAL,
   EXECUTION_OUTCOMES,
   EXECUTION_RECEIPT_SCHEMA,
   EXECUTION_RECEIPT_SCHEMA_V2,

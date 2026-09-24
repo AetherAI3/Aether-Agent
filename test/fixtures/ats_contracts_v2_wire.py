@@ -103,7 +103,12 @@ RECEIPT_SCHEMA = ("aether.ats.execution-receipt/1", "aether.ats.execution-receip
 GRANT_SCHEMA = ("aether.ats.delegated-trading-grant/1", "aether.ats.delegated-trading-grant/2")
 BINDING_SCHEMA = ("aether.ats.account-binding/1", "aether.ats.account-binding/2")
 EXECUTABLE_CHAIN_REFUSAL = (
-    "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record."
+    "Only an order chain whose intent, approval, account binding and grant are all /2 may authorize an executable "
+    "order; any /1 member makes it a historical record."
+)
+EXECUTABLE_MEMBER_REFUSAL = (
+    "An executable order chain member failed re-validation; only freshly validated /2 documents and well-formed "
+    "inputs may authorize an order."
 )
 
 REQUESTED_EXECUTION_MODES = ("observe", "paper", "approve", "auto")
@@ -542,6 +547,11 @@ def validate_account_binding_v2(value: Any, name: str = "Account binding") -> di
     return _account_binding(value, name, BINDING_SCHEMA[1], closed_masked_label)
 
 
+def optional_binding_v2(value: Any, name: str = "Account binding") -> dict[str, Any] | None:
+    """optionalBindingV2: no binding, or a /2 binding whose label is drawn from the closed set."""
+    return None if value is None else validate_account_binding_v2(value, name)
+
+
 V1_VALIDATORS: dict[str, Callable[[Any], dict[str, Any]]] = {
     PROPOSAL_SCHEMA[0]: validate_model_order_proposal,
     INTENT_SCHEMA[0]: validate_order_intent,
@@ -600,8 +610,8 @@ def connector_binding_matches(a: dict[str, Any], b: dict[str, Any]) -> bool:
     return all(a[field] == b[field] for field in CONNECTOR_REF_FIELDS)
 
 
-def approval_chain_verdict(intent: dict[str, Any], review: dict[str, Any], approval: dict[str, Any], now_ms: int) -> dict[str, Any]:
-    """verifyApprovalChain's logic. It never reads a schema tag."""
+def _approval_chain_verdict(intent: dict[str, Any], review: dict[str, Any], approval: dict[str, Any], now_ms: int) -> dict[str, Any]:
+    """verifyApprovalChain's logic. Private: it never reads a tag or re-validates; call verify_executable_approval_chain."""
     intent_digest = digest_of(intent)
     review_digest = digest_of(review)
     if not digest_equals(review["intent_digest"], intent_digest):
@@ -682,11 +692,11 @@ def grant_refusal(grant: dict[str, Any], order: dict[str, Any], usage: dict[str,
     return None
 
 
-def commit_authority_verdict(request: dict[str, Any]) -> dict[str, Any]:
-    """verifyCommitAuthority's logic. It never reads a schema tag."""
+def _commit_authority_verdict(request: dict[str, Any]) -> dict[str, Any]:
+    """verifyCommitAuthority's logic. Private: it never reads a tag or re-validates; call verify_executable_commit_authority."""
     now, grant, usage, binding = request["now"], request["grant"], request["usage"], request["binding"]
     intent, review, approval = request["intent"], request["review"], request["approval"]
-    chain = approval_chain_verdict(intent, review, approval, now)
+    chain = _approval_chain_verdict(intent, review, approval, now)
     if not chain["consistent"]:
         return chain
     connector = intent["connector"]
@@ -721,20 +731,70 @@ def commit_authority_verdict(request: dict[str, Any]) -> dict[str, Any]:
     return CONSISTENT if reason is None else broken(reason)
 
 
-def verify_executable_approval_chain(intent: dict[str, Any], review: dict[str, Any], approval: dict[str, Any], now_ms: int) -> dict[str, Any]:
-    """verifyExecutableApprovalChain: a /2 intent and a /2 approval, then the shared logic."""
-    if intent["schema_version"] != INTENT_SCHEMA[1] or approval["schema_version"] != APPROVAL_SCHEMA[1]:
+def _tag_of(member: Any) -> Any:
+    """A member's schema tag, or None for anything that is not an object. Never raises."""
+    return member.get("schema_version") if isinstance(member, dict) else None
+
+
+def _executable_clock(value: Any) -> int:
+    """The clock an executable gate trusts: whole milliseconds, never NaN, which would pass every expiry check."""
+    return integer(value, "Executable order clock", 0, MAX_SAFE_INTEGER)
+
+
+def verify_executable_approval_chain(intent: Any, review: Any, approval: Any, now_ms: Any) -> dict[str, Any]:
+    """verifyExecutableApprovalChain.
+
+    Version first: a /2 intent and a /2 approval, or EXECUTABLE_CHAIN_REFUSAL.
+    Then re-validation, because a tag is only a claim: the intent and approval
+    with their /2 validators, the review with validate_order_review and the
+    clock as whole milliseconds, or EXECUTABLE_MEMBER_REFUSAL. The verdict runs
+    on the re-validated copies, never on the caller's objects.
+    """
+    if _tag_of(intent) != INTENT_SCHEMA[1] or _tag_of(approval) != APPROVAL_SCHEMA[1]:
         return broken(EXECUTABLE_CHAIN_REFUSAL)
-    return approval_chain_verdict(intent, review, approval, now_ms)
+    try:
+        chain = {
+            "intent": validate_order_intent_v2(intent),
+            "review": validate_order_review(review),
+            "approval": validate_operator_approval_v2(approval),
+            "now": _executable_clock(now_ms),
+        }
+    except Exception:  # fail closed: whatever cannot be re-validated refuses, as TypeScript's catch does
+        return broken(EXECUTABLE_MEMBER_REFUSAL)
+    return _approval_chain_verdict(chain["intent"], chain["review"], chain["approval"], chain["now"])
 
 
-def verify_executable_commit_authority(request: dict[str, Any]) -> dict[str, Any]:
-    """verifyExecutableCommitAuthority: every versioned member at /2, then the shared logic."""
+def verify_executable_commit_authority(request: Any) -> dict[str, Any]:
+    """verifyExecutableCommitAuthority: the ONLY gate that may authorize an executable order.
+
+    Version first: intent, approval, binding and grant all /2, or
+    EXECUTABLE_CHAIN_REFUSAL. Then re-validation: the four with their /2
+    validators, the review, the usage, and the clock and resulting position
+    notional as whole non-negative numbers, or EXECUTABLE_MEMBER_REFUSAL. The
+    verdict runs on the re-validated copies.
+    """
+    raw = request if isinstance(request, dict) else {}
     if (
-        request["intent"]["schema_version"] != INTENT_SCHEMA[1]
-        or request["approval"]["schema_version"] != APPROVAL_SCHEMA[1]
-        or request["binding"]["schema_version"] != BINDING_SCHEMA[1]
-        or request["grant"]["schema_version"] != GRANT_SCHEMA[1]
+        _tag_of(raw.get("intent")) != INTENT_SCHEMA[1]
+        or _tag_of(raw.get("approval")) != APPROVAL_SCHEMA[1]
+        or _tag_of(raw.get("binding")) != BINDING_SCHEMA[1]
+        or _tag_of(raw.get("grant")) != GRANT_SCHEMA[1]
     ):
         return broken(EXECUTABLE_CHAIN_REFUSAL)
-    return commit_authority_verdict(request)
+    try:
+        revalidated = {
+            "now": _executable_clock(raw.get("now")),
+            "grant": validate_trading_grant_v2(raw.get("grant")),
+            "usage": validate_grant_usage(raw.get("usage")),
+            "binding": validate_account_binding_v2(raw.get("binding")),
+            "intent": validate_order_intent_v2(raw.get("intent")),
+            "review": validate_order_review(raw.get("review")),
+            "approval": validate_operator_approval_v2(raw.get("approval")),
+            "resulting_position_notional_minor": integer(
+                raw.get("resulting_position_notional_minor"),
+                "Executable order resulting position notional", 0, MAX_SAFE_INTEGER,
+            ),
+        }
+    except Exception:  # fail closed: whatever cannot be re-validated refuses, as TypeScript's catch does
+        return broken(EXECUTABLE_MEMBER_REFUSAL)
+    return _commit_authority_verdict(revalidated)

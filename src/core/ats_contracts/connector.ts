@@ -329,3 +329,8 @@ export function connectorStatusLine(
 export function optionalBinding(value: unknown, name = "Account binding"): BrokerAccountBindingV1 | null {
   return nullable(value, name, (v, n) => validateAccountBinding(v, n));
 }
+
+/** `optionalBinding` for `/2`: no binding, or a `/2` binding whose label is drawn from the closed set. */
+export function optionalBindingV2(value: unknown, name = "Account binding"): BrokerAccountBindingV2 | null {
+  return nullable(value, name, (v, n) => validateAccountBindingV2(v, n));
+}

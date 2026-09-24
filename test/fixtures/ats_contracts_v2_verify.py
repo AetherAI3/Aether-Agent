@@ -21,6 +21,7 @@ from ats_contracts_v2_wire import (  # noqa: E402
     APPROVAL_SCHEMA,
     BINDING_SCHEMA,
     EXECUTABLE_CHAIN_REFUSAL,
+    EXECUTABLE_MEMBER_REFUSAL,
     GRANT_SCHEMA,
     INTENT_SCHEMA,
     PROPOSAL_SCHEMA,
@@ -29,11 +30,13 @@ from ats_contracts_v2_wire import (  # noqa: E402
     V1_VALIDATORS,
     V2_VALIDATORS,
     ContractError,
-    approval_chain_verdict,
+    _approval_chain_verdict,
+    _commit_authority_verdict,
     canonical_json,
-    commit_authority_verdict,
     digest_of,
     epoch_ms,
+    optional_binding_v2,
+    validate_account_binding_v2,
     validate_grant_usage,
     verify_executable_approval_chain,
     verify_executable_commit_authority,
@@ -52,7 +55,13 @@ FROZEN_LABEL_CASES = (
     "right_to_left_override", "zero_width_space", "byte_order_mark",
 )
 REJECTED_LABEL_CASES = ("five_ascii_digits",)
-CHAIN_CASES = ("all_v2", "intent_v1", "approval_v1", "binding_v1", "grant_v1", "all_v1")
+VERSION_CASES = ("all_v2", "intent_v1", "approval_v1", "binding_v1", "grant_v1", "all_v1")
+MEMBER_CASES = (
+    "retagged_v1_chain", "retagged_v1_binding", "retagged_v1_grant", "unvalidated_intent", "unvalidated_review",
+    "unvalidated_approval", "unvalidated_usage", "unvalidated_clock", "unvalidated_position",
+)
+# Distinct refusal messages the branch cases pin: one per reachable refusal branch.
+BRANCH_MESSAGE_FLOOR = 50
 MIN_ACCEPTS = 8
 
 
@@ -103,8 +112,13 @@ def check_coverage(fixture: dict[str, Any]) -> list[str]:
         missing += [f"{tag} frozen label {c}" for c in FROZEN_LABEL_CASES if not has("frozen_weakness", tag, "label", c)]
         missing += [f"{tag} label reject {c}" for c in REJECTED_LABEL_CASES if not has("rejects", tag, "label", c)]
     missing += [f"{tag} /1 tag reject" for tag in V2_SCHEMAS if not has("rejects", tag, "schema_tag", "v1_tag")]
-    cases = {entry["case"] for entry in fixture["chains"]["cases"]}
-    missing += [f"chain case {c}" for c in CHAIN_CASES if c not in cases]
+    cases = fixture["chains"]["cases"]
+    for category, ids in (("version", VERSION_CASES), ("member", MEMBER_CASES)):
+        present = {entry["case"] for entry in cases if entry["category"] == category}
+        missing += [f"{category} chain case {c}" for c in ids if c not in present]
+    branch_messages = {entry["commit_expect"] for entry in cases if entry["category"] == "branch"}
+    if len(branch_messages) < BRANCH_MESSAGE_FLOOR:
+        missing.append(f"branch messages fell to {len(branch_messages)}")
     if len(fixture["accepts"]) < MIN_ACCEPTS:
         missing.append(f"accepts fell to {len(fixture['accepts'])}")
     return missing
@@ -175,44 +189,124 @@ def check_refusals(fixture: dict[str, Any], bases: dict[str, dict[str, Any]]) ->
     return failures
 
 
-def check_chains(fixture: dict[str, Any]) -> list[str]:
+def check_optional_binding(fixture: dict[str, Any], bases: dict[str, dict[str, Any]]) -> list[str]:
     failures: list[str] = []
-    chains = fixture["chains"]
-    parsed: dict[str, dict[str, Any]] = {}
+    binding = bases[BINDING_SCHEMA[1]]
+    if optional_binding_v2(None) is not None:
+        failures.append("optional_binding_v2 did not pass through an absent binding")
+    if digest_of(optional_binding_v2(binding)) != digest_of(validate_account_binding_v2(binding)):
+        failures.append("optional_binding_v2 changed a valid binding")
+    override = next((e for e in fixture["frozen_weakness"] if e["case"] == "right_to_left_override"), None)
+    if override is None:
+        failures.append("the direction-override label vector left the fixture")
+    elif refusal_of(lambda: optional_binding_v2(apply_patches(binding, override["patches"]))) != override["expect"]:
+        failures.append("optional_binding_v2 accepted a direction-override label")
+    if refusal_of(lambda: optional_binding_v2(retag(binding, BINDING_SCHEMA[0]))) != f"Account binding must declare schema {BINDING_SCHEMA[1]}.":
+        failures.append("optional_binding_v2 accepted a /1 binding")
+    return failures
+
+
+# --- Chains -------------------------------------------------------------------------
+
+
+def chain_document(chains: dict[str, Any], key: str) -> dict[str, Any]:
+    entry = chains["documents"].get(key) or chains["raw_documents"].get(key)
+    if entry is None:
+        raise AssertionError(f"missing chain document {key}")
+    return copy.deepcopy(entry["document"])
+
+
+def request_of(chains: dict[str, Any], case: dict[str, Any]) -> dict[str, Any]:
+    """A raw case hands the gates the parsed JSON untouched; every other case the validators' output."""
+    def load(key: str) -> dict[str, Any]:
+        document = chain_document(chains, key)
+        return document if case["raw"] else at_own_version(document)
+
+    usage = copy.deepcopy(case.get("usage", chains["usage"]))
+    return {
+        "now": case["now_ms"] if "now_ms" in case else epoch_ms(case.get("now", chains["now"])),
+        "usage": usage if case["raw"] else validate_grant_usage(usage),
+        "resulting_position_notional_minor": case.get("resulting_position_notional_minor", chains["resulting_position_notional_minor"]),
+        **{role: load(key) for role, key in case["members"].items()},
+    }
+
+
+def reason_of(verdict: dict[str, Any]) -> str | None:
+    return None if verdict["consistent"] else verdict["reason"]
+
+
+def version_blind(request: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The shared logic alone: it never reads a tag or re-validates, so it is the control."""
+    return (
+        reason_of(_approval_chain_verdict(request["intent"], request["review"], request["approval"], request["now"])),
+        reason_of(_commit_authority_verdict(request)),
+    )
+
+
+def executable(request: dict[str, Any]) -> tuple[str | None, str | None]:
+    return (
+        reason_of(verify_executable_approval_chain(request["intent"], request["review"], request["approval"], request["now"])),
+        reason_of(verify_executable_commit_authority(request)),
+    )
+
+
+def check_chain_documents(chains: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
     for key, entry in chains["documents"].items():
         try:
-            parsed[key] = at_own_version(entry["document"])
+            parsed = at_own_version(entry["document"])
         except ContractError as error:
             failures.append(f"chain document {key}: refused: {error}")
             continue
-        if digest_of(parsed[key]) != entry["canonical_digest"]:
+        if digest_of(parsed) != entry["canonical_digest"]:
             failures.append(f"chain document {key}: digest drifted")
-    now = epoch_ms(chains["now"])
-    usage = validate_grant_usage(chains["usage"])
+    for key, entry in chains["raw_documents"].items():
+        document = entry["document"]
+        if digest_of(document) != entry["canonical_digest"]:
+            failures.append(f"raw document {key}: digest drifted")
+        if refusal_of(lambda: at_own_version(document)) is None:
+            failures.append(f"raw document {key}: validates at its own tag, so it is not raw")
+        if key.startswith("retagged_v1_"):
+            v1_tag = V1_OF.get(document.get("schema_version"))
+            if v1_tag is None:
+                failures.append(f"raw document {key}: is not tagged /2")
+            elif refusal_of(lambda: V1_VALIDATORS[v1_tag](retag(document, v1_tag))) is not None:
+                failures.append(f"raw document {key}: its content is not /1-valid")
+    return failures
+
+
+def check_chains(fixture: dict[str, Any]) -> list[str]:
+    chains = fixture["chains"]
+    failures = check_chain_documents(chains)
+    if chains["refusals"]["version"] != EXECUTABLE_CHAIN_REFUSAL:
+        failures.append("the version refusal differs from the fixture")
+    if chains["refusals"]["member"] != EXECUTABLE_MEMBER_REFUSAL:
+        failures.append("the member refusal differs from the fixture")
+    fixed_for = {"version": EXECUTABLE_CHAIN_REFUSAL, "member": EXECUTABLE_MEMBER_REFUSAL}
     for case in chains["cases"]:
-        members = {role: parsed.get(key) for role, key in case["members"].items()}
-        if any(document is None for document in members.values()):
-            failures.append(f"{case['name']}: a member document did not parse")
+        name, category = case["case"], case["category"]
+        if case["raw"] != (category == "member"):
+            failures.append(f"{name}: only member cases are raw")
+        try:
+            request = request_of(chains, case)
+        except (ContractError, AssertionError) as error:
+            failures.append(f"{name}: could not build the request: {error}")
             continue
-        request = {**members, "now": now, "usage": usage,
-                   "resulting_position_notional_minor": chains["resulting_position_notional_minor"]}
-        # Single-cause control: the version-blind logic accepts every case.
-        blind = [approval_chain_verdict(members["intent"], members["review"], members["approval"], now),
-                 commit_authority_verdict(request)]
-        for verdict in blind:
-            if not verdict["consistent"]:
-                failures.append(f"{case['name']}: not single-cause; the version-blind logic refuses it: {verdict['reason']}")
-        results = (
-            ("approval chain", verify_executable_approval_chain(members["intent"], members["review"], members["approval"], now),
-             case["approval_chain_expect"]),
-            ("commit", verify_executable_commit_authority(request), case["commit_expect"]),
-        )
-        for label, verdict, expected in results:
-            reason = None if verdict["consistent"] else verdict["reason"]
-            if reason != expected:
-                failures.append(f"{case['name']}: {label} expected {expected!r}, got {reason!r}")
-            if expected is not None and expected != EXECUTABLE_CHAIN_REFUSAL:
-                failures.append(f"{case['name']}: {label} pins a message other than the fixed refusal")
+        expected = (case["approval_chain_expect"], case["commit_expect"])
+        blind = version_blind(request)
+        if category == "branch":
+            if blind != expected:
+                failures.append(f"{name}: version-blind expected {expected!r}, got {blind!r}")
+        else:
+            if blind != (None, None):
+                failures.append(f"{name}: not single-cause; the version-blind logic refuses it: {blind!r}")
+            if any(value not in (None, fixed_for[category]) for value in expected):
+                failures.append(f"{name}: pins a message other than the fixed {category} refusal")
+        verdict = executable(request)
+        if verdict[0] != expected[0]:
+            failures.append(f"{name}: approval chain expected {expected[0]!r}, got {verdict[0]!r}")
+        if verdict[1] != expected[1]:
+            failures.append(f"{name}: commit expected {expected[1]!r}, got {verdict[1]!r}")
     return failures
 
 
@@ -226,6 +320,7 @@ def check_fixture(fixture: dict[str, Any]) -> list[str]:
     failures += check_coverage(fixture)
     failures += check_vectors(fixture, bases)
     failures += check_refusals(fixture, bases)
+    failures += check_optional_binding(fixture, bases)
     failures += check_chains(fixture)
     return failures
 
@@ -242,6 +337,7 @@ def main() -> int:
         "rejects": len(fixture["rejects"]),
         "frozen_weakness": len(fixture["frozen_weakness"]),
         "chain_documents": len(chains["documents"]),
+        "raw_documents": len(chains["raw_documents"]),
         "chain_cases": len(chains["cases"]),
     }
     total = sum(counts.values())

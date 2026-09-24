@@ -16,8 +16,10 @@
 //
 // The `/2` successors (same fields, strict equity ticker) share each `/1`
 // validator body. Only verifyExecutableCommitAuthority() may authorize an
-// executable order, and it admits nothing but a `/2` chain; the `/1` gates are
-// kept, version-blind as they always were, for historical records.
+// executable order: it admits nothing but a `/2` chain, re-validates every
+// member and input before deciding, and decides on the re-validated copies.
+// The `/1` gates are kept, version-blind as they always were, for historical
+// records.
 
 import {
   choice,
@@ -40,12 +42,19 @@ import {
 } from "./primitives.js";
 import { digestEquals, digestOf } from "./canonical.js";
 import { isHalted, permitsOrderSubmission } from "./mode.js";
-import { ACCOUNT_BINDING_SCHEMA_V2, type BrokerAccountBindingV1, type BrokerAccountBindingV2 } from "./connector.js";
+import {
+  ACCOUNT_BINDING_SCHEMA_V2,
+  validateAccountBindingV2,
+  type BrokerAccountBindingV1,
+  type BrokerAccountBindingV2,
+} from "./connector.js";
 import {
   grantPermits,
   ORDER_SIDES,
   ORDER_TYPES,
   TRADING_GRANT_SCHEMA_V2,
+  validateGrantUsage,
+  validateTradingGrantV2,
   type DelegatedTradingGrantV1,
   type DelegatedTradingGrantV2,
   type GrantUsage,
@@ -57,6 +66,8 @@ import {
   isReviewApprovable,
   ORDER_INTENT_SCHEMA_V2,
   validateConnectorBindingRef,
+  validateOrderIntentV2,
+  validateOrderReview,
   type BrokerOrderReviewReceiptV1,
   type ConnectorBindingRef,
   type NormalizedEquityOrderIntentV1,
@@ -71,11 +82,22 @@ export const EXECUTION_RECEIPT_SCHEMA = "aether.ats.execution-receipt/1" as cons
 export const EXECUTION_RECEIPT_SCHEMA_V2 = "aether.ats.execution-receipt/2" as const;
 
 /**
- * The one refusal the executable gates add. Fixed text, never parameterized,
- * so a caller can match it exactly and no document content reaches it.
+ * The two refusals the executable gates add. Fixed text, never parameterized,
+ * so a caller can match them exactly and no document content reaches them.
+ *
+ * The version refusal names the four members that have a `/2`; the review
+ * receipt has one version and is bound to its intent by digest.
  */
 export const EXECUTABLE_CHAIN_REFUSAL =
-  "Only a /2 order chain may authorize an executable order; a /1 or mixed-version chain is a historical record." as const;
+  "Only an order chain whose intent, approval, account binding and grant are all /2 may authorize an executable order; any /1 member makes it a historical record." as const;
+
+/**
+ * A chain whose tags all say `/2` but whose content the gate cannot re-validate:
+ * a `/1` document retagged in code, a document that was never validated, or an
+ * input (usage, clock, resulting position) that is not a well-formed value.
+ */
+export const EXECUTABLE_MEMBER_REFUSAL =
+  "An executable order chain member failed re-validation; only freshly validated /2 documents and well-formed inputs may authorize an order." as const;
 
 export interface OperatorApprovalReceiptV1 {
   readonly schema_version: typeof OPERATOR_APPROVAL_SCHEMA;
@@ -255,6 +277,10 @@ function broken(reason: string): ChainVerdict {
  * re-run the preview and carry on; that is precisely how an approval minted
  * against a paper preview ends up authorizing a live order, so there is no
  * refresh path in this module to reach for.
+ *
+ * @deprecated For historical `/1` records only. It never reads a schema tag and
+ * never re-validates its inputs; anything that may execute must use
+ * `verifyExecutableApprovalChain()`.
  */
 export function verifyApprovalChain(
   intent: NormalizedEquityOrderIntentV1,
@@ -267,11 +293,18 @@ export function verifyApprovalChain(
 
 /**
  * `verifyApprovalChain` for an order that may execute. It admits only a `/2`
- * intent and a `/2` approval and refuses anything else with
- * EXECUTABLE_CHAIN_REFUSAL before any other check; past that it runs the very
- * same version-blind logic. The review receipt has one version: it carries no
- * ticker or label, and its `intent_digest` covers the intent's schema tag, so
- * it can only answer the `/2` intent it was minted for.
+ * intent and a `/2` approval, refusing anything else with
+ * EXECUTABLE_CHAIN_REFUSAL before any other check. A tag is only a claim, so
+ * it then re-validates the intent and approval with their `/2` validators, the
+ * review with `validateOrderReview` and the clock as a whole number of
+ * milliseconds, refusing with EXECUTABLE_MEMBER_REFUSAL if any of them fails:
+ * a `/1` document retagged `/2` in code carries whatever it was validated
+ * with. The verdict then runs on the re-validated copies, never on the
+ * caller's objects. Past that it is the very same version-blind logic.
+ *
+ * The review receipt has one version: it carries no ticker or label, and its
+ * `intent_digest` covers the intent's schema tag, so it can only answer the
+ * `/2` intent it was minted for.
  *
  * Inputs are typed as either version on purpose. A document deserialized at
  * runtime carries whatever tag it carries, so the refusal has to be a verdict
@@ -283,10 +316,31 @@ export function verifyExecutableApprovalChain(
   approval: OperatorApprovalReceiptV1 | OperatorApprovalReceiptV2,
   nowMs: number = Date.now(),
 ): ChainVerdict {
-  if (intent.schema_version !== ORDER_INTENT_SCHEMA_V2 || approval.schema_version !== OPERATOR_APPROVAL_SCHEMA_V2) {
+  if (tagOf(intent) !== ORDER_INTENT_SCHEMA_V2 || tagOf(approval) !== OPERATOR_APPROVAL_SCHEMA_V2) {
     return broken(EXECUTABLE_CHAIN_REFUSAL);
   }
-  return approvalChainVerdict(intent, review, approval, nowMs);
+  let chain: { intent: NormalizedEquityOrderIntentV2; review: BrokerOrderReviewReceiptV1; approval: OperatorApprovalReceiptV2; now: number };
+  try {
+    chain = {
+      intent: validateOrderIntentV2(intent),
+      review: validateOrderReview(review),
+      approval: validateOperatorApprovalV2(approval),
+      now: executableClock(nowMs),
+    };
+  } catch {
+    return broken(EXECUTABLE_MEMBER_REFUSAL);
+  }
+  return approvalChainVerdict(chain.intent, chain.review, chain.approval, chain.now);
+}
+
+/** A member's schema tag, or undefined for anything that is not an object. Never throws. */
+function tagOf(member: unknown): unknown {
+  return typeof member === "object" && member !== null ? (member as { readonly schema_version?: unknown }).schema_version : undefined;
+}
+
+/** The clock an executable gate trusts: whole milliseconds, never NaN, which would pass every expiry check. */
+function executableClock(value: unknown): number {
+  return integer(value, "Executable order clock", 0, Number.MAX_SAFE_INTEGER);
 }
 
 /** The chain logic both gates share. It never reads a schema tag. */
@@ -404,29 +458,65 @@ export interface ExecutableCommitAuthorityRequest {
  * Spec 1 section 16 requires kill and pause to win *after* review and
  * immediately before commit, so the effective-mode check lives here rather
  * than being inherited from whatever the review said minutes ago.
+ *
+ * @deprecated For historical `/1` records only. It never reads a schema tag and
+ * never re-validates its inputs; the only gate that may authorize an
+ * executable order is `verifyExecutableCommitAuthority()`.
  */
 export function verifyCommitAuthority(request: CommitAuthorityRequest): ChainVerdict {
   return commitAuthorityVerdict(request);
 }
 
 /**
- * The ONLY gate that may authorize an executable order. It admits a chain
- * whose intent, approval, account binding and grant are all `/2`, refusing
- * anything else with EXECUTABLE_CHAIN_REFUSAL before any other check; past
- * that it is `verifyCommitAuthority`'s logic, unchanged. `/1` chains stay
- * valid historical records and are never executable.
+ * The ONLY gate that may authorize an executable order.
+ *
+ *   1. Version: the intent, approval, account binding and grant must all be
+ *      tagged `/2`, or it refuses with EXECUTABLE_CHAIN_REFUSAL.
+ *   2. Re-validation: a tag is only a claim, so every member is re-validated
+ *      (the four with their `/2` validators, the review with
+ *      `validateOrderReview`, the usage with `validateGrantUsage`) and the
+ *      clock and resulting position notional must be whole, non-negative
+ *      numbers; anything that fails refuses with EXECUTABLE_MEMBER_REFUSAL.
+ *      A NaN clock would pass every expiry check and a NaN or negative
+ *      position or usage every limit, so these are checked as strictly as
+ *      the documents.
+ *   3. Verdict: `verifyCommitAuthority`'s logic, unchanged, run on the
+ *      re-validated copies rather than on the caller's objects.
+ *
+ * `/1` chains stay valid historical records and are never executable.
  */
 export function verifyExecutableCommitAuthority(request: ExecutableCommitAuthorityRequest): ChainVerdict {
-  const { intent, approval, binding, grant } = request;
+  const raw: { readonly [K in keyof ExecutableCommitAuthorityRequest]?: unknown } =
+    typeof request === "object" && request !== null ? request : {};
   if (
-    intent.schema_version !== ORDER_INTENT_SCHEMA_V2 ||
-    approval.schema_version !== OPERATOR_APPROVAL_SCHEMA_V2 ||
-    binding.schema_version !== ACCOUNT_BINDING_SCHEMA_V2 ||
-    grant.schema_version !== TRADING_GRANT_SCHEMA_V2
+    tagOf(raw.intent) !== ORDER_INTENT_SCHEMA_V2 ||
+    tagOf(raw.approval) !== OPERATOR_APPROVAL_SCHEMA_V2 ||
+    tagOf(raw.binding) !== ACCOUNT_BINDING_SCHEMA_V2 ||
+    tagOf(raw.grant) !== TRADING_GRANT_SCHEMA_V2
   ) {
     return broken(EXECUTABLE_CHAIN_REFUSAL);
   }
-  return commitAuthorityVerdict(request);
+  let revalidated: ExecutableCommitAuthorityRequest;
+  try {
+    revalidated = {
+      now: executableClock(raw.now),
+      grant: validateTradingGrantV2(raw.grant),
+      usage: validateGrantUsage(raw.usage),
+      binding: validateAccountBindingV2(raw.binding),
+      intent: validateOrderIntentV2(raw.intent),
+      review: validateOrderReview(raw.review),
+      approval: validateOperatorApprovalV2(raw.approval),
+      resultingPositionNotionalMinor: integer(
+        raw.resultingPositionNotionalMinor,
+        "Executable order resulting position notional",
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    };
+  } catch {
+    return broken(EXECUTABLE_MEMBER_REFUSAL);
+  }
+  return commitAuthorityVerdict(revalidated);
 }
 
 /** The commit logic both gates share. It never reads a schema tag. */
