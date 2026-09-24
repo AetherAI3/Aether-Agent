@@ -35,7 +35,7 @@ file bytes.
 | `ats_contracts_golden.json` | `baed2ed715d697c3040ffdf5318734d20fa39b835719ac3b79896d9ba6bd7f15` | `AGENT_CONTRACT_FILE_SHA256` in `ats-mcp/tests/test_agent_wire_conformance.py`; byte `cmp` in `.github/workflows/ats-mcp.yml` |
 | `ats_model_proposal_golden.json` | `f6d07b91a5036729a7eb1d5acf241de1a6ea70ec60bd807629b959c16d84b5e1` | `AGENT_PROPOSAL_FILE_SHA256` in the same test; byte `cmp` in `ats-mcp.yml` |
 | `ats_browser_order_golden.json` | `c71d623885c6253725c674a0f1c85a51a729bcd41992ef9b8ac41227431a492c` | `AGENT_BROWSER_ORDER_FILE_SHA256` in `ats-mcp/tests/test_agent_browser_ats_order_conformance.py`; byte `cmp` in `ats-mcp.yml` |
-| `ats_contracts_v2_golden.json` | `837994a7dc3624e807eeef57e629648f0b8b19362c31ab4fa3958da6203d3544` | **Pending ATSv2 pin.** It lands with the Spec 1 `/2` closure (branch `feat/ats-contracts-v2-closure`); ATSv2 pins it in lane W1-D. |
+| `ats_contracts_v2_golden.json` | `05cc87082c641a4c14714bdcf66e1b227b105fac3920dff2542f3e37784eea21` | **Pending ATSv2 pin.** It lands with the Spec 1 `/2` closure (branch `feat/ats-contracts-v2-closure`); ATSv2 pins it, and the two fixed gate refusals it carries, in lane W1-D. |
 
 The first three are byte-identical at every commit in the next section and at
 the head of the `/2` closure branch, which does not modify them.
@@ -70,17 +70,25 @@ fixture is lane W1-D.
   Python verifiers (`ats_contracts_golden_verify.py`,
   `ats_browser_order_verify.py`, `ats_contracts_v2_verify.py`) pass on the
   `/2` closure branch, and CI runs all three on Linux and Windows.
-- **Zero order tools registered.** `test/ats_no_order_tool.test.ts` reads 32
-  tool, action and command registries, from the brain tool list and
+- **Zero order tools registered.** `test/ats_no_order_tool.test.ts` reads 35
+  tool, action, command and flag registries, from the brain tool list and
   CloudBrain's live advertisement to every command dispatcher in
-  `src/commands`. It finds none of the order contracts' 17 operations, no
-  order, trade or position being submitted, committed, placed, cancelled,
-  executed, closed, routed or amended, no buy, sell, short or flatten, and no
-  approval. It also finds no import of the proposal or browser-order
-  validators outside `src/core/ats_contracts/`, and no MCP server. The
-  inventory covers what this CLI registers, advertises and dispatches; tools
-  offered by a user-configured MCP server or by Cloud's MCP broker are outside
-  it, and the CLI's `ToolExecutor` refuses any name outside `TOOLS`.
+  `src/commands`. It finds none of the following:
+  - any of the order contracts' 17 operations;
+  - an order, trade, position or ticket being submitted, created, placed,
+    cancelled, executed, closed, routed or amended, including forms run
+    together;
+  - a buy, sell, short, trade, flatten, rebalance or liquidation;
+  - an approval;
+  - in an ATS-scoped registry, a bare submit, place, commit or cancel.
+
+  Three reviewed exemptions cover the GitHub `--approve` flag and the ATS
+  settings mode `approve`. The test also finds no import of the proposal,
+  order-chain or browser-order validators outside `src/core/ats_contracts/`,
+  and no MCP server. The inventory covers what this CLI registers, advertises
+  and dispatches. Tools offered by a user-configured MCP server or by Cloud's
+  MCP broker are outside it, and the CLI's `ToolExecutor` refuses any name
+  outside `TOOLS`.
 - **Doctor refusal projection.** Not produced by this lane. The execution
   spec records the last observed projection: `paper_order_ready=false`,
   `provider_sandbox_ready=false`, `broker_live_ready=false`.
