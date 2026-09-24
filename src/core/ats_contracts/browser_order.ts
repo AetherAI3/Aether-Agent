@@ -36,9 +36,9 @@
 // ATSv2 makes from both; browser_order_values.ts the shared value shapes.
 
 import type { ExecutionEnvironment } from "./mode.js";
-import { choice, closed, digest, fail, ident, integer, nullable, schemaTag, timestamp } from "./primitives.js";
+import { choice, closed, digest, equityTicker, fail, ident, integer, nullable, schemaTag, timestamp } from "./primitives.js";
 import {
-  MAX_GENERATION, equitySymbol, validateAdapterPin, validatePrincipal, validateTicket,
+  MAX_GENERATION, validateAdapterPin, validatePrincipal, validateTicket,
   type BrowserAdapterPin, type BrowserPrincipal, type BrowserTicket,
 } from "./browser_order_values.js";
 
@@ -186,7 +186,7 @@ const PARAM_VALIDATORS: ParamValidators = {
   verify_session: noParams,
   read_market: (value, name) => {
     const raw = closed(value, name, ["symbol"] as const);
-    return Object.freeze({ symbol: equitySymbol(raw.symbol, `${name} symbol`) });
+    return Object.freeze({ symbol: equityTicker(raw.symbol, `${name} symbol`) });
   },
   read_account: noParams,
   prepare_ticket: ticketParams,
@@ -205,7 +205,7 @@ const PARAM_VALIDATORS: ParamValidators = {
   },
   read_positions: (value, name) => {
     const raw = closed(value, name, ["symbol"] as const);
-    return Object.freeze({ symbol: nullable(raw.symbol, `${name} symbol`, equitySymbol) });
+    return Object.freeze({ symbol: nullable(raw.symbol, `${name} symbol`, equityTicker) });
   },
   cancel_order: (value, name) => {
     const raw = closed(value, name, ["site_order_id"] as const);
