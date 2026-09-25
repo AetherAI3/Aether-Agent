@@ -372,6 +372,17 @@ test("the v0.3.0 operator packet keeps an immutable publication-base inventory",
  */
 const FEATURE_MANIFEST: Array<{ claim: string; command?: string; packaged: string[] }> = [
   {
+    claim: "local PC capability map, doctor and approved browser proof — `aether pc`",
+    command: "pc",
+    packaged: [
+      "dist/src/commands/pc.js",
+      "dist/src/core/pc/broker.js",
+      "dist/src/core/pc/doctor.js",
+      "dist/src/core/browser_runtime.js",
+      "dist/src/core/device_runtime/telemetry.js",
+    ],
+  },
+  {
     claim: "shared account agent inventory, setup and Online DM chat — `aether agent`",
     command: "agent",
     packaged: ["dist/src/commands/managed_agents.js", "dist/src/core/managed_agents.js"],

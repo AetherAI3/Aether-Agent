@@ -18,6 +18,7 @@
 import { cpus as osCpus, freemem as osFreemem, totalmem as osTotalmem } from "node:os";
 import { spawnSync } from "node:child_process";
 import { statfsSync } from "node:fs";
+import { childEnv } from "../child_env.js";
 import {
   OBSERVATION_SCHEMA,
   type DeviceObservation,
@@ -357,13 +358,15 @@ function probeWindowsSwap(): SwapSnapshot {
   try {
     const script =
       "$os = Get-CimInstance Win32_OperatingSystem; " +
-      "$pf = Get-CimInstance Win32_PageFileUsage | Measure-Object -Property CurrentUsage,AllocatedBaseSize -Sum; " +
       "$totalVirt = [int64]$os.TotalVirtualMemorySize; $freeVirt = [int64]$os.FreeVirtualMemory; " +
       "[PSCustomObject]@{ totalVirtKb = $totalVirt; freeVirtKb = $freeVirt } | ConvertTo-Json -Compress";
-    const res = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    const res = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8",
       windowsHide: true,
       timeout: 2500,
+      maxBuffer: 64 * 1024,
+      shell: false,
+      env: childEnv(),
     });
     const parsed = JSON.parse((res.stdout ?? "").trim()) as { totalVirtKb?: number; freeVirtKb?: number };
     const totalKb = typeof parsed.totalVirtKb === "number" ? parsed.totalVirtKb : null;

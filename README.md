@@ -213,11 +213,29 @@ at your configured endpoint.
 | `aether review` | See the changes and the current verification evidence. |
 | `aether mcp` | List, diagnose, or repair MCP servers. |
 | `aether doctor` | Check the environment. |
+| `aether pc map\|doctor\|verify-browser\|open` | Inspect PC capabilities and local performance; verify a browser or open a named app after fresh interactive approval. |
 | `aether ship` | Preview and approve a branch and pull request. |
 
 `aether help <command>` has the details, or read the generated
 [command reference](docs/generated/commands.md) for every flag, slash command,
 environment variable, and exit code.
+
+### PC capability preview
+
+`aether pc map` shows which PC actions this source build can actually perform.
+`aether pc doctor claude`, `chatgpt`, `aether-cloud`, or `ollama` samples local
+CPU, memory, disk, network-interface, and process health. Add `--probe-network`
+to contact only the named target and measure three reachability requests. This
+does not measure model inference speed. `aether pc verify-browser` opens a local
+readiness page and verifies that a browser rendered it through a one-use loopback
+callback. `aether pc open claude` opens a fixed
+site after a fresh terminal approval; `--yes` cannot approve that action.
+
+Desktop capture/input, browser automation, system changes, and general PC
+command execution remain unavailable until their scoped driver and OS sandbox
+are implemented and tested. The existing coding `run_shell` tool is separate.
+See [PC capability plane](docs/pc-capability-plane.md) for the boundary and
+follow-on implementation gates.
 
 <!-- SOURCE-0.3-WORKFLOWS:END -->
 

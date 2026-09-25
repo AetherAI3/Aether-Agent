@@ -1638,6 +1638,83 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "shell:pc",
+    "surface": "shell",
+    "name": "pc",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "[map|doctor|verify-browser|open] [target]",
+    "summary": "inspect PC capabilities and diagnose app performance with scoped actions",
+    "detailedHelp": "aether pc map | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt]\nInspect local metrics and capability availability. Network probes require --probe-network. Browser verification opens a loopback page and requires fresh interactive approval. Opening an app also requires approval; --yes cannot approve PC actions.",
+    "section": "System",
+    "hidden": false,
+    "permissionClass": "local-write",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "shell.pc",
+    "acceptedGlobalFlags": [
+      "agent",
+      "all",
+      "apply",
+      "audit",
+      "available",
+      "ci",
+      "cwd",
+      "effort",
+      "help",
+      "interactive",
+      "json",
+      "junit",
+      "license-key",
+      "local",
+      "model",
+      "no-browser",
+      "no-log",
+      "no-skills",
+      "out",
+      "password",
+      "pool",
+      "quiet",
+      "repo",
+      "resume",
+      "scope",
+      "skill",
+      "swarm",
+      "test-cmd",
+      "token",
+      "username",
+      "version",
+      "with-token",
+      "worktree",
+      "yes"
+    ],
+    "ownedFlags": {
+      "probe-network": { "type": "boolean", "default": false }
+    },
+    "handler": {
+      "id": "handler:shell:pc",
+      "kind": "lazy",
+      "module": "src/commands/cli_registry.ts",
+      "symbol": "DISPATCH_COMMANDS"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "pc",
+      "usage": "aether pc [map|doctor|verify-browser|open] [target]",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Read-only PC map and doctor with a one-use approval broker for browser readiness proof and named browser opens. Desktop and unsandboxed command actions remain unavailable."
+    }
+  },
+  {
     "key": "shell:audit",
     "surface": "shell",
     "name": "audit",

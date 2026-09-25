@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:3c905f43bdae6f04aa78c07bcc15ea28815c85b8931784ce3c032a50579f4cdb -->
+<!-- manifest-digest: sha256:7e770e13db9311bc9b660412df8bb642f12c249c0082a3cee56e46279614e51d -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -232,6 +232,16 @@ manage generated media
 Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.output` · Aliases: `aether out`
 
 ### System
+
+#### `aether pc [map|doctor|verify-browser|open] [target]`
+
+inspect PC capabilities and diagnose app performance with scoped actions
+
+Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.pc`
+
+Command flags:
+
+- `--probe-network`
 
 #### `aether audit [limit]`
 

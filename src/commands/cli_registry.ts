@@ -131,6 +131,13 @@ export const SHELL_RUNTIME_HANDLERS: Array<Pick<DispatchedCommand, "name" | "loa
     },
   },
   {
+    name: "pc",
+    load: async () => {
+      const { cmdPc } = await import("./pc.js");
+      return (ctx, argv, flags) => cmdPc(ctx, argv, flags);
+    },
+  },
+  {
     // Lane SC-DEVICE-01. Hidden (dev-only, default-off) but a real dispatch-table
     // entry so `aether device …` runs the command group instead of billing a
     // chat turn. It owns no flags — subcommands are positionals and it reads only
