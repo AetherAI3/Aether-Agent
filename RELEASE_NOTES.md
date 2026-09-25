@@ -2,6 +2,14 @@
 
 **Release candidate — September 17, 2026. No tag or registry publication is established by these notes.**
 
+**Source candidate update — September 25, 2026.** `aether pc map` and
+`aether pc doctor` report local capability and performance evidence. An
+approved `aether pc verify-browser` checks that a browser rendered a loopback
+page; `aether pc open` dispatches a named site after a fresh terminal approval.
+This preview does not enable the development-only device runtime or provide
+PC-wide shell containment, desktop control, browser automation, or hosted PC
+actions.
+
 - **Your account's agents in the terminal.** `aether agent list`, `aether agent create`,
   `aether agent configure` and `aether agent chat` use Cloud's canonical managed
   agents and Online DM threads. The single-column picker shows real runtime
