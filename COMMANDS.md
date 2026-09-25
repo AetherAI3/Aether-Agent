@@ -19,8 +19,8 @@ aether                                  # no args = interactive REPL
 
 <!-- CLI-COMMANDS:START -->
 `help`, `agent`, `chat`, `resume`, `run`, `models`, `agents`, `auth`, `github`, `vault`, `workflow`, `memory`,
-`skills`, `capabilities`, `image`, `video`, `output`, `audit`, `receipt`, `support-bundle`, `mcp`, `config`, `exec`, `setup`,
-`local`, `preview`, `doctor`, `sessions`, `review`, `ship`, `settings`, `voice`
+`skills`, `capabilities`, `image`, `video`, `output`, `pc`, `audit`, `receipt`, `support-bundle`, `mcp`, `config`, `exec`,
+`setup`, `local`, `preview`, `doctor`, `sessions`, `review`, `ship`, `settings`, `voice`
 <!-- CLI-COMMANDS:END -->
 
 <!-- SLASH-COMMANDS:START -->
