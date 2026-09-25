@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aethersystems.net/managed-ats-tool-host/v1/trust.schema.json",
+  "x-aether-schema-id": "aether.managed-tool-trust/1",
+  "title": "ManagedToolTrustV1",
+  "description": "Cloud verification keys served at /.well-known/aether-managed-tool-host-v1.json. Semantic rules: keys strictly ascending by key_id with no repeated key_id; expires_at later than generated_at; lifetime at most 24 hours; usable only until expires_at with 30 seconds of clock skew.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "generated_at",
+    "expires_at",
+    "keys"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "aether.managed-tool-trust/1"
+    },
+    "generated_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/trust_key"
+      }
+    }
+  },
+  "$defs": {
+    "trust_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_id",
+        "algorithm",
+        "public_key"
+      ],
+      "properties": {
+        "key_id": {
+          "$ref": "#/$defs/id"
+        },
+        "algorithm": {
+          "type": "string",
+          "const": "Ed25519"
+        },
+        "public_key": {
+          "$ref": "#/$defs/base64url_32"
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$"
+    },
+    "base64url_32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    }
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aethersystems.net/managed-ats-tool-host/v1/runtime-capability.schema.json",
+  "x-aether-schema-id": "aether.ats.runtime-capability/1",
+  "title": "RuntimeCapabilityV1",
+  "description": "Describes ATS runtime support; grants no authority. capability_digest follows the common digest rule and is computed before the receipt digest. Lifetime at most 60 seconds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "runtime_id",
+    "runtime_version",
+    "runtime_build_digest",
+    "attestation_kind",
+    "attestation_ref",
+    "supported_read_operations",
+    "effective_execution_mode",
+    "supports_paper_execution",
+    "supports_live_execution",
+    "observed_at",
+    "expires_at",
+    "grants_execution_authority",
+    "capability_digest"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "aether.ats.runtime-capability/1"
+    },
+    "runtime_id": {
+      "$ref": "#/$defs/id"
+    },
+    "runtime_version": {
+      "$ref": "#/$defs/runtime_version"
+    },
+    "runtime_build_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "attestation_kind": {
+      "type": "string",
+      "const": "ats_observer_channel_v1"
+    },
+    "attestation_ref": {
+      "$ref": "#/$defs/id"
+    },
+    "supported_read_operations": {
+      "type": "array",
+      "const": [
+        "aether.ats.workspace-status/1"
+      ]
+    },
+    "effective_execution_mode": {
+      "$ref": "#/$defs/execution_mode"
+    },
+    "supports_paper_execution": {
+      "type": "boolean"
+    },
+    "supports_live_execution": {
+      "type": "boolean",
+      "const": false
+    },
+    "observed_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "grants_execution_authority": {
+      "type": "boolean",
+      "const": false
+    },
+    "capability_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "runtime_version": {
+      "type": "string",
+      "pattern": "^[ -~]{1,64}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "execution_mode": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "paper",
+        "approve",
+        "auto",
+        "unknown"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$"
+    }
+  }
+}

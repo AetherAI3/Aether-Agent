@@ -13,11 +13,19 @@
 // compare-and-set. `consumed_at` and isApprovalUsable() model the state so a
 // caller can render it honestly and refuse an obviously spent approval early —
 // they are not a substitute for the atomic consume.
+//
+// The `/2` successors (same fields, strict equity ticker) share each `/1`
+// validator body. Only verifyExecutableCommitAuthority() may authorize an
+// executable order: it admits nothing but a `/2` chain, re-validates every
+// member and input before deciding, and decides on the re-validated copies.
+// The `/1` gates are kept, version-blind as they always were, for historical
+// records.
 
 import {
   choice,
   closed,
   digest,
+  equityTicker,
   fail,
   ident,
   integer,
@@ -29,15 +37,26 @@ import {
   symbol as tickerSymbol,
   text,
   timestamp,
+  type FieldCheck,
+  type Retagged,
 } from "./primitives.js";
 import { digestEquals, digestOf } from "./canonical.js";
 import { isHalted, permitsOrderSubmission } from "./mode.js";
-import type { BrokerAccountBindingV1 } from "./connector.js";
+import {
+  ACCOUNT_BINDING_SCHEMA_V2,
+  validateAccountBindingV2,
+  type BrokerAccountBindingV1,
+  type BrokerAccountBindingV2,
+} from "./connector.js";
 import {
   grantPermits,
   ORDER_SIDES,
   ORDER_TYPES,
+  TRADING_GRANT_SCHEMA_V2,
+  validateGrantUsage,
+  validateTradingGrantV2,
   type DelegatedTradingGrantV1,
+  type DelegatedTradingGrantV2,
   type GrantUsage,
   type OrderSide,
   type OrderType,
@@ -45,14 +64,40 @@ import {
 import {
   connectorBindingMatches,
   isReviewApprovable,
+  ORDER_INTENT_SCHEMA_V2,
   validateConnectorBindingRef,
+  validateOrderIntentV2,
+  validateOrderReview,
   type BrokerOrderReviewReceiptV1,
   type ConnectorBindingRef,
   type NormalizedEquityOrderIntentV1,
+  type NormalizedEquityOrderIntentV2,
 } from "./order.js";
 
 export const OPERATOR_APPROVAL_SCHEMA = "aether.ats.operator-approval/1" as const;
+/** Frozen `/1` admits URL-shaped symbols; `/2` requires an equity ticker. */
+export const OPERATOR_APPROVAL_SCHEMA_V2 = "aether.ats.operator-approval/2" as const;
 export const EXECUTION_RECEIPT_SCHEMA = "aether.ats.execution-receipt/1" as const;
+/** Frozen `/1` admits URL-shaped symbols; `/2` requires an equity ticker. */
+export const EXECUTION_RECEIPT_SCHEMA_V2 = "aether.ats.execution-receipt/2" as const;
+
+/**
+ * The two refusals the executable gates add. Fixed text, never parameterized,
+ * so a caller can match them exactly and no document content reaches them.
+ *
+ * The version refusal names the four members that have a `/2`; the review
+ * receipt has one version and is bound to its intent by digest.
+ */
+export const EXECUTABLE_CHAIN_REFUSAL =
+  "Only an order chain whose intent, approval, account binding and grant are all /2 may authorize an executable order; any /1 member makes it a historical record." as const;
+
+/**
+ * A chain whose tags all say `/2` but whose content the gate cannot re-validate:
+ * a `/1` document retagged in code, a document that was never validated, or an
+ * input (usage, clock, resulting position) that is not a well-formed value.
+ */
+export const EXECUTABLE_MEMBER_REFUSAL =
+  "An executable order chain member failed re-validation; only freshly validated /2 documents and well-formed inputs may authorize an order." as const;
 
 export interface OperatorApprovalReceiptV1 {
   readonly schema_version: typeof OPERATOR_APPROVAL_SCHEMA;
@@ -89,6 +134,11 @@ export interface OperatorApprovalReceiptV1 {
   readonly consumed_at: string | null;
 }
 
+/** Same fields as `/1`; only the symbol check is stricter (`equityTicker()`). */
+export interface OperatorApprovalReceiptV2 extends Omit<OperatorApprovalReceiptV1, "schema_version"> {
+  readonly schema_version: typeof OPERATOR_APPROVAL_SCHEMA_V2;
+}
+
 const APPROVAL_FIELDS = [
   "schema_version",
   "approval_id",
@@ -122,6 +172,21 @@ const APPROVAL_FIELDS = [
 ] as const;
 
 export function validateOperatorApproval(value: unknown, name = "Operator approval"): OperatorApprovalReceiptV1 {
+  return operatorApproval(value, name, OPERATOR_APPROVAL_SCHEMA, tickerSymbol);
+}
+
+/** `/2`: the `/1` approval, except that the restated symbol must be an equity ticker. */
+export function validateOperatorApprovalV2(value: unknown, name = "Operator approval"): OperatorApprovalReceiptV2 {
+  return operatorApproval(value, name, OPERATOR_APPROVAL_SCHEMA_V2, equityTicker);
+}
+
+/** One body for both versions; only the schema tag and the ticker check vary. */
+function operatorApproval<S extends string>(
+  value: unknown,
+  name: string,
+  schema: S,
+  ticker: FieldCheck,
+): Retagged<OperatorApprovalReceiptV1, S> {
   const raw = closed(value, name, APPROVAL_FIELDS);
   const approvedAt = timestamp(raw.approved_at, `${name} approved_at`);
   const expiresAt = timestamp(raw.expires_at, `${name} expires_at`);
@@ -138,7 +203,7 @@ export function validateOperatorApproval(value: unknown, name = "Operator approv
   if (orderType === "market" && limitPrice !== null) fail(`${name} market order must not carry a limit price.`);
 
   return Object.freeze({
-    schema_version: schemaTag(raw.schema_version, OPERATOR_APPROVAL_SCHEMA, name) as typeof OPERATOR_APPROVAL_SCHEMA,
+    schema_version: schemaTag(raw.schema_version, schema, name) as S,
     approval_id: ident(raw.approval_id, `${name} id`),
     request_id: ident(raw.request_id, `${name} request id`),
     intent_digest: digest(raw.intent_digest, `${name} intent digest`),
@@ -150,7 +215,7 @@ export function validateOperatorApproval(value: unknown, name = "Operator approv
     grant_id: ident(raw.grant_id, `${name} grant id`),
     grant_version: integer(raw.grant_version, `${name} grant version`, 1, Number.MAX_SAFE_INTEGER),
     policy_version: text(raw.policy_version, `${name} policy version`, 64),
-    symbol: tickerSymbol(raw.symbol, `${name} symbol`),
+    symbol: ticker(raw.symbol, `${name} symbol`),
     side: choice(raw.side, ORDER_SIDES, `${name} side`),
     quantity: integer(raw.quantity, `${name} quantity`, 1, 1_000_000),
     order_type: orderType,
@@ -179,7 +244,10 @@ export type ApprovalUsability = { readonly usable: true } | { readonly usable: f
  * another click may have consumed it. Spec 1 section 16: "First terminal
  * action wins; later calls return stored outcome."
  */
-export function isApprovalUsable(approval: OperatorApprovalReceiptV1, nowMs: number = Date.now()): ApprovalUsability {
+export function isApprovalUsable(
+  approval: OperatorApprovalReceiptV1 | OperatorApprovalReceiptV2,
+  nowMs: number = Date.now(),
+): ApprovalUsability {
   if (approval.consumed_at !== null) return { usable: false, reason: "Approval was already used." };
   if (nowMs >= Date.parse(approval.expires_at)) return { usable: false, reason: "Approval expired." };
   return { usable: true };
@@ -209,12 +277,78 @@ function broken(reason: string): ChainVerdict {
  * re-run the preview and carry on; that is precisely how an approval minted
  * against a paper preview ends up authorizing a live order, so there is no
  * refresh path in this module to reach for.
+ *
+ * @deprecated For historical `/1` records only. It never reads a schema tag and
+ * never re-validates its inputs; anything that may execute must use
+ * `verifyExecutableApprovalChain()`.
  */
 export function verifyApprovalChain(
   intent: NormalizedEquityOrderIntentV1,
   review: BrokerOrderReviewReceiptV1,
   approval: OperatorApprovalReceiptV1,
   nowMs: number = Date.now(),
+): ChainVerdict {
+  return approvalChainVerdict(intent, review, approval, nowMs);
+}
+
+/**
+ * `verifyApprovalChain` for an order that may execute. It admits only a `/2`
+ * intent and a `/2` approval, refusing anything else with
+ * EXECUTABLE_CHAIN_REFUSAL before any other check. A tag is only a claim, so
+ * it then re-validates the intent and approval with their `/2` validators, the
+ * review with `validateOrderReview` and the clock as a whole number of
+ * milliseconds, refusing with EXECUTABLE_MEMBER_REFUSAL if any of them fails:
+ * a `/1` document retagged `/2` in code carries whatever it was validated
+ * with. The verdict then runs on the re-validated copies, never on the
+ * caller's objects. Past that it is the very same version-blind logic.
+ *
+ * The review receipt has one version: it carries no ticker or label, and its
+ * `intent_digest` covers the intent's schema tag, so it can only answer the
+ * `/2` intent it was minted for.
+ *
+ * Inputs are typed as either version on purpose. A document deserialized at
+ * runtime carries whatever tag it carries, so the refusal has to be a verdict
+ * this gate returns, not a guarantee the compiler was trusted to give.
+ */
+export function verifyExecutableApprovalChain(
+  intent: NormalizedEquityOrderIntentV1 | NormalizedEquityOrderIntentV2,
+  review: BrokerOrderReviewReceiptV1,
+  approval: OperatorApprovalReceiptV1 | OperatorApprovalReceiptV2,
+  nowMs: number = Date.now(),
+): ChainVerdict {
+  if (tagOf(intent) !== ORDER_INTENT_SCHEMA_V2 || tagOf(approval) !== OPERATOR_APPROVAL_SCHEMA_V2) {
+    return broken(EXECUTABLE_CHAIN_REFUSAL);
+  }
+  let chain: { intent: NormalizedEquityOrderIntentV2; review: BrokerOrderReviewReceiptV1; approval: OperatorApprovalReceiptV2; now: number };
+  try {
+    chain = {
+      intent: validateOrderIntentV2(intent),
+      review: validateOrderReview(review),
+      approval: validateOperatorApprovalV2(approval),
+      now: executableClock(nowMs),
+    };
+  } catch {
+    return broken(EXECUTABLE_MEMBER_REFUSAL);
+  }
+  return approvalChainVerdict(chain.intent, chain.review, chain.approval, chain.now);
+}
+
+/** A member's schema tag, or undefined for anything that is not an object. Never throws. */
+function tagOf(member: unknown): unknown {
+  return typeof member === "object" && member !== null ? (member as { readonly schema_version?: unknown }).schema_version : undefined;
+}
+
+/** The clock an executable gate trusts: whole milliseconds, never NaN, which would pass every expiry check. */
+function executableClock(value: unknown): number {
+  return integer(value, "Executable order clock", 0, Number.MAX_SAFE_INTEGER);
+}
+
+/** The chain logic both gates share. It never reads a schema tag. */
+function approvalChainVerdict(
+  intent: NormalizedEquityOrderIntentV1 | NormalizedEquityOrderIntentV2,
+  review: BrokerOrderReviewReceiptV1,
+  approval: OperatorApprovalReceiptV1 | OperatorApprovalReceiptV2,
+  nowMs: number,
 ): ChainVerdict {
   const intentDigest = digestOf(intent);
   const reviewDigest = digestOf(review);
@@ -300,6 +434,22 @@ export interface CommitAuthorityRequest {
 }
 
 /**
+ * What `verifyExecutableCommitAuthority` receives. Members are typed as either
+ * version so that a `/1` or mixed chain reaches the gate and is refused there
+ * with EXECUTABLE_CHAIN_REFUSAL (see `verifyExecutableApprovalChain`).
+ */
+export interface ExecutableCommitAuthorityRequest {
+  readonly now: number;
+  readonly grant: DelegatedTradingGrantV1 | DelegatedTradingGrantV2;
+  readonly usage: GrantUsage;
+  readonly binding: BrokerAccountBindingV1 | BrokerAccountBindingV2;
+  readonly intent: NormalizedEquityOrderIntentV1 | NormalizedEquityOrderIntentV2;
+  readonly review: BrokerOrderReviewReceiptV1;
+  readonly approval: OperatorApprovalReceiptV1 | OperatorApprovalReceiptV2;
+  readonly resultingPositionNotionalMinor: number;
+}
+
+/**
  * The gate immediately before a broker commit.
  *
  * `verifyApprovalChain` proves the three documents describe one order. This
@@ -308,11 +458,72 @@ export interface CommitAuthorityRequest {
  * Spec 1 section 16 requires kill and pause to win *after* review and
  * immediately before commit, so the effective-mode check lives here rather
  * than being inherited from whatever the review said minutes ago.
+ *
+ * @deprecated For historical `/1` records only. It never reads a schema tag and
+ * never re-validates its inputs; the only gate that may authorize an
+ * executable order is `verifyExecutableCommitAuthority()`.
  */
 export function verifyCommitAuthority(request: CommitAuthorityRequest): ChainVerdict {
+  return commitAuthorityVerdict(request);
+}
+
+/**
+ * The ONLY gate that may authorize an executable order.
+ *
+ *   1. Version: the intent, approval, account binding and grant must all be
+ *      tagged `/2`, or it refuses with EXECUTABLE_CHAIN_REFUSAL.
+ *   2. Re-validation: a tag is only a claim, so every member is re-validated
+ *      (the four with their `/2` validators, the review with
+ *      `validateOrderReview`, the usage with `validateGrantUsage`) and the
+ *      clock and resulting position notional must be whole, non-negative
+ *      numbers; anything that fails refuses with EXECUTABLE_MEMBER_REFUSAL.
+ *      A NaN clock would pass every expiry check and a NaN or negative
+ *      position or usage every limit, so these are checked as strictly as
+ *      the documents.
+ *   3. Verdict: `verifyCommitAuthority`'s logic, unchanged, run on the
+ *      re-validated copies rather than on the caller's objects.
+ *
+ * `/1` chains stay valid historical records and are never executable.
+ */
+export function verifyExecutableCommitAuthority(request: ExecutableCommitAuthorityRequest): ChainVerdict {
+  const raw: { readonly [K in keyof ExecutableCommitAuthorityRequest]?: unknown } =
+    typeof request === "object" && request !== null ? request : {};
+  if (
+    tagOf(raw.intent) !== ORDER_INTENT_SCHEMA_V2 ||
+    tagOf(raw.approval) !== OPERATOR_APPROVAL_SCHEMA_V2 ||
+    tagOf(raw.binding) !== ACCOUNT_BINDING_SCHEMA_V2 ||
+    tagOf(raw.grant) !== TRADING_GRANT_SCHEMA_V2
+  ) {
+    return broken(EXECUTABLE_CHAIN_REFUSAL);
+  }
+  let revalidated: ExecutableCommitAuthorityRequest;
+  try {
+    revalidated = {
+      now: executableClock(raw.now),
+      grant: validateTradingGrantV2(raw.grant),
+      usage: validateGrantUsage(raw.usage),
+      binding: validateAccountBindingV2(raw.binding),
+      intent: validateOrderIntentV2(raw.intent),
+      review: validateOrderReview(raw.review),
+      approval: validateOperatorApprovalV2(raw.approval),
+      resultingPositionNotionalMinor: integer(
+        raw.resultingPositionNotionalMinor,
+        "Executable order resulting position notional",
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    };
+  } catch {
+    return broken(EXECUTABLE_MEMBER_REFUSAL);
+  }
+  return commitAuthorityVerdict(revalidated);
+}
+
+/** The commit logic both gates share. It never reads a schema tag. */
+function commitAuthorityVerdict(request: ExecutableCommitAuthorityRequest): ChainVerdict {
   const { now, grant, usage, binding, intent, review, approval } = request;
 
-  const chain = verifyApprovalChain(intent, review, approval, now);
+  const chain = approvalChainVerdict(intent, review, approval, now);
   if (!chain.consistent) return chain;
 
   // The chain agrees with itself; does it agree with the account on disk?
@@ -421,6 +632,11 @@ export interface ExecutionReceiptV1 {
   readonly reason: string | null;
 }
 
+/** Same fields as `/1`; only the symbol check is stricter (`equityTicker()`). */
+export interface ExecutionReceiptV2 extends Omit<ExecutionReceiptV1, "schema_version"> {
+  readonly schema_version: typeof EXECUTION_RECEIPT_SCHEMA_V2;
+}
+
 const RECEIPT_FIELDS = [
   "schema_version",
   "request_id",
@@ -446,6 +662,21 @@ const RECEIPT_FIELDS = [
 ] as const;
 
 export function validateExecutionReceipt(value: unknown, name = "Execution receipt"): ExecutionReceiptV1 {
+  return executionReceipt(value, name, EXECUTION_RECEIPT_SCHEMA, tickerSymbol);
+}
+
+/** `/2`: the `/1` receipt, except that the symbol must be an equity ticker. */
+export function validateExecutionReceiptV2(value: unknown, name = "Execution receipt"): ExecutionReceiptV2 {
+  return executionReceipt(value, name, EXECUTION_RECEIPT_SCHEMA_V2, equityTicker);
+}
+
+/** One body for both versions; only the schema tag and the ticker check vary. */
+function executionReceipt<S extends string>(
+  value: unknown,
+  name: string,
+  schema: S,
+  ticker: FieldCheck,
+): Retagged<ExecutionReceiptV1, S> {
   const raw = closed(value, name, RECEIPT_FIELDS);
   const outcome = choice(raw.outcome, EXECUTION_OUTCOMES, `${name} outcome`);
   const fill = raw.fill === null ? null : validateFill(raw.fill, `${name} fill`);
@@ -478,14 +709,14 @@ export function validateExecutionReceipt(value: unknown, name = "Execution recei
   }
 
   return Object.freeze({
-    schema_version: schemaTag(raw.schema_version, EXECUTION_RECEIPT_SCHEMA, name) as typeof EXECUTION_RECEIPT_SCHEMA,
+    schema_version: schemaTag(raw.schema_version, schema, name) as S,
     request_id: ident(raw.request_id, `${name} request id`),
     intent_id: ident(raw.intent_id, `${name} intent id`),
     approval_id: ident(raw.approval_id, `${name} approval id`),
     outcome,
     opaque_order_ref: nullable(raw.opaque_order_ref, `${name} order reference`, (v, n) => opaqueRef(v, n)),
     opaque_account_ref: opaqueRef(raw.opaque_account_ref, `${name} opaque account reference`),
-    symbol: tickerSymbol(raw.symbol, `${name} symbol`),
+    symbol: ticker(raw.symbol, `${name} symbol`),
     side: choice(raw.side, ORDER_SIDES, `${name} side`),
     quantity,
     order_type: choice(raw.order_type, ORDER_TYPES, `${name} order type`),
@@ -507,6 +738,6 @@ export function validateExecutionReceipt(value: unknown, name = "Execution recei
  * section 16: "Connection loss after commit may have started — never retry;
  * enter reconciliation."
  */
-export function forbidsRetry(receipt: ExecutionReceiptV1): boolean {
+export function forbidsRetry(receipt: ExecutionReceiptV1 | ExecutionReceiptV2): boolean {
   return receipt.outcome === "ambiguous" || receipt.submitted_at !== null;
 }

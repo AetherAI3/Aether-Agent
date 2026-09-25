@@ -69,10 +69,11 @@ export interface ArchiveFetcher {
  * and byte limits before or during extraction. The post-extraction tree walk
  * checks what remains inside the slot; it cannot undo an extractor's write
  * outside the slot or resource exhaustion that occurred during extraction.
- * No production extractor is provided by this PR.
+ * strictTarExtractor is available for a future signed ustar artifact. It is
+ * not a default because the existing manifest does not pin an archive format.
  */
 export interface ArchiveExtractor {
-  extract(input: { bytes: Uint8Array; destination: string }): Promise<void>;
+  extract(input: { bytes: Uint8Array; destination: string; limits?: ArchiveLimits; signal?: AbortSignal }): Promise<void>;
 }
 
 export interface InstallDeps {
@@ -184,7 +185,8 @@ export async function installRuntime(input: InstallInput, deps: InstallDeps = {}
   await mkdir(targetDir, { recursive: true, mode: 0o700 });
 
   try {
-    await deps.extractor.extract({ bytes, destination: targetDir });
+    await deps.extractor.extract({ bytes, destination: targetDir,
+      limits: deps.limits ?? DEFAULT_ARCHIVE_LIMITS, ...(input.signal ? { signal: input.signal } : {}) });
   } catch (error) {
     await clearSlot(input.installRoot, target).catch(() => {});
     throw error;

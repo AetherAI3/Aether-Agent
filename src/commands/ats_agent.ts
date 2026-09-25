@@ -596,8 +596,8 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
         const rows = await pack.readJournal(journalPath(path), { limit });
         output(sanitizeTerm(pack.formatJournal(rows, { json })));
       } else if (command === "status") {
-        output(`ATS · ${binding.agent_id}\nMemory: ${binding.memory_gb} GiB limit · ${sanitizeTerm(binding.memory_directory)}\nStrategies: ${sanitizeTerm(binding.strategies_directory)}\nMode: ${settings.permission_mode} requested · runtime unconfirmed\n`);
-        output(sanitizeTerm(JSON.stringify(pack.dataStreamStatus(settings))) + `\nCloud chat: ${surface?.connection?.().chat ?? "unverified"}. Local execution is not connected to this conversation.\n`);
+        output(`ATS · ${binding.agent_id}\nMemory: ${binding.memory_gb} GiB limit · ${sanitizeTerm(binding.memory_directory)}\nStrategies: ${sanitizeTerm(binding.strategies_directory)}\nMode: ${settings.permission_mode} requested · effective offline until authenticated runtime probe\n`);
+        output(sanitizeTerm(JSON.stringify(pack.dataStreamStatus(settings))) + `\nCloud chat: ${surface?.connection?.().chat ?? "unverified"}. Local execution is not connected to this conversation.\nATS simulated paper orders: unavailable · no authenticated target, grant, executable quote or operator session.\nProvider sandbox: unavailable · no external adapter verified.\nLive capital: HOLD · no live adapter or arm.\n`);
       } else if (command === "doctor") {
         // Spec 2 step 2.7. The scan is re-run rather than remembered so the
         // strategy axis reports what is on disk now, not what setup once saw.

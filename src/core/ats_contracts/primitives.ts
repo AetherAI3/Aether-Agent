@@ -38,8 +38,28 @@ const DIGEST = /^sha256:[0-9a-f]{64}$/;
 /** Bare lowercase hex sha256, for fields the specs type as `*_sha256`. */
 const HEX64 = /^[0-9a-f]{64}$/;
 
-/** Equity ticker, matching the bound already enforced by ats-skills settings. */
+/**
+ * Ticker shape frozen with the Spec 1 `/1` documents, matching the bound
+ * already enforced by ats-skills settings. It is WEAK: `/` and `:` let an
+ * all-caps string spell `HTTPS://X`. Executable shapes use EQUITY_TICKER.
+ */
 const SYMBOL = /^[A-Z0-9][A-Z0-9.^:=_/-]{0,39}$/;
+
+/**
+ * An equity ticker such as SPY, BRK.B or BRK-B. Deliberately narrower than
+ * SYMBOL, whose `/` and `:` let an all-caps string spell a URL.
+ */
+const EQUITY_TICKER = /^[A-Z]{1,6}(?:[.-][A-Z]{1,4})?$/;
+
+/**
+ * A masked label is drawn from a closed character set: ASCII letters and
+ * digits, space, `. - _ ( ) # *`, the bullet and the ellipsis. Blacklisting
+ * cannot hold this line: fullwidth or other-script digits slip past a
+ * digit-run rule, and confusable letters or direction overrides can make an
+ * approval card read as something it is not. The two non-ASCII members are
+ * built from their code points so no editor or escape layer can swap them.
+ */
+const CLOSED_LABEL_CHARACTERS = new RegExp(`^[A-Za-z0-9 ._()#*${String.fromCharCode(0x2022, 0x2026)}-]+$`, "u");
 
 /**
  * Control characters are refused everywhere, and that now means ALL of them.
@@ -63,6 +83,18 @@ const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;
 export function fail(message: string): never {
   throw new Error(message);
 }
+
+/** A field check: the validated string, or an Error whose message names the field. */
+export type FieldCheck = (value: unknown, name: string) => string;
+
+/**
+ * Document `D` under schema tag `S`. Each Spec 1 `/2` shape is its `/1` shape
+ * re-tagged: the same fields, with only the ticker or masked-label check
+ * replaced, so the two versions share one validator body.
+ */
+export type Retagged<D extends { readonly schema_version: string }, S extends string> = Omit<D, "schema_version"> & {
+  readonly schema_version: S;
+};
 
 /**
  * Reject anything that is not a plain object, then reject unknown keys.
@@ -148,9 +180,29 @@ export function version(value: unknown, name: string): string {
   return value;
 }
 
+/** The frozen `/1` ticker. Never use it for a shape that can authorize an order. */
 export function symbol(value: unknown, name: string): string {
   if (typeof value !== "string" || !SYMBOL.test(value)) fail(`${name} must be a bounded uppercase ticker.`);
   return value;
+}
+
+/** The strict ticker every executable (`/2`) shape and the browser order wire use. */
+export function equityTicker(value: unknown, name: string): string {
+  if (typeof value !== "string" || !EQUITY_TICKER.test(value)) fail(`${name} must be an equity ticker such as SPY or BRK.B.`);
+  return value;
+}
+
+/**
+ * A masked account label from the closed character set, with at most four
+ * consecutive digits so it cannot carry a full account number.
+ */
+export function closedMaskedLabel(value: unknown, name: string): string {
+  const label = text(value, name, 64);
+  if (!CLOSED_LABEL_CHARACTERS.test(label)) {
+    fail(`${name} must use only letters, digits, spaces, masking bullets and . - _ ( ) # *.`);
+  }
+  if (/[0-9]{5,}/.test(label)) fail(`${name} must not embed a full account number.`);
+  return label;
 }
 
 /**

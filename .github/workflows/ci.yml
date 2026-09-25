@@ -69,6 +69,18 @@ jobs:
       - name: Build and test
         run: npm test
 
+      - name: Verify independent Python ATS canonical bytes
+        run: python test/fixtures/ats_contracts_golden_verify.py
+
+      - name: Verify independent Python Agent Browser order contract
+        run: python test/fixtures/ats_browser_order_verify.py
+
+      - name: Verify independent Python ATS Spec 1 /2 closure
+        run: python test/fixtures/ats_contracts_v2_verify.py
+
+      - name: Verify independent Python managed tool host contract
+        run: python test/fixtures/managed_tool_host_verify.py
+
       # Emit the compact, machine-readable package summary on both release
       # platforms. The release-coherence suite binds the packet's named host
       # measurement to this same npm pack result, so a value from one runner

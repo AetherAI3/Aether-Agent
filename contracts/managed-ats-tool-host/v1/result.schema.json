@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aethersystems.net/managed-ats-tool-host/v1/result.schema.json",
+  "x-aether-schema-id": "aether.managed-tool-result/1",
+  "title": "ToolResultV1",
+  "description": "Terminal record of one call. bounded_bytes is the byte length of JCS(payload), or 0 when payload is null. evidence_refs are strictly ascending by code point. result_digest follows the common digest rule.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "result_id",
+    "request_id",
+    "cloud_tool_call_id",
+    "lease_id",
+    "host_session_id",
+    "local_session_id",
+    "session_generation",
+    "revocation_epoch",
+    "run_id",
+    "tool_name",
+    "tool_version",
+    "input_schema_id",
+    "input_schema_digest",
+    "invocation_digest",
+    "arguments_digest",
+    "state",
+    "payload",
+    "output_schema_id",
+    "output_schema_digest",
+    "error",
+    "evidence_refs",
+    "replay_status",
+    "retry_class",
+    "started_at",
+    "completed_at",
+    "bounded_bytes",
+    "redaction_profile",
+    "grants_execution_authority",
+    "result_digest"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "aether.managed-tool-result/1"
+    },
+    "result_id": {
+      "$ref": "#/$defs/id"
+    },
+    "request_id": {
+      "$ref": "#/$defs/id"
+    },
+    "cloud_tool_call_id": {
+      "$ref": "#/$defs/id"
+    },
+    "lease_id": {
+      "$ref": "#/$defs/id"
+    },
+    "host_session_id": {
+      "$ref": "#/$defs/id"
+    },
+    "local_session_id": {
+      "$ref": "#/$defs/id"
+    },
+    "session_generation": {
+      "$ref": "#/$defs/positive_uint53"
+    },
+    "revocation_epoch": {
+      "$ref": "#/$defs/uint53"
+    },
+    "run_id": {
+      "$ref": "#/$defs/id"
+    },
+    "tool_name": {
+      "$ref": "#/$defs/tool_name"
+    },
+    "tool_version": {
+      "$ref": "#/$defs/tool_version"
+    },
+    "input_schema_id": {
+      "$ref": "#/$defs/schema_id"
+    },
+    "input_schema_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "invocation_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "arguments_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "refused",
+        "cancelled",
+        "deadline_exceeded",
+        "unavailable"
+      ]
+    },
+    "payload": {
+      "description": "Null unless state is succeeded; then validated against the registered output schema."
+    },
+    "output_schema_id": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/schema_id"
+        }
+      ]
+    },
+    "output_schema_digest": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/digest"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/error"
+        }
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/id"
+      }
+    },
+    "replay_status": {
+      "type": "string",
+      "enum": [
+        "fresh",
+        "stored_redelivery",
+        "interrupted_before_result"
+      ]
+    },
+    "retry_class": {
+      "type": "string",
+      "enum": [
+        "none",
+        "redeliver_stored_result",
+        "new_call_after_recovery"
+      ]
+    },
+    "started_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "completed_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "bounded_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65536
+    },
+    "redaction_profile": {
+      "type": "string",
+      "const": "aether.safe-display/1"
+    },
+    "grants_execution_authority": {
+      "type": "boolean",
+      "const": false
+    },
+    "result_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "succeeded"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "output_schema_id": {
+            "type": "string"
+          },
+          "output_schema_digest": {
+            "type": "string"
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "payload": {
+            "type": "null"
+          },
+          "output_schema_id": {
+            "type": "null"
+          },
+          "output_schema_digest": {
+            "type": "null"
+          },
+          "error": {
+            "not": {
+              "type": "null"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "retry_class": {
+            "const": "redeliver_stored_result"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "replay_status": {
+            "const": "stored_redelivery"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "replay_status": {
+            "const": "interrupted_before_result"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "state": {
+            "const": "unavailable"
+          },
+          "retry_class": {
+            "const": "new_call_after_recovery"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "TOOL_CONTRACT_INVALID",
+            "TOOL_SCOPE_MISMATCH",
+            "TOOL_LEASE_EXPIRED",
+            "TOOL_LEASE_REVOKED",
+            "TOOL_REGISTRY_MISMATCH",
+            "TOOL_SEQUENCE_INVALID",
+            "TOOL_IDEMPOTENCY_CONFLICT",
+            "TOOL_UNKNOWN",
+            "TOOL_ARGUMENT_INVALID",
+            "TOOL_DEADLINE_EXCEEDED",
+            "TOOL_CANCELLED",
+            "TOOL_DEPENDENCY_UNAVAILABLE",
+            "TOOL_RESULT_TOO_LARGE",
+            "TOOL_DELIVERY_UNAVAILABLE"
+          ]
+        },
+        "message": {
+          "$ref": "#/$defs/safe_text"
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "positive_uint53": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "uint53": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "tool_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "tool_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "schema_id": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^aether[.][a-z0-9.-]+/[1-9][0-9]*$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$"
+    },
+    "safe_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  }
+}
