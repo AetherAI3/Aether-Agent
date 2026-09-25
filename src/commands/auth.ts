@@ -9,8 +9,8 @@
 import type { AppContext } from "../core/context.js";
 import { cmdLogin, cmdLogout, type LoginOpts } from "./login.js";
 import { MODELS_PATH, REFRESH_PATH } from "../core/transport.js";
-import { HttpError, errorHint, errorMessage } from "../core/errors.js";
-import { isApiKeyToken } from "../core/auth.js";
+import { HttpError, RequestTimeoutError, errorHint, errorMessage } from "../core/errors.js";
+import { isApiKeyToken, unsetEnvTokenCommand, type TokenSourceInfo } from "../core/auth.js";
 import { box, titledBox, hyperlink } from "../ui/box.js";
 import { CLOUD } from "../ui/logo.js";
 import { theme } from "../ui/theme.js";
@@ -24,15 +24,23 @@ export function isApiToken(token: string | null | undefined): boolean {
   return isApiKeyToken(token);
 }
 
-export type AuthVerificationState = "signed-out" | "verified" | "expired" | "unverified";
+export type AuthVerificationState = "signed-out" | "verified" | "expired" | "forbidden" | "unverified";
+
+export interface AuthStatusDiagnostic {
+  verification: AuthVerificationState;
+  credentialSource: TokenSourceInfo["source"] | "unknown" | "none";
+  storedCredentialShadowed: boolean;
+  credentialKind: "api-key" | "session" | "none";
+  endpoint: string | null;
+  /** Rejection/error status when known; null for successful or unanswered requests. */
+  httpStatus: number | null;
+  failureKind: "none" | "http" | "timeout" | "network" | "other";
+}
 
 interface AuthPanel {
   output: string;
   state: AuthVerificationState;
-}
-
-function mask(t: string): string {
-  return t.length <= 12 ? "\u2022".repeat(Math.max(4, t.length)) : `${t.slice(0, 8)}\u2026${t.slice(-4)}`;
+  diagnostic: AuthStatusDiagnostic;
 }
 
 // ── Shared cloud glyph (centered above the box) ──
@@ -52,33 +60,63 @@ function centeredCloud(): string {
 // without going through cmdAuth's stdout write.
 async function renderAuthPanel(ctx: AppContext): Promise<AuthPanel> {
   const t = await ctx.tokens.get();
-  if (!t) return { output: renderLoggedOut(), state: "signed-out" };
+  if (!t) return {
+    output: renderLoggedOut(),
+    state: "signed-out",
+    diagnostic: {
+      verification: "signed-out", credentialSource: "none", storedCredentialShadowed: false,
+      credentialKind: "none", endpoint: null, httpStatus: null, failureKind: "none",
+    },
+  };
+  // Provenance is local metadata only. An unavailable custom-store diagnostic
+  // must not prevent verification, and no credential bytes enter JSON output.
+  let source: TokenSourceInfo | undefined;
+  try { source = await ctx.tokens.sourceInfo?.(); } catch { /* optional */ }
 
   // Fetch tier info for display
   let tier = "";
   let defaultModel = "";
-  // A 401/403 here means the SERVER actively rejected this token (expired or
-  // revoked session) — that is a different situation from "server
+  // A 401 means the server rejected this credential. A 403 means access was
+  // forbidden and must not be described as expiry. Both differ from "server
   // unreachable" and must not be swallowed the same way, or `status` would
   // claim "Authenticated" for a dead session (the stale-AETHER_TOKEN case PR
   // #47 fixed elsewhere). Any other failure (no HttpError, or a 5xx) is a
   // genuine network/server problem: report a stored-but-unverified credential
   // rather than claiming the user is authenticated.
   let sessionExpired = false;
+  let accessForbidden = false;
   let verificationUnavailable = false;
+  let httpStatus: number | null = null;
+  let failureKind: AuthStatusDiagnostic["failureKind"] = "none";
   try {
     const cat = await ctx.api.getJson<{ tier?: string; default?: string }>(MODELS_PATH);
     tier = cat.tier ?? "";
     defaultModel = cat.default ?? "";
   } catch (err) {
-    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
-      sessionExpired = true;
-    } else verificationUnavailable = true;
+    if (err instanceof HttpError) {
+      httpStatus = err.status;
+      failureKind = "http";
+      if (err.status === 401) sessionExpired = true;
+      else if (err.status === 403) accessForbidden = true;
+      else verificationUnavailable = true;
+    } else {
+      verificationUnavailable = true;
+      failureKind = err instanceof RequestTimeoutError ? "timeout"
+        : err instanceof TypeError ? "network" : "other";
+    }
   }
 
   const kind = isApiToken(t) ? "API key" : "session token";
+  const sourceLabel = source?.source ? ({
+    environment: "AETHER_TOKEN environment variable",
+    stored: "saved CLI login",
+    injected: "host-injected credential",
+    "current-process": "current process",
+  } satisfies Record<TokenSourceInfo["source"], string>)[source.source] : "unknown";
   const header = sessionExpired
     ? theme.yellow("⚠") + "  " + theme.bold("Aether Agent — Session expired")
+    : accessForbidden
+      ? theme.yellow("⚠") + "  " + theme.bold("Aether Agent — Access forbidden")
     : verificationUnavailable
       ? theme.yellow("⚠") + "  " + theme.bold("Aether Agent — Verification unavailable")
       : theme.iceBlue("☁") + "  " + theme.bold("Aether Agent — Authenticated");
@@ -88,15 +126,30 @@ async function renderAuthPanel(ctx: AppContext): Promise<AuthPanel> {
     "",
     // No Account row: there is no account endpoint yet, and a hardcoded
     // "(fetching…)" that never resolves is a fake loading state (PR #47 UX).
-    "  " + theme.dim("Token:") + "    " + theme.bold(mask(t)) + "  " + theme.dim(`(${kind})`),
+    "  " + theme.dim("Token:") + "    " + theme.bold("present") + "  " + theme.dim(`(${kind})`),
+    "  " + theme.dim("Source:") + "   " + sourceLabel,
     "  " + theme.dim("API:") + "      " + ctx.cfg.baseUrl.replace("https://", ""),
   ];
 
   if (sessionExpired) {
+    lines.push("", "  " + theme.yellow("Server rejected this credential (HTTP 401)."));
+    if (source?.source === "environment") {
+      if (source.storedCredentialShadowed) {
+        lines.push("  AETHER_TOKEN overrides a different saved CLI login.");
+      }
+      lines.push(
+        "  Remove the environment override, then check again:",
+        "  " + theme.bold(theme.cyan(unsetEnvTokenCommand())),
+        "  " + theme.bold(theme.cyan("aether auth status")),
+      );
+    } else {
+      lines.push("  " + theme.bold(theme.cyan("aether auth login")));
+    }
+  } else if (accessForbidden) {
     lines.push(
       "",
-      "  " + theme.yellow("Server rejected this token — sign in again:"),
-      "  " + theme.bold(theme.cyan("aether auth login")),
+      "  " + theme.yellow("Server denied access (HTTP 403). Check account permissions or tier."),
+      "  " + theme.bold(theme.cyan("aether doctor --live")),
     );
   } else if (verificationUnavailable) {
     lines.push(
@@ -123,13 +176,23 @@ async function renderAuthPanel(ctx: AppContext): Promise<AuthPanel> {
     "",
   );
 
-  const state: AuthVerificationState = sessionExpired
-    ? "expired"
-    : verificationUnavailable
-      ? "unverified"
-      : "verified";
-  const title = state === "expired" ? "Session expired" : state === "unverified" ? "Not verified" : "Authenticated";
-  return { output: [centeredCloud(), "", titledBox(lines, title, { width: BOX_W })].join("\n"), state };
+  const state: AuthVerificationState = sessionExpired ? "expired" : accessForbidden ? "forbidden"
+    : verificationUnavailable ? "unverified" : "verified";
+  const title = state === "expired" ? "Session expired" : state === "forbidden" ? "Access forbidden"
+    : state === "unverified" ? "Not verified" : "Authenticated";
+  return {
+    output: [centeredCloud(), "", titledBox(lines, title, { width: BOX_W })].join("\n"),
+    state,
+    diagnostic: {
+      verification: state,
+      credentialSource: source?.source ?? "unknown",
+      storedCredentialShadowed: source?.storedCredentialShadowed ?? false,
+      credentialKind: isApiToken(t) ? "api-key" : "session",
+      endpoint: MODELS_PATH,
+      httpStatus,
+      failureKind,
+    },
+  };
 }
 
 export async function renderAuthBox(ctx: AppContext): Promise<string> {
@@ -187,9 +250,9 @@ export async function cmdAuth(
       // resolved — up to DEFAULT_REQUEST_TIMEOUT_MS of silence on a slow
       // connection, "the REPL just looks hung" (the exact class PR #47 fixed
       // for slash.ts's catalog fetch). Match that convention here.
-      process.stdout.write(theme.dim("checking session…\n"));
+      if (!ctx.flags.json) process.stdout.write(theme.dim("checking session…\n"));
       const panel = await renderAuthPanel(ctx);
-      process.stdout.write(panel.output + "\n");
+      process.stdout.write(ctx.flags.json ? JSON.stringify(panel.diagnostic) + "\n" : panel.output + "\n");
       return panel.state === "verified" ? 0 : 1;
     }
     case "token":
@@ -221,7 +284,7 @@ function printAuthHelp(): void {
     [
       "aether auth login    Authorize via browser (or --with-token / --token)",
       "aether auth logout   Clear the stored credential",
-      "aether auth status   Show who you're logged in as",
+      "aether auth status   Verify the credential (--json for secret-free diagnostics)",
       "aether auth token    Print the stored token (for scripts)",
       "aether auth refresh  Refresh a session token",
       "",

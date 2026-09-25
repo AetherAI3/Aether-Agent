@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { tokenStoreFromEnv, FileTokenStore, StaticTokenStore } from "../src/core/auth.js";
+import { tokenStoreFromEnv, FileTokenStore, StaticTokenStore, type TokenStore } from "../src/core/auth.js";
 import { ApiClient } from "../src/core/transport.js";
 import { errorHint, HttpError } from "../src/core/errors.js";
 import { hintFor } from "../src/core/error_hints.js";
@@ -357,7 +357,7 @@ test("EnvOverrideTokenStore: update() (auto-refresh) swaps the active token WITH
 
 // ── 5. renderAuthBox (LOOP-06): 401/403 must not read as "Authenticated" ──
 
-function fakeCtx(api: ApiClient, tokens: StaticTokenStore): AppContext {
+function fakeCtx(api: ApiClient, tokens: TokenStore): AppContext {
   return {
     cfg: { baseUrl: "https://api.example" },
     api,
@@ -384,16 +384,58 @@ test("renderAuthBox: a 401 from /models renders a distinct 'Session expired' sta
   }
 });
 
-test("renderAuthBox: a 403 from /models also renders 'Session expired' (not silently 'Authenticated')", async () => {
+test("renderAuthBox: a 403 from /models reports forbidden access, not an expired session", async () => {
   const real = globalThis.fetch;
   const tokens = new StaticTokenStore("aek_deadtoken1234");
   stubFetch(() => jsonRes(403, { detail: "forbidden" }), []);
   try {
     const api = new ApiClient("https://api.example", tokens);
     const panel = stripAnsi(await renderAuthBox(fakeCtx(api, tokens)));
-    assert.match(panel, /Session expired/);
+    assert.match(panel, /Access forbidden/);
+    assert.doesNotMatch(panel, /Session expired/);
+    assert.doesNotMatch(panel, /aether auth login/);
     assert.doesNotMatch(panel, /Authenticated/);
   } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("renderAuthBox: a rejected environment token identifies a different saved login being shadowed", () =>
+  withTempConfigDir(async () => {
+    const real = globalThis.fetch;
+    const saved = new FileTokenStore();
+    await saved.set("aek_saved_credential_canary");
+    const tokens = tokenStoreFromEnv({ AETHER_TOKEN: "aek_rejected_environment_canary" } as NodeJS.ProcessEnv);
+    stubFetch(() => jsonRes(401, { detail: "rejected" }), []);
+    try {
+      const panel = stripAnsi(await renderAuthBox(fakeCtx(new ApiClient("https://api.example", tokens), tokens)));
+      assert.match(panel, /AETHER_TOKEN environment variable/);
+      assert.match(panel, /overrides a different saved CLI login/);
+      assert.match(panel, /aether auth status/);
+      assert.doesNotMatch(panel, /aek_saved_credential_canary|aek_rejected_environment_canary/);
+    } finally {
+      globalThis.fetch = real;
+    }
+  }));
+
+test("auth status --json reports endpoint, 401, and source without leaking credential bytes", async () => {
+  const real = globalThis.fetch;
+  const tokens = new StaticTokenStore("aek_secret_canary_123456");
+  stubFetch(() => jsonRes(401, { detail: "rejected" }), []);
+  const cap = captureStdout();
+  try {
+    const ctx = fakeCtx(new ApiClient("https://api.example", tokens), tokens);
+    ctx.flags.json = true;
+    assert.equal(await cmdAuth(ctx, ["status"], {} as LoginOpts), 1);
+    const output = cap.writes.join("");
+    const diagnostic = JSON.parse(output) as Record<string, unknown>;
+    assert.deepEqual(diagnostic, {
+      verification: "expired", credentialSource: "injected", storedCredentialShadowed: false,
+      credentialKind: "api-key", endpoint: "/models", httpStatus: 401, failureKind: "http",
+    });
+    assert.doesNotMatch(output, /aek_secret_canary_123456|checking session|rejected/);
+  } finally {
+    cap.restore();
     globalThis.fetch = real;
   }
 });
