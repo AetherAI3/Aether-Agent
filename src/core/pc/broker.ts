@@ -17,7 +17,7 @@ export interface PcActionPlan extends PcActionRequest {
 
 export interface PcActionReceipt {
   planId: string;
-  status: "succeeded" | "denied" | "stale" | "failed";
+  status: "succeeded" | "denied" | "stale" | "failed" | "unknown";
   reason: string;
   observedAt: string;
 }

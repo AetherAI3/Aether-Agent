@@ -48,6 +48,11 @@ export interface ToolResult {
   exitCode: number;
 }
 
+/** Chosen by the local host when it creates an executor, never by a tool call. */
+export interface ToolExecutionContext {
+  readonly mode: "coding" | "pc";
+}
+
 /**
  * A pre-write read of a file, for rendering the live diff. `text` is null when
  * the content is unsuitable to diff (binary, oversized, or outside the
@@ -62,6 +67,7 @@ export interface FileSnapshot {
 
 export class ToolExecutor {
   private readonly root: string;
+  private readonly mode: ToolExecutionContext["mode"];
   /**
    * Built on first use by armCommitGuard(), never in the constructor. See the
    * comment there — constructing it runs synchronous git probes, and doing that
@@ -72,7 +78,14 @@ export class ToolExecutor {
   constructor(
     cwd: string,
     private readonly testCmd: string = DEFAULT_TEST_CMD,
+    context: ToolExecutionContext = { mode: "coding" },
   ) {
+    if (context.mode !== "coding" && context.mode !== "pc") {
+      throw new Error("invalid tool execution mode");
+    }
+    // Copy the primitive. A caller changing its context object later cannot
+    // upgrade this executor from the PC task's closed tool set.
+    this.mode = context.mode;
     // Canonicalize the root once (resolve any symlinks in the workspace path).
     const r = resolve(cwd);
     this.root = existsSync(r) ? realpathSync(r) : r;
@@ -99,6 +112,13 @@ export class ToolExecutor {
       this.committer = new GitCommitGuard(new SpawnGitRunner(this.root));
     }
     return this.committer;
+  }
+
+  private pcToolRefusal(): ToolResult {
+    return {
+      output: "[tool rejected: PC task mode accepts only registered PC operations through the local host gateway]",
+      exitCode: 1,
+    };
   }
 
   /**
@@ -252,6 +272,7 @@ export class ToolExecutor {
    * pointer rather than silently no-op'ing.
    */
   execute(name: string, rawArgs: unknown): ToolResult {
+    if (this.mode === "pc") return this.pcToolRefusal();
     const validation = validateToolCall(name, rawArgs);
     if (!validation.ok) {
       return { output: `[tool ${name} rejected: ${validation.error}]`, exitCode: 1 };
@@ -295,6 +316,7 @@ export class ToolExecutor {
    * output the brain reads as ordinary tool output).
    */
   async executeAsync(name: string, rawArgs: unknown, options: RunOptions = {}): Promise<ToolResult> {
+    if (this.mode === "pc") return this.pcToolRefusal();
     const validation = validateToolCall(name, rawArgs);
     if (!validation.ok) {
       return { output: `[tool ${name} rejected: ${validation.error}]`, exitCode: 1 };
