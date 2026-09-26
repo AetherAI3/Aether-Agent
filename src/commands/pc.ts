@@ -6,6 +6,7 @@ import type { CommandFlags } from "../core/command_dispatch.js";
 import { detectBrowserRuntime, verifyBrowserLaunch, type VerifyResult } from "../core/browser_runtime.js";
 import { openTargetChecked } from "../core/opener.js";
 import { PcActionBroker } from "../core/pc/broker.js";
+import { PcFileAudit, PcHostGateway } from "../core/pc/gateway.js";
 import { PC_TARGETS, isPcTarget, pcDoctor, pcMap, pcTargetUrl, type PcDoctorReport } from "../core/pc/doctor.js";
 
 function renderDoctor(report: PcDoctorReport): string {
@@ -68,7 +69,7 @@ export async function cmdPc(ctx: AppContext, argv: string[], flags: CommandFlags
     });
     const plan = broker.plan({ adapter: "browser.verify", operation: "verify", target: "127.0.0.1", expectedState });
     const verification: { proof?: VerifyResult } = {};
-    const receipt = await broker.execute(plan,
+    const receipt = await new PcHostGateway(broker, new PcFileAudit()).execute(plan,
       () => {
         const current = detectBrowserRuntime();
         return current.available ? current.browser ?? current.launcher ?? "browser-ready" : "unavailable";
@@ -103,7 +104,7 @@ export async function cmdPc(ctx: AppContext, argv: string[], flags: CommandFlags
       approve: (plan) => explicitApproval(`Open ${plan.target} in the default browser: ${url}`),
     });
     const plan = broker.plan({ adapter: "browser.open", operation: "open", target, expectedState: browser.browser ?? browser.launcher ?? "browser-ready" });
-    const receipt = await broker.execute(plan,
+    const receipt = await new PcHostGateway(broker, new PcFileAudit()).execute(plan,
       () => {
         const current = detectBrowserRuntime();
         return current.available ? current.browser ?? current.launcher ?? "browser-ready" : "unavailable";
