@@ -11,13 +11,15 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { childEnv } from "../child_env.js";
 
-export type BrowserInspectState = "rendered" | "login-required" | "redirected" | "failed";
+export type BrowserInspectState = "rendered" | "login-required" | "redirected" | "http-error" | "failed";
+export type BrowserHttpClass = "2xx" | "3xx" | "4xx" | "5xx" | "other";
 
 export interface BrowserInspection {
   schema: "aether.pc.browser-inspect/1";
   state: BrowserInspectState;
   browserLaunched: boolean;
   navigationAttempted: boolean;
+  mainDocumentHttpClass: BrowserHttpClass | null;
   requestedOrigin: string;
   finalOrigin: string | null;
   documentDigest: string | null;
@@ -45,6 +47,7 @@ export interface BrowserInspectOptions {
 interface DevtoolsPort { port: number; browserPath: string }
 interface PageTarget { type?: unknown; webSocketDebuggerUrl?: unknown }
 interface CdpMessage { id?: number; method?: unknown; params?: unknown; result?: unknown; error?: unknown }
+interface DocumentResponse { frameId: string; loaderId: string; httpClass: BrowserHttpClass }
 
 const SCHEMA = "aether.pc.browser-inspect/1" as const;
 const POLL_MS = 100;
@@ -65,6 +68,11 @@ function boundedTimeout(value: number | undefined): number {
   if (value === undefined) return DEFAULT_TIMEOUT_MS;
   if (!Number.isSafeInteger(value) || value < 1_000 || value > 60_000) throw new Error("invalid browser inspection timeout");
   return value;
+}
+
+function httpClass(status: number): BrowserHttpClass {
+  const hundreds = Math.floor(status / 100);
+  return hundreds >= 2 && hundreds <= 5 ? `${hundreds}xx` as BrowserHttpClass : "other";
 }
 
 function inspectedUrl(raw: string, allowHttpLoopback: boolean): URL {
@@ -226,6 +234,7 @@ async function structure(cdp: CdpConnection, deadline: number): Promise<NonNulla
 function newResult(origin: string): BrowserInspection {
   return {
     schema: SCHEMA, state: "failed", browserLaunched: false, navigationAttempted: false,
+    mainDocumentHttpClass: null,
     requestedOrigin: origin, finalOrigin: null,
     documentDigest: null, structure: null, reason: "inspection did not complete",
     profileCleaned: false, observedAt: new Date().toISOString(),
@@ -274,6 +283,7 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
   let port: DevtoolsPort | null = null;
   let cdp: CdpConnection | null = null;
   let browserControl: CdpConnection | null = null;
+  const documentResponses: DocumentResponse[] = [];
   let unexpectedPage = false;
   let monitorArmed = false;
   let phase = "launch";
@@ -306,10 +316,23 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
     cdp = await CdpConnection.connect(ws, deadline);
     phase = "Page.enable";
     await cdp.command("Page.enable", {}, deadline);
+    cdp.onEvent((method, params) => {
+      if (method !== "Network.responseReceived") return;
+      const event = params as { type?: unknown; frameId?: unknown; loaderId?: unknown; response?: { status?: unknown } } | null;
+      if (event?.type !== "Document" || typeof event.frameId !== "string" ||
+          typeof event.loaderId !== "string" || typeof event.response?.status !== "number" ||
+          !Number.isFinite(event.response.status)) return;
+      documentResponses.push({
+        frameId: event.frameId, loaderId: event.loaderId,
+        httpClass: httpClass(event.response.status),
+      });
+      if (documentResponses.length > 16) documentResponses.shift();
+    });
+    await cdp.command("Network.enable", {}, deadline);
     phase = "Page.navigate";
     monitorArmed = true;
     result.navigationAttempted = true;
-    const navigation = await cdp.command("Page.navigate", { url: requested.href }, deadline, 20_000) as { errorText?: unknown };
+    const navigation = await cdp.command("Page.navigate", { url: requested.href }, deadline, 35_000) as { errorText?: unknown };
     if (typeof navigation?.errorText === "string") throw new Error("controlled browser navigation failed");
     phase = "document readiness";
     let frame: FrameIdentity | null = null;
@@ -325,6 +348,17 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
     if (final.origin !== requested.origin) {
       result.state = "redirected";
       result.reason = "page navigated outside the approved origin; no structure was inspected";
+      return result;
+    }
+    phase = "main document status";
+    const mainResponse = [...documentResponses].reverse().find((response) =>
+      response.frameId === frame.id && response.loaderId === frame.loaderId);
+    if (!mainResponse) throw new Error("main document HTTP status unavailable");
+    result.mainDocumentHttpClass = mainResponse.httpClass;
+    if (mainResponse.httpClass !== "2xx") {
+      result.state = "http-error";
+      result.finalOrigin = final.origin;
+      result.reason = `main document returned HTTP ${mainResponse.httpClass}`;
       return result;
     }
     phase = "structure inspection";
