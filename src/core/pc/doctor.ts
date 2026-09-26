@@ -3,6 +3,7 @@ import { networkInterfaces } from "node:os";
 import { statfsSync } from "node:fs";
 import { childEnv } from "../child_env.js";
 import { detectBrowserRuntime } from "../browser_runtime.js";
+import { controlledEdgeExecutable } from "./browser_inspect.js";
 import { defaultTelemetryInputs, TelemetrySampler } from "../device_runtime/telemetry.js";
 
 export const PC_SCHEMA = "aether.pc/1" as const;
@@ -105,6 +106,7 @@ export function pcTargetUrl(target: PcTarget): string { return TARGET_URL[target
 /** Static and inspected support are separated from verified end-to-end control. */
 export function pcMap(platform: NodeJS.Platform = process.platform, now: () => number = Date.now): PcMap {
   const browser = detectBrowserRuntime({ platform });
+  const controlledEdge = controlledEdgeExecutable(process.env, platform);
   return {
     schema: PC_SCHEMA,
     platform,
@@ -114,7 +116,9 @@ export function pcMap(platform: NodeJS.Platform = process.platform, now: () => n
       { id: "process.inspect", state: platform === "win32" ? "unverified" : "unavailable", detail: platform === "win32" ? "Windows CIM probe; run pc doctor to verify" : "Windows-only first release" },
       { id: "browser.open", state: browser.available ? "unverified" : "unavailable", detail: browser.evidence + "; rendering has not been verified" },
       { id: "browser.verify", state: browser.available ? "unverified" : "unavailable", detail: browser.available ? "run pc verify-browser for an approved loopback page-render proof" : browser.evidence },
-      { id: "browser.inspect", state: "unavailable", detail: "no browser automation adapter installed in this release" },
+      { id: "browser.inspect", state: controlledEdge ? "unverified" : "unavailable", detail: controlledEdge
+        ? "controlled Edge structural inspection adapter present; run pc inspect-browser with approval for a real page proof"
+        : "controlled Edge inspection requires Windows and Edge Stable" },
       { id: "browser.act", state: "unavailable", detail: "no origin-scoped action adapter installed in this release" },
       { id: "pc.capture", state: "unavailable", detail: "desktop capture driver and privacy masks are not implemented" },
       { id: "pc.act", state: "unavailable", detail: "desktop action driver and window-scoped grants are not implemented" },

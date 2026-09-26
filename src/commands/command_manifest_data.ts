@@ -1644,9 +1644,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "[map|doctor|verify-browser|open] [target]",
+    "args": "[map|doctor|verify-browser|open|inspect-browser] [target]",
     "summary": "inspect PC capabilities and diagnose app performance with scoped actions",
-    "detailedHelp": "aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt]\nMap defaults to the v2 axes; map v1 preserves the legacy JSON view for one transition release. Network probes require --probe-network. Browser verification opens a loopback page and requires fresh interactive approval. Opening an app also requires approval; --yes cannot approve PC actions.",
+    "detailedHelp": "aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt] | inspect-browser [aether-cloud|claude|chatgpt]\nMap defaults to the v2 axes; map v1 preserves the legacy JSON view for one transition release. Network probes require --probe-network. Browser verification opens a loopback page. Browser inspection opens a disposable Edge profile and reports only origin, document readiness and structural presence. Browser actions require fresh interactive approval; --yes cannot approve them.",
     "section": "System",
     "hidden": false,
     "permissionClass": "local-write",
@@ -1705,13 +1705,13 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "pc",
-      "usage": "aether pc [map|doctor|verify-browser|open] [target]",
+      "usage": "aether pc [map|doctor|verify-browser|open|inspect-browser] [target]",
       "visible": true,
       "disposition": "generated"
     },
     "release": {
       "disposition": "new",
-      "note": "Read-only PC map and doctor with a one-use approval broker for browser readiness proof and named browser opens. Desktop and unsandboxed command actions remain unavailable."
+      "note": "Read-only PC map and doctor, plus approved browser readiness and disposable Edge structural inspection. Desktop and unsandboxed command actions remain unavailable."
     }
   },
   {

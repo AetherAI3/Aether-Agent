@@ -6,6 +6,7 @@ import type { CommandFlags } from "../core/command_dispatch.js";
 import { detectBrowserRuntime, verifyBrowserLaunch, type VerifyResult } from "../core/browser_runtime.js";
 import { openTargetChecked } from "../core/opener.js";
 import { PcActionBroker } from "../core/pc/broker.js";
+import { controlledEdgeExecutable, inspectControlledPage, type BrowserInspection } from "../core/pc/browser_inspect.js";
 import { PcFileAudit, PcHostGateway } from "../core/pc/gateway.js";
 import { PC_TARGETS, isPcTarget, pcDoctor, pcMap, pcMapV2, pcTargetUrl, type PcDoctorReport } from "../core/pc/doctor.js";
 
@@ -88,12 +89,15 @@ export async function cmdPc(ctx: AppContext, argv: string[], flags: CommandFlags
       },
       async () => {
         verification.proof = await verifyBrowserLaunch({ timeoutMs: 10_000 });
-        return verification.proof.verified;
+        return {
+          dispatched: verification.proof.code === "BROWSER_READY" || verification.proof.code === "BROWSER_UNVERIFIED",
+          verified: verification.proof.verified,
+        };
       },
     );
     process.stdout.write(ctx.flags.json ? JSON.stringify({ receipt, proof: verification.proof ?? null }) + "\n" :
       `Browser readiness: ${verification.proof?.verified ? "verified" : receipt.status}\n${verification.proof?.evidence ?? receipt.reason}\n`);
-    return receipt.status === "succeeded" ? 0 : 3;
+    return receipt.status === "succeeded" && verification.proof?.verified ? 0 : 3;
   }
   if (sub === "open" && argv.length === 2) {
     const target = argv[1]!;
@@ -126,6 +130,44 @@ export async function cmdPc(ctx: AppContext, argv: string[], flags: CommandFlags
     process.stdout.write(ctx.flags.json ? JSON.stringify(receipt) + "\n" : `${receipt.status}: ${receipt.reason}\n`);
     return receipt.status === "succeeded" ? 0 : 3;
   }
-  process.stderr.write("usage: aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt]\n");
+  if (sub === "inspect-browser" && argv.length === 2) {
+    const target = argv[1]!;
+    if (!isPcTarget(target) || target === "ollama") {
+      process.stderr.write("PC browser inspection supports aether-cloud, claude and chatgpt.\n");
+      return 2;
+    }
+    if (ctx.flags.yes || !process.stdin.isTTY) {
+      process.stderr.write("PC browser inspection requires fresh interactive approval; --yes and headless execution do not grant it.\n");
+      return 3;
+    }
+    const executable = controlledEdgeExecutable();
+    if (!executable) {
+      process.stderr.write("Controlled Edge browser unavailable on this Windows installation.\n");
+      return 3;
+    }
+    const url = pcTargetUrl(target);
+    const broker = new PcActionBroker(randomUUID(), userInfo().username, {
+      interactive: true,
+      approve: () => explicitApproval(`Inspect only page readiness and structural presence at ${new URL(url).origin} in a disposable Edge profile?`),
+    });
+    const plan = broker.plan({ adapter: "browser.inspect", operation: "inspect", target, expectedState: executable });
+    const observation: { proof?: BrowserInspection } = {};
+    const receipt = await new PcHostGateway(broker, new PcFileAudit()).execute(plan,
+      () => controlledEdgeExecutable() ?? "unavailable",
+      async () => {
+        observation.proof = await inspectControlledPage(url);
+        return {
+          dispatched: observation.proof.browserLaunched,
+          verified: observation.proof.profileCleaned &&
+            (observation.proof.state === "rendered" || observation.proof.state === "login-required"),
+        };
+      },
+    );
+    const proof = observation.proof ?? null;
+    process.stdout.write(ctx.flags.json ? JSON.stringify({ receipt, proof }) + "\n" :
+      `Browser inspection: ${proof?.state ?? receipt.status}\n${proof?.reason ?? receipt.reason}\n`);
+    return receipt.status === "succeeded" ? 0 : 3;
+  }
+  process.stderr.write("usage: aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt] | inspect-browser [aether-cloud|claude|chatgpt]\n");
   return 2;
 }
