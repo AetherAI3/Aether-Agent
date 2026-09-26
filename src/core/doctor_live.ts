@@ -33,6 +33,7 @@ import { TOOLS } from "./brain_protocol.js";
 import { DEV_PROTOCOL_VERSION } from "./brain_cloud.js";
 import { appendCustody, readCustodyLog } from "./custody.js";
 import { McpClient } from "./mcp.js";
+import { diagnosePredatorDrive } from "./predator_drive_readiness.js";
 import { LocalMcpStore } from "./mcp_store.js";
 import { bounded } from "./mcp_diagnostics.js";
 import {
@@ -941,8 +942,22 @@ function automationChecks(): HealthCheck[] {
     });
   return [
     na("actions.dispatch", "GitHub Actions dispatch", "this build has no workflow-dispatch surface"),
-    na("predator.readiness", "Predator readiness", "this build has no Predator client"),
   ];
+}
+
+export async function predatorDriveProbe(ctx: AppContext): Promise<HealthCheck> {
+  const report = await diagnosePredatorDrive(ctx);
+  const reached = report.source === "CLOUD_G0_DIAGNOSE" ||
+    (report.source === "CLOUD_ROUTE_ERROR" && !report.blockers.includes("CLOUD_ROUTE_UNAVAILABLE"));
+  return check({ id: "predator.readiness", category: "automation", title: "Predator readiness" }, {
+    configured: axis("yes", { evidence: "read-only Cloud Drive G0 diagnosis is available" }),
+    reachable: report.source === "LOCAL_CREDENTIAL_GATE"
+      ? notChecked("staff route not contacted: " + report.blockers.join(", "))
+      : axis(reached ? "yes" : "no", { evidence: report.source }),
+    verified: axis("no", { evidence: "Drive G0: " + report.blockers.join(", ") }),
+    severity: "warning",
+    remediation: "run: aether mcp doctor drive",
+  });
 }
 
 /**
@@ -981,6 +996,7 @@ export async function liveReport(ctx: AppContext, options: LiveOptions = {}): Pr
       Promise.resolve(githubProbe(runner)),
       Promise.resolve(branchProbe(runner, cwd)),
       mcpProbe(client, store, timeoutMs),
+      predatorDriveProbe(ctx),
       Promise.resolve(custodyProbe(sandbox, runId)),
     ]);
 

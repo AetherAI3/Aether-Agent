@@ -191,16 +191,19 @@ test("fast doctor is local, ordered, fail-soft, and content-redacted", async () 
   );
 });
 
-test("a surface this build does not have reports n/a, not a pass", async () => {
+test("fast doctor distinguishes the absent Actions surface from read-only Drive readiness", async () => {
   const { ctx, roots, store, client } = setup();
   const report = await diagnosticReport(ctx, {
     dependencies: { memoryRoots: roots, mcpStore: store, mcpClient: client },
   });
-  for (const id of ["actions.dispatch", "predator.readiness"]) {
-    const check = report.checks.find((entry) => entry.id === id);
-    assert.equal(check?.verified.state, "na", `${id} must not claim a pass`);
-    assert.match(String(check?.verified.evidence), /this build has no/);
-  }
+  const actions = report.checks.find((entry) => entry.id === "actions.dispatch");
+  assert.equal(actions?.verified.state, "na");
+  assert.match(String(actions?.verified.evidence), /this build has no/);
+  const drive = report.checks.find((entry) => entry.id === "predator.readiness");
+  assert.equal(drive?.configured.state, "yes");
+  assert.equal(drive?.reachable.state, "not-checked");
+  assert.equal(drive?.verified.state, "not-checked");
+  assert.match(String(drive?.verified.evidence), /aether mcp doctor drive/);
 });
 
 test("fast doctor contacts nothing even when --deep is passed", async () => {

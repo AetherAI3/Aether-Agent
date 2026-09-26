@@ -4,6 +4,7 @@ import type { Writable } from "node:stream";
 import type { AppContext } from "../src/core/context.js";
 import { HttpError } from "../src/core/errors.js";
 import { cmdMcp } from "../src/commands/mcp.js";
+import { predatorDriveProbe } from "../src/core/doctor_live.js";
 import {
   diagnosePredatorDrive,
   PREDATOR_DRIVE_DIAGNOSE_PATH,
@@ -98,4 +99,14 @@ test("aether mcp doctor drive emits a typed blocked report", async () => {
   assert.equal(report["releaseGate"], "G0");
   assert.equal(report["decision"], "CAPABILITY_BLOCKED");
   assert.equal(report["missionAdmitted"], false);
+});
+
+test("live doctor reports the Agent API-key fence without probing Cloud", async () => {
+  const { ctx, calls } = context("aek_example_private");
+  const check = await predatorDriveProbe(ctx);
+  assert.deepEqual(calls, []);
+  assert.equal(check.configured.state, "yes");
+  assert.equal(check.reachable.state, "not-checked");
+  assert.equal(check.verified.state, "no");
+  assert.match(String(check.verified.evidence), /STAFF_SESSION_REQUIRED/);
 });
