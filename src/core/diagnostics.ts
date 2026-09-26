@@ -450,10 +450,10 @@ export function fastCheckSpecs(
       category: "automation",
       title: "Predator readiness",
       run: (): CheckOutcome => ({
-        configured: notApplicable("this build has no Predator client"),
-        reachable: notApplicable("this build has no Predator client"),
-        verified: notApplicable("this build has no Predator client"),
-        severity: "info",
+        configured: axis("yes", { evidence: "read-only Cloud Drive G0 diagnosis is available" }),
+        reachable: notChecked("fast doctor makes no network calls"),
+        verified: notChecked("run: aether mcp doctor drive"),
+        severity: "warning",
       }),
     },
     // Skill and instruction health. Filesystem-only, so they belong in fast

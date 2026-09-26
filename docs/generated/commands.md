@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:7e770e13db9311bc9b660412df8bb642f12c249c0082a3cee56e46279614e51d -->
+<!-- manifest-digest: sha256:edd420b57e7af864b11cfe8627177c66e4fd416801b252f0ababee4c9d85d84d -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -261,7 +261,7 @@ export a redacted diagnostic support bundle
 
 Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.support-bundle`
 
-#### `aether mcp [list|doctor|repair]`
+#### `aether mcp [list|doctor [drive]|repair]`
 
 manage and diagnose MCP servers
 
@@ -393,7 +393,7 @@ leave the REPL
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.exit` · Aliases: `/quit`
 
-#### `/mcp [list|doctor|repair]`
+#### `/mcp [list|doctor [drive]|repair]`
 
 manage and diagnose MCP servers
 
