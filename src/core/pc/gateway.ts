@@ -100,7 +100,8 @@ export class PcHostGateway {
         const performed = await perform();
         effect = typeof performed === "boolean" ? { dispatched: performed } : performed;
         if (typeof effect.dispatched !== "boolean" ||
-            (effect.verified !== undefined && typeof effect.verified !== "boolean")) {
+            (effect.verified !== undefined && typeof effect.verified !== "boolean") ||
+            (effect.verified === true && !effect.dispatched)) {
           throw new Error("invalid PC effect result");
         }
       } catch {

@@ -334,7 +334,9 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
     if (after.id !== frame.id || after.loaderId !== frame.loaderId || after.url !== frame.url) {
       throw new Error("controlled page changed during inspection");
     }
-    if (unexpectedPage || await pageCount(port.port, deadline) !== 1) {
+    const finalPageCount = await pageCount(port.port, deadline);
+    await pause(); // Let queued target-created events reach the browser socket.
+    if (unexpectedPage || finalPageCount !== 1) {
       throw new Error("controlled browser opened an unexpected page");
     }
     result.state = flags.passwordField || /(?:^|\/)(?:login|sign-?in|auth)(?:\/|$)/i.test(final.pathname)
