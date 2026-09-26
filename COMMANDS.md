@@ -460,6 +460,11 @@ disconnect actions per entry.
 | `aether mcp list` | Print a diagnostics report (providers, connections, tool counts). |
 | `aether mcp doctor` | Same report; exits `1` if any check fails (scriptable health gate). |
 | `aether mcp repair` | Back up and reset a corrupted local MCP registry (confirms first). |
+| `aether mcp drive preview <intake.json>` | Read-only Cloud staff preflight. At G0, returns blockers and creates no mission or spend. |
+| `aether mcp drive status <lane-id>` | Read shared C1 mission metadata visible to the bound staff session. |
+| `aether mcp drive events <lane-id> [after-cursor] [limit]` | Page shared C1 control events visible to the bound staff session. |
+
+Drive reads require an existing bound Cloud staff session (for example a desktop-injected session). The ordinary `aether auth login` device flow issues an `aek_` API key, which the Drive client refuses before sending a staff request. The Cloud independently checks staff role and lane visibility. These read commands do not start or control a mission.
 
 ### `aether config [show|get|set]` — local settings
 Local settings, stored at `~/.config/aether/config.json`.
