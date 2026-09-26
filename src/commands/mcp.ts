@@ -32,6 +32,7 @@ import { browserHint, openBrowserTyped, type BrowserOpenResult } from "../core/b
 import { theme } from "../ui/theme.js";
 import { sanitizeTerm } from "../ui/text.js";
 import { diagnosePredatorDrive, renderPredatorDriveReadiness } from "../core/predator_drive_readiness.js";
+import { cmdMcpDrive } from "./mcp_drive.js";
 
 export interface MenuIO {
   out: Writable;
@@ -627,8 +628,9 @@ export async function cmdMcp(
     out.write(ctx.flags.json ? JSON.stringify(report) + "\n" : renderPredatorDriveReadiness(report));
     return 1; // G0 is a real blocker, never a ready/green Drive claim.
   }
+  if (sub === "drive") return cmdMcpDrive(ctx, argv.slice(1), out);
   if (argv.length > 1) {
-    out.write("usage: aether mcp [list|doctor [drive]|repair]\n");
+    out.write("usage: aether mcp [list|doctor [drive]|drive|repair]\n");
     return 2;
   }
   const client = options.client ?? new McpClient(ctx.api);
@@ -665,7 +667,7 @@ export async function cmdMcp(
     }
   }
   if (sub) {
-    out.write("usage: aether mcp [list|doctor [drive]|repair]\n");
+    out.write("usage: aether mcp [list|doctor [drive]|drive|repair]\n");
     return 2;
   }
   if (!process.stdin.isTTY) {
