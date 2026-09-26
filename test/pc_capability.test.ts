@@ -69,7 +69,7 @@ test("PC doctor does not contact remote targets unless explicitly requested", as
   const called: string[] = [];
   const deps = {
     wait: async () => {},
-    fetchHead: async (url: string) => { called.push(url); return [10, 12, 30][called.length - 1]!; },
+    fetchHead: async (url: string) => { called.push(url); return { latencyMs: [10, 12, 30][called.length - 1]!, statusCode: 200 }; },
     processProbe: () => ({ state: "measured" as const, items: [] }),
   };
   const root = process.cwd();
@@ -81,6 +81,48 @@ test("PC doctor does not contact remote targets unless explicitly requested", as
   assert.equal(online.metrics.find((item) => item.id === "target.reachability_p50")?.value, 12);
   assert.equal(online.metrics.find((item) => item.id === "target.reachability_p95")?.value, 30);
   assert.equal(online.processes.state, "measured");
+  assert.deepEqual(online.networkProbe.statusCodes, [200, 200, 200]);
+  assert.equal(online.networkProbe.httpClass, "success");
+  assert.equal(online.metrics.find((item) => item.id === "cpu.utilization")?.sampleCount, 3);
+});
+
+test("PC doctor reports HTTP refusals and server errors without calling them healthy", async () => {
+  const root = process.cwd();
+  for (const [statusCode, expected] of [[401, "auth-required"], [500, "server-error"]] as const) {
+    const report = await pcDoctor("aether-cloud", root, true, {
+      wait: async () => {},
+      fetchHead: async () => ({ latencyMs: 10, statusCode }),
+      processProbe: () => ({ state: "measured", items: [] }),
+    });
+    assert.equal(report.networkProbe.state, "measured");
+    assert.equal(report.networkProbe.httpClass, expected);
+    assert.deepEqual(report.networkProbe.statusCodes, [statusCode, statusCode, statusCode]);
+  }
+});
+
+test("PC doctor calls a partial or mixed network probe inconclusive", async () => {
+  const root = process.cwd();
+  let call = 0;
+  const partial = await pcDoctor("claude", root, true, {
+    wait: async () => {},
+    fetchHead: async () => {
+      if (++call === 2) throw new Error("timeout with a secret that must not be shown");
+      return { latencyMs: 10, statusCode: 200 };
+    },
+    processProbe: () => ({ state: "measured", items: [] }),
+  });
+  assert.equal(partial.networkProbe.state, "inconclusive");
+  assert.equal(partial.networkProbe.sampleCount, 2);
+  assert.equal(partial.metrics.find((item) => item.id === "target.reachability_p50")?.state, "unavailable");
+  assert.doesNotMatch(JSON.stringify(partial), /secret that must not be shown/);
+  call = 0;
+  const mixed = await pcDoctor("claude", root, true, {
+    wait: async () => {},
+    fetchHead: async () => ({ latencyMs: 10, statusCode: ++call === 1 ? 200 : 500 }),
+    processProbe: () => ({ state: "measured", items: [] }),
+  });
+  assert.equal(mixed.networkProbe.state, "inconclusive");
+  assert.equal(mixed.networkProbe.httpClass, "mixed");
 });
 
 test("target set and command manifest stay closed and visible", () => {
