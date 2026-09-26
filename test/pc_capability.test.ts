@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { PcActionBroker, type PcActionRequest } from "../src/core/pc/broker.js";
-import { isPcTarget, pcDoctor, pcMap, pcTargetUrl } from "../src/core/pc/doctor.js";
+import { isPcTarget, pcDoctor, pcMap, pcMapV2, pcTargetUrl } from "../src/core/pc/doctor.js";
 import { findManifestCommand } from "../src/commands/command_manifest.js";
 
 const request: PcActionRequest = {
@@ -63,6 +63,33 @@ test("PC map reports unavailable control rather than inheriting legacy shell aut
   assert.equal(map.capabilities.find((item) => item.id === "device.runtime")?.state, "unavailable");
   assert.ok(["unverified", "unavailable"].includes(map.capabilities.find((item) => item.id === "browser.verify")?.state ?? ""));
   assert.equal(map.capabilities.find((item) => item.id === "cloud.act")?.state, "unverified");
+});
+
+test("PC map v2 separates readiness, permission, proof, and release qualification", () => {
+  const map = pcMapV2("win32", () => 0, true);
+  assert.equal(map.schema, "aether.pc/2");
+  assert.equal(map.legacySchema, "aether.pc/1");
+  assert.deepEqual(map.session, { active: false, interactive: true });
+  const browser = map.capabilities.find((row) => row.id === "browser.open")!;
+  assert.equal(browser.platformSupport, "supported");
+  assert.equal(browser.permission, "fresh-local-approval");
+  assert.deepEqual(browser.lastProof, { observedAt: null, ageMs: null, scope: null });
+  assert.equal(browser.qualification.installed, "unverified");
+  assert.equal(browser.qualification.hosted, "unverified");
+  const command = map.capabilities.find((row) => row.id === "command.execute")!;
+  assert.equal(command.permission, "denied");
+  assert.equal(command.runtimeReadiness, "not-applicable");
+});
+
+test("PC map CLI defaults to v2 and keeps an explicit v1 JSON view", () => {
+  const entry = fileURLToPath(new URL("../src/main.js", import.meta.url));
+  for (const [args, schema] of [[[], "aether.pc/2"], [["v1"], "aether.pc/1"], [["v2"], "aether.pc/2"]] as const) {
+    const result = spawnSync(process.execPath, [entry, "pc", "map", ...args, "--json"], {
+      encoding: "utf8", timeout: 10_000, windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal((JSON.parse(result.stdout) as { schema: string }).schema, schema);
+  }
 });
 
 test("PC doctor does not contact remote targets unless explicitly requested", async () => {

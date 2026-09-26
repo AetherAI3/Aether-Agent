@@ -1646,7 +1646,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "deprecatedAliases": [],
     "args": "[map|doctor|verify-browser|open] [target]",
     "summary": "inspect PC capabilities and diagnose app performance with scoped actions",
-    "detailedHelp": "aether pc map | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt]\nInspect local metrics and capability availability. Network probes require --probe-network. Browser verification opens a loopback page and requires fresh interactive approval. Opening an app also requires approval; --yes cannot approve PC actions.",
+    "detailedHelp": "aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt]\nMap defaults to the v2 axes; map v1 preserves the legacy JSON view for one transition release. Network probes require --probe-network. Browser verification opens a loopback page and requires fresh interactive approval. Opening an app also requires approval; --yes cannot approve PC actions.",
     "section": "System",
     "hidden": false,
     "permissionClass": "local-write",

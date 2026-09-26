@@ -7,7 +7,7 @@ import { detectBrowserRuntime, verifyBrowserLaunch, type VerifyResult } from "..
 import { openTargetChecked } from "../core/opener.js";
 import { PcActionBroker } from "../core/pc/broker.js";
 import { PcFileAudit, PcHostGateway } from "../core/pc/gateway.js";
-import { PC_TARGETS, isPcTarget, pcDoctor, pcMap, pcTargetUrl, type PcDoctorReport } from "../core/pc/doctor.js";
+import { PC_TARGETS, isPcTarget, pcDoctor, pcMap, pcMapV2, pcTargetUrl, type PcDoctorReport } from "../core/pc/doctor.js";
 
 function renderDoctor(report: PcDoctorReport): string {
   const lines = [`PC doctor · ${report.target} · ${report.observedAt}`];
@@ -40,10 +40,18 @@ async function explicitApproval(message: string): Promise<boolean> {
 
 export async function cmdPc(ctx: AppContext, argv: string[], flags: CommandFlags): Promise<number> {
   const sub = argv[0] ?? "map";
-  if (sub === "map" && argv.length <= 1) {
-    const map = pcMap();
+  if (sub === "map" && (argv.length === 1 || (argv.length === 2 && (argv[1] === "v1" || argv[1] === "v2")))) {
+    if (argv[1] === "v1") {
+      const map = pcMap();
+      process.stdout.write(ctx.flags.json ? JSON.stringify(map) + "\n" :
+        `PC capabilities · ${map.platform} · legacy v1\n` + map.capabilities.map((row) => `  ${row.id.padEnd(22)} ${row.state.padEnd(11)} ${row.detail}`).join("\n") + "\n");
+      return 0;
+    }
+    const map = pcMapV2();
     process.stdout.write(ctx.flags.json ? JSON.stringify(map) + "\n" :
-      `PC capabilities · ${map.platform}\n` + map.capabilities.map((row) => `  ${row.id.padEnd(22)} ${row.state.padEnd(11)} ${row.detail}`).join("\n") + "\n");
+      `PC capabilities · ${map.platform} · v2\n` + map.capabilities.map((row) =>
+        `  ${row.id.padEnd(22)} ${row.runtimeReadiness.padEnd(15)} ${row.permission.padEnd(22)} ${row.detail}`,
+      ).join("\n") + "\n");
     return 0;
   }
   if (sub === "doctor" && argv.length <= 2) {
@@ -118,6 +126,6 @@ export async function cmdPc(ctx: AppContext, argv: string[], flags: CommandFlags
     process.stdout.write(ctx.flags.json ? JSON.stringify(receipt) + "\n" : `${receipt.status}: ${receipt.reason}\n`);
     return receipt.status === "succeeded" ? 0 : 3;
   }
-  process.stderr.write("usage: aether pc map | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt]\n");
+  process.stderr.write("usage: aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt]\n");
   return 2;
 }

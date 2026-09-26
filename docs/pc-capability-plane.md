@@ -8,7 +8,7 @@ or hosted-service entitlement claim.
 
 | Command | Effect | What it proves |
 |---|---|---|
-| `aether pc map [--json]` | Read-only | Available, unavailable, denied, and unverified PC adapters. A registered browser is unverified until a page render is observed. |
+| `aether pc map [v1\|v2] [--json]` | Read-only | V2 separates support, readiness, permission, missing proof, and source/installed/hosted qualification. `map v1` preserves the older JSON envelope for one transition release. |
 | `aether pc doctor [aether-cloud\|claude\|chatgpt\|ollama] [--json]` | Read-only local sampling | CPU delta, memory, workspace disk, non-internal network interface count, and selected app/browser processes with PID and start time on Windows. Missing probes are explicit. |
 | `aether pc doctor <target> --probe-network` | Three outbound HEAD requests to a fixed target | Reachability p50/p95; includes remote service time. No cookies, tokens, prompt content, or user-defined URL is sent. |
 | `aether pc verify-browser` | Opens a loopback readiness page | Interactive approval and a one-use callback prove that a browser rendered the page. The listener closes after the result. |
@@ -23,6 +23,12 @@ app speedup or distinguish network time from remote service time. It never
 changes settings or deletes files. In particular, local PC adjustments cannot
 guarantee faster inference from Claude, ChatGPT, or Aether Cloud; reachability
 measurements combine network and service response time.
+
+The default `pc map` emits `aether.pc/2`. Its `lastProof` fields remain null
+until target- and session-scoped evidence is actually recorded. A source value
+of `implemented` identifies code in this candidate; `installed` and `hosted`
+remain unverified. The prior `aether.pc/1` JSON remains available through
+`pc map v1 --json` during the transition.
 
 ## Authority and implementation
 
