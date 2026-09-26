@@ -13,6 +13,7 @@ or hosted-service entitlement claim.
 | `aether pc doctor <target> --probe-network` | Three outbound HEAD requests to a fixed target | Reachability p50/p95; includes remote service time. No cookies, tokens, prompt content, or user-defined URL is sent. |
 | `aether pc verify-browser` | Opens a loopback readiness page | Interactive approval and a one-use callback prove that a browser rendered the page. The listener closes after the result. |
 | `aether pc open [aether-cloud\|claude\|chatgpt]` | Opens one fixed site | One-use interactive approval bound to target and detected browser state. `--yes` and headless sessions cannot approve. Launcher start is reported as dispatch, not as verified page rendering. |
+| `aether pc inspect-browser [aether-cloud\|claude\|chatgpt] [--json]` | Opens a fixed HTTPS site in a disposable Edge profile | After fresh interactive approval, observes a real top-level document, checks its origin, loader identity, and bounded main-document HTTP status class, then reports only fixed structural booleans for a successful response. HTTP 4xx/5xx return `http-error` without inspecting structure. `rendered` does not mean authenticated; `login-required` means a password field or login route was observed. The profile is closed and removed afterward. |
 
 `pc doctor` reports recommendations from observed resource pressure. CPU and
 memory now use three timed samples and show their range. The optional fixed
@@ -29,6 +30,10 @@ until target- and session-scoped evidence is actually recorded. A source value
 of `implemented` identifies code in this candidate; `installed` and `hosted`
 remain unverified. The prior `aether.pc/1` JSON remains available through
 `pc map v1 --json` during the transition.
+The Windows Edge inspection adapter is source-implemented in this candidate,
+but `browser.inspect` runtime readiness stays unverified from driver presence
+alone. Its `lastProof` remains null because individual run proofs are returned
+in receipts rather than persisted into the capability map.
 
 ## Authority and implementation
 
@@ -37,9 +42,8 @@ bound to the local user, session, adapter, operation, target, and expected
 state. The broker consumes a plan before calling the host approval port, checks
 the state again immediately before dispatch, and refuses changed, expired,
 replayed, revoked, or headless requests. Model output, page content, and tool
-results do not create approval. The first adapter is a fixed-target browser
-open; the command uses a fresh terminal prompt and does not treat `--yes` as a
-grant.
+results do not create approval. Fixed-target browser open and controlled Edge
+inspection each use a fresh terminal prompt and do not treat `--yes` as a grant.
 
 `src/core/pc/gateway.ts` now wraps the approved browser actions. It durably
 writes a redacted intent before dispatch and an outcome afterward. If the intent
@@ -49,6 +53,25 @@ operator should check the browser before retrying. The local JSONL record uses
 a target digest, not a raw URL, and is stored under the user's application data
 directory. It is an audit aid under the current user profile, not protection
 against another process with the same user's privileges.
+The outcome records dispatch separately from postcondition verification. An
+Edge launch followed by an unproved page state is logged as dispatched with
+`verified: false` and returns a failed receipt. The browser proof separately
+states whether Edge launched, navigation was attempted, and profile cleanup
+completed.
+
+The controlled inspection adapter launches Edge Stable with a separate temporary
+profile and a random loopback DevTools port. It never attaches to the user's
+normal browser profile. It reads top-level origin, readiness, and presence of
+fixed landmarks without returning page text, DOM, cookies, storage, screenshots,
+or credentials. A redirect outside the approved origin stops before structure
+inspection. It watches for extra page targets during navigation and fails proof
+if one appears, even if that page closes before the final count. Its
+`browser.inspect` map entry remains **unverified** merely from
+driver presence; the receipt from a particular run carries that run's proof.
+Browser clicking, typing, and authenticated-session claims remain unavailable.
+The temporary DevTools endpoint is local to this user's session, not an OS
+isolation boundary against another same-user process. A failed profile cleanup
+turns inspection into failure and is reported instead of hidden.
 
 `ToolExecutor` also accepts an explicit `pc` mode. In that mode its legacy
 coding tools, including shell and MCP routes, refuse execution. PC adapters

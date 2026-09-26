@@ -41,6 +41,30 @@ test("PC gateway makes failed intent logging a zero-effect denial", async () => 
   assert.equal(effects, 0);
 });
 
+test("PC gateway records launch separately from an unverified page", async () => {
+  const actionBroker = broker();
+  const plan = actionBroker.plan({ adapter: "browser.inspect", operation: "inspect", target: "aether-cloud", expectedState: "edge" });
+  const entries: PcAuditEntry[] = [];
+  const gateway = new PcHostGateway(actionBroker, { append: (entry) => { entries.push(entry); } });
+  const receipt = await gateway.execute(plan, () => "edge", () => ({ dispatched: true, verified: false }));
+  assert.equal(receipt.status, "failed");
+  assert.match(receipt.reason, /postcondition unverified/);
+  assert.deepEqual(entries.map((entry) => entry.phase), ["intent", "outcome"]);
+  assert.equal(entries[1]?.dispatched, true);
+  assert.equal(entries[1]?.verified, false);
+});
+
+test("PC gateway rejects verification without dispatch", async () => {
+  const actionBroker = broker();
+  const plan = actionBroker.plan({ adapter: "browser.inspect", operation: "inspect", target: "aether-cloud", expectedState: "edge" });
+  const entries: PcAuditEntry[] = [];
+  const gateway = new PcHostGateway(actionBroker, { append: (entry) => { entries.push(entry); } });
+  const receipt = await gateway.execute(plan, () => "edge", () => ({ dispatched: false, verified: true }));
+  assert.equal(receipt.status, "unknown");
+  assert.equal(entries[1]?.phase, "outcome");
+  assert.equal(entries[1]?.verified, undefined);
+});
+
 test("PC gateway reports uncertain outcome after post-effect journal failure or adapter throw", async () => {
   for (const adapterThrows of [false, true]) {
     const actionBroker = broker();

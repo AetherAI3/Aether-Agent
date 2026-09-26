@@ -13,7 +13,11 @@ export interface PcAuditEntry {
   targetDigest: string;
   observedAt: string;
   dispatched?: boolean;
+  verified?: boolean;
 }
+
+/** Separate issuing a host effect from proving its postcondition. */
+export type PcGatewayEffect = boolean | { dispatched: boolean; verified?: boolean };
 
 export interface PcAuditPort {
   append(entry: PcAuditEntry): Promise<void> | void;
@@ -53,7 +57,7 @@ export class PcFileAudit implements PcAuditPort {
   }
 }
 
-function auditEntry(plan: PcActionPlan, phase: PcAuditEntry["phase"], dispatched?: boolean): PcAuditEntry {
+function auditEntry(plan: PcActionPlan, phase: PcAuditEntry["phase"], effect?: { dispatched: boolean; verified?: boolean }): PcAuditEntry {
   const entry: PcAuditEntry = {
     phase,
     planId: plan.id,
@@ -62,7 +66,10 @@ function auditEntry(plan: PcActionPlan, phase: PcAuditEntry["phase"], dispatched
     targetDigest: createHash("sha256").update(plan.target).digest("hex"),
     observedAt: new Date().toISOString(),
   };
-  if (dispatched !== undefined) entry.dispatched = dispatched;
+  if (effect) {
+    entry.dispatched = effect.dispatched;
+    if (effect.verified !== undefined) entry.verified = effect.verified;
+  }
   return entry;
 }
 
@@ -76,11 +83,12 @@ export class PcHostGateway {
   async execute(
     plan: PcActionPlan,
     observe: () => Promise<string> | string,
-    perform: () => Promise<boolean> | boolean,
+    perform: () => Promise<PcGatewayEffect> | PcGatewayEffect,
   ): Promise<PcActionReceipt> {
     let intentFailed = false;
     let outcomeFailed = false;
     let performFailed = false;
+    let effect: { dispatched: boolean; verified?: boolean } | undefined;
     const receipt = await this.broker.execute(plan, observe, async () => {
       try {
         await this.audit.append(auditEntry(plan, "intent"));
@@ -88,24 +96,35 @@ export class PcHostGateway {
         intentFailed = true;
         return false; // No adapter call after an unavailable intent journal.
       }
-      let dispatched = false;
       try {
-        dispatched = await perform();
+        const performed = await perform();
+        effect = typeof performed === "boolean" ? { dispatched: performed } : performed;
+        if (typeof effect.dispatched !== "boolean" ||
+            (effect.verified !== undefined && typeof effect.verified !== "boolean") ||
+            (effect.verified === true && !effect.dispatched)) {
+          throw new Error("invalid PC effect result");
+        }
       } catch {
         // An adapter can throw after issuing an external effect. Its outcome
         // is unknown until a separate observation reconciles it.
         performFailed = true;
       } finally {
         try {
-          await this.audit.append(auditEntry(plan, "outcome", performFailed ? undefined : dispatched));
+          await this.audit.append(auditEntry(plan, "outcome", performFailed ? undefined : effect));
         } catch {
           outcomeFailed = true;
         }
       }
-      return dispatched;
+      return effect?.dispatched ?? false;
     });
     if (intentFailed) return { ...receipt, status: "denied", reason: "PC audit unavailable; action not dispatched" };
     if (outcomeFailed || performFailed) return { ...receipt, status: "unknown", reason: "action outcome is uncertain; verify before retry" };
+    if (effect?.dispatched && effect.verified === false) {
+      return { ...receipt, status: "failed", reason: "action dispatched but postcondition unverified; inspect proof before retry" };
+    }
+    if (receipt.status === "succeeded" && effect?.verified) {
+      return { ...receipt, reason: "action dispatched and postcondition verified" };
+    }
     return receipt;
   }
 }

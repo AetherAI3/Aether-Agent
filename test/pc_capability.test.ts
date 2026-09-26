@@ -62,6 +62,7 @@ test("PC map reports unavailable control rather than inheriting legacy shell aut
   assert.equal(map.capabilities.find((item) => item.id === "command.execute")?.state, "denied");
   assert.equal(map.capabilities.find((item) => item.id === "device.runtime")?.state, "unavailable");
   assert.ok(["unverified", "unavailable"].includes(map.capabilities.find((item) => item.id === "browser.verify")?.state ?? ""));
+  assert.ok(["unverified", "unavailable"].includes(map.capabilities.find((item) => item.id === "browser.inspect")?.state ?? ""));
   assert.equal(map.capabilities.find((item) => item.id === "cloud.act")?.state, "unverified");
 });
 
@@ -76,6 +77,14 @@ test("PC map v2 separates readiness, permission, proof, and release qualificatio
   assert.deepEqual(browser.lastProof, { observedAt: null, ageMs: null, scope: null });
   assert.equal(browser.qualification.installed, "unverified");
   assert.equal(browser.qualification.hosted, "unverified");
+  const inspection = map.capabilities.find((row) => row.id === "browser.inspect")!;
+  assert.equal(inspection.platformSupport, "supported");
+  assert.equal(inspection.qualification.source, "implemented");
+  assert.ok(["unverified", "unavailable"].includes(inspection.runtimeReadiness));
+  assert.deepEqual(inspection.lastProof, { observedAt: null, ageMs: null, scope: null });
+  assert.equal(inspection.qualification.installed, "unverified");
+  assert.equal(inspection.qualification.hosted, "unverified");
+  assert.equal(pcMapV2("linux").capabilities.find((row) => row.id === "browser.inspect")?.platformSupport, "unsupported");
   const command = map.capabilities.find((row) => row.id === "command.execute")!;
   assert.equal(command.permission, "denied");
   assert.equal(command.runtimeReadiness, "not-applicable");
@@ -163,7 +172,7 @@ test("target set and command manifest stay closed and visible", () => {
 
 test("CLI cannot turn --yes into PC browser approval", () => {
   const entry = fileURLToPath(new URL("../src/main.js", import.meta.url));
-  for (const args of [["verify-browser"], ["open", "claude"]]) {
+  for (const args of [["verify-browser"], ["open", "claude"], ["inspect-browser", "aether-cloud"]]) {
     const result = spawnSync(process.execPath, [entry, "pc", ...args, "--yes", "--json"], {
       encoding: "utf8", timeout: 10_000, windowsHide: true,
     });
