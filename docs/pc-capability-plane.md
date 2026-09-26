@@ -14,7 +14,12 @@ or hosted-service entitlement claim.
 | `aether pc verify-browser` | Opens a loopback readiness page | Interactive approval and a one-use callback prove that a browser rendered the page. The listener closes after the result. |
 | `aether pc open [aether-cloud\|claude\|chatgpt]` | Opens one fixed site | One-use interactive approval bound to target and detected browser state. `--yes` and headless sessions cannot approve. Launcher start is reported as dispatch, not as verified page rendering. |
 
-`pc doctor` reports recommendations from observed resource pressure. It never
+`pc doctor` reports recommendations from observed resource pressure. CPU and
+memory now use three timed samples and show their range. The optional fixed
+target HEAD probe reports HTTP classes and status codes separately from latency:
+a 401, redirect, or 500 is not application readiness, and partial or mixed
+responses are marked inconclusive. Three requests still cannot establish an
+app speedup or distinguish network time from remote service time. It never
 changes settings or deletes files. In particular, local PC adjustments cannot
 guarantee faster inference from Claude, ChatGPT, or Aether Cloud; reachability
 measurements combine network and service response time.

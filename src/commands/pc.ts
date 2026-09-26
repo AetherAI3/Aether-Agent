@@ -12,10 +12,14 @@ import { PC_TARGETS, isPcTarget, pcDoctor, pcMap, pcTargetUrl, type PcDoctorRepo
 function renderDoctor(report: PcDoctorReport): string {
   const lines = [`PC doctor · ${report.target} · ${report.observedAt}`];
   for (const metric of report.metrics) {
-    lines.push(`  ${metric.id.padEnd(27)} ${metric.state === "measured" ? `${metric.value} ${metric.unit}` : `${metric.state}: ${metric.reason ?? "unknown"}`}`);
+    const repeat = metric.sampleCount ? ` (${metric.sampleCount} samples, range ${metric.range ?? 0} ${metric.unit})` : "";
+    lines.push(`  ${metric.id.padEnd(27)} ${metric.state === "measured" ? `${metric.value} ${metric.unit}${repeat}` : `${metric.state}: ${metric.reason ?? "unknown"}`}`);
   }
   lines.push(`  processes                   ${report.processes.state}: ${report.processes.items.length} matching app/browser processes`);
   if (report.processes.reason) lines.push(`  process detail              ${report.processes.reason}`);
+  lines.push(`  target HTTP                 ${report.networkProbe.state}: ${report.networkProbe.httpClass}`);
+  if (report.networkProbe.statusCodes.length) lines.push(`  HTTP statuses               ${report.networkProbe.statusCodes.join(", ")}`);
+  if (report.networkProbe.state === "inconclusive" || report.networkProbe.state === "unavailable") lines.push(`  probe detail                ${report.networkProbe.reason}`);
   if (report.recommendations.length) {
     lines.push("Suggestions:");
     for (const item of report.recommendations) lines.push(`  - ${item}`);
