@@ -30,6 +30,22 @@ results do not create approval. The first adapter is a fixed-target browser
 open; the command uses a fresh terminal prompt and does not treat `--yes` as a
 grant.
 
+`src/core/pc/gateway.ts` now wraps the approved browser actions. It durably
+writes a redacted intent before dispatch and an outcome afterward. If the intent
+cannot be recorded, the action is denied before the adapter runs. If dispatch
+or outcome recording fails after that point, the receipt is `unknown`; the
+operator should check the browser before retrying. The local JSONL record uses
+a target digest, not a raw URL, and is stored under the user's application data
+directory. It is an audit aid under the current user profile, not protection
+against another process with the same user's privileges.
+
+`ToolExecutor` also accepts an explicit `pc` mode. In that mode its legacy
+coding tools, including shell and MCP routes, refuse execution. PC adapters
+must use the gateway; selecting PC mode does not turn the coding shell into a
+contained PC command runner. The hosted model route has not been proved to
+call this local gateway, so the PC map continues to report cloud PC actions as
+unverified.
+
 The existing `run_shell` coding tool has a separate older permission gate. Its
 workspace working directory is not an OS sandbox and must not be presented as
 one. The PC capability map therefore marks general `command.execute` denied.

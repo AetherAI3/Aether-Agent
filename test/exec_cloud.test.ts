@@ -298,9 +298,12 @@ test("cloud brain tears down a session whose model acknowledgement drifted", asy
   })) events.push(event);
   assert.equal(streams, 0);
   assert.deepEqual(deleted, ["/agent/dev/sessions/devs_model_drift"]);
+  const errorEvent = events.at(-2);
+  assert.equal(errorEvent?.type, "error");
+  assert.match(errorEvent?.type === "error" ? errorEvent.msg : "", /did not preserve/);
   const terminalEvent = events.at(-1);
-  assert.equal(terminalEvent?.type, "error");
-  assert.match(terminalEvent?.type === "error" ? terminalEvent.msg : "", /did not preserve/);
+  assert.equal(terminalEvent?.type, "done");
+  assert.equal(terminalEvent?.type === "done" ? terminalEvent.ok : true, false);
 });
 
 test("packaged cloud driver refuses server-side downgrade without opening legacy chat", async () => {

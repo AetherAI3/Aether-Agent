@@ -165,6 +165,18 @@ test("a 404 dev-session refusal emits the same event with status 404", async () 
   });
 });
 
+test("a pre-stream 401 ends with one explicit failed terminal and no legacy fallback", async () => {
+  const { fetchImpl, calls } = refusingServer(401, "invalid session");
+  await withFetch(fetchImpl, async () => {
+    const events = await drain(new CloudBrain(new ApiClient("https://stub.test", tokens)), AGENT_TASK);
+    const terminals = events.filter((event) => event.type === "done");
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0]?.type === "done" && terminals[0].ok, false);
+    assert.ok(events.some((event) => event.type === "error"));
+    assert.equal(calls.filter((call) => call.url.includes("/agent/chat/stream")).length, 0);
+  });
+});
+
 test("chat-shaped runs still degrade, but the drift event PRECEDES the first model event", async () => {
   const { fetchImpl, calls } = refusingServer(403, "agent dev sessions disabled");
   await withFetch(fetchImpl, async () => {

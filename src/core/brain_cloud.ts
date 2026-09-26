@@ -289,7 +289,12 @@ export class CloudBrain implements Brain {
       queue.push({ type: "stage", name: "execute", face: "⟨◉⟩" }); // uplink face
       await this.devPump(queue);
     } catch (err) {
-      queue.push({ type: "error", msg: withHint(err) });
+      const message = withHint(err);
+      queue.push({ type: "error", msg: message });
+      // A failed session create has no downstream terminal frame to relay.
+      // The host must still see an explicit failed terminal, especially after
+      // a pre-stream 401, rather than inferring success from a closed iterator.
+      queue.push({ type: "done", ok: false, result: message, remaining: 0, reason: "transport-error" });
     } finally {
       this.controlState = "closed";
       queue.end();
