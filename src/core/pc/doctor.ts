@@ -138,7 +138,7 @@ export function pcMapV2(
   interactive = Boolean(process.stdin.isTTY),
 ): PcMapV2 {
   const legacy = pcMap(platform, now);
-  const implemented = new Set(["pc.inspect", "process.inspect", "browser.open", "browser.verify"]);
+  const implemented = new Set(["pc.inspect", "process.inspect", "browser.open", "browser.verify", "browser.inspect"]);
   const browserApproval = new Set(["browser.open", "browser.verify", "browser.inspect"]);
   const localReads = new Set(["pc.inspect", "process.inspect"]);
   return {
@@ -148,7 +148,7 @@ export function pcMapV2(
     observedAt: legacy.observedAt,
     session: { active: false, interactive },
     capabilities: legacy.capabilities.map((row) => {
-      const platformSupport = row.id === "process.inspect" && platform !== "win32" ? "unsupported"
+      const platformSupport = (row.id === "process.inspect" || row.id === "browser.inspect") && platform !== "win32" ? "unsupported"
         : implemented.has(row.id) ? "supported" : "unqualified";
       const runtimeReadiness = row.state === "available" ? "ready"
         : row.state === "denied" ? "not-applicable" : row.state;

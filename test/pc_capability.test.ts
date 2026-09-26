@@ -77,6 +77,14 @@ test("PC map v2 separates readiness, permission, proof, and release qualificatio
   assert.deepEqual(browser.lastProof, { observedAt: null, ageMs: null, scope: null });
   assert.equal(browser.qualification.installed, "unverified");
   assert.equal(browser.qualification.hosted, "unverified");
+  const inspection = map.capabilities.find((row) => row.id === "browser.inspect")!;
+  assert.equal(inspection.platformSupport, "supported");
+  assert.equal(inspection.qualification.source, "implemented");
+  assert.ok(["unverified", "unavailable"].includes(inspection.runtimeReadiness));
+  assert.deepEqual(inspection.lastProof, { observedAt: null, ageMs: null, scope: null });
+  assert.equal(inspection.qualification.installed, "unverified");
+  assert.equal(inspection.qualification.hosted, "unverified");
+  assert.equal(pcMapV2("linux").capabilities.find((row) => row.id === "browser.inspect")?.platformSupport, "unsupported");
   const command = map.capabilities.find((row) => row.id === "command.execute")!;
   assert.equal(command.permission, "denied");
   assert.equal(command.runtimeReadiness, "not-applicable");

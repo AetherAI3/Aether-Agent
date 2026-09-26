@@ -30,6 +30,10 @@ until target- and session-scoped evidence is actually recorded. A source value
 of `implemented` identifies code in this candidate; `installed` and `hosted`
 remain unverified. The prior `aether.pc/1` JSON remains available through
 `pc map v1 --json` during the transition.
+The Windows Edge inspection adapter is source-implemented in this candidate,
+but `browser.inspect` runtime readiness stays unverified from driver presence
+alone. Its `lastProof` remains null because individual run proofs are returned
+in receipts rather than persisted into the capability map.
 
 ## Authority and implementation
 
