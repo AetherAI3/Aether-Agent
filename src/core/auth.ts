@@ -37,6 +37,18 @@ export interface TokenStore {
    * automatic 401→refresh path). Stores that don't distinguish may omit it;
    * callers fall back to set(). */
   update?(token: string): Promise<void>;
+  /** Safe provenance for diagnostics. Never includes a token or token fragment. */
+  sourceInfo?(): Promise<TokenSourceInfo>;
+}
+
+export interface TokenSourceInfo {
+  source: "stored" | "environment" | "injected" | "current-process";
+  /** An environment credential currently takes precedence over a different saved login. */
+  storedCredentialShadowed: boolean;
+}
+
+export function unsetEnvTokenCommand(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? "Remove-Item Env:AETHER_TOKEN" : "unset AETHER_TOKEN";
 }
 
 /**
@@ -129,6 +141,10 @@ async function renameWithWindowsRetry(from: string, to: string): Promise<void> {
 /** File-backed token store (0600). Fallback until keychain is wired. */
 export class FileTokenStore implements TokenStore {
   private path = join(configDir(), ".token");
+
+  async sourceInfo(): Promise<TokenSourceInfo> {
+    return { source: "stored", storedCredentialShadowed: false };
+  }
 
   async get(): Promise<string | null> {
     if (!existsSync(this.path)) return null;
@@ -329,6 +345,7 @@ export function tokenStoreFromEnv(env: NodeJS.ProcessEnv = process.env): TokenSt
  * the exact bug in PR #47.
  */
 export class EnvOverrideTokenStore implements TokenStore {
+  private source: TokenSourceInfo["source"] = "environment";
   constructor(
     private override: string,
     private readonly disk: TokenStore,
@@ -339,16 +356,26 @@ export class EnvOverrideTokenStore implements TokenStore {
   async set(token: string): Promise<void> {
     this.override = token;
     await this.disk.set(token);
+    this.source = "current-process";
   }
   /** Automatic refresh of an embedded session stays in-process: the desktop
    * app owns AETHER_TOKEN, and a background rotation must not overwrite the
    * standalone CLI's independent on-disk login. */
   async update(token: string): Promise<void> {
     this.override = token;
+    this.source = "current-process";
+  }
+  async sourceInfo(): Promise<TokenSourceInfo> {
+    const stored = this.source === "environment" ? await this.disk.get() : null;
+    return {
+      source: this.source,
+      storedCredentialShadowed: Boolean(stored && stored !== this.override),
+    };
   }
   async clear(): Promise<void> {
     this.override = "";
     await this.disk.clear();
+    this.source = "stored";
   }
 }
 
@@ -360,6 +387,9 @@ export class EnvOverrideTokenStore implements TokenStore {
  */
 export class StaticTokenStore implements TokenStore {
   constructor(private token: string) {}
+  async sourceInfo(): Promise<TokenSourceInfo> {
+    return { source: "injected", storedCredentialShadowed: false };
+  }
   async get(): Promise<string | null> {
     return this.token || null;
   }
