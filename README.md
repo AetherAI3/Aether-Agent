@@ -222,7 +222,10 @@ environment variable, and exit code.
 
 ### PC capability preview
 
-`aether pc map` shows which PC actions this source build can actually perform.
+`aether pc map` separates platform support, runtime readiness, local permission,
+and release qualification. It does not treat a registered browser or source
+merge as live proof. `aether pc map v1 --json` preserves the older JSON view
+for a transition release.
 `aether pc doctor claude`, `chatgpt`, `aether-cloud`, or `ollama` samples local
 CPU, memory, disk, network-interface, and process health. Add `--probe-network`
 to contact only the named target and measure three reachability requests. This

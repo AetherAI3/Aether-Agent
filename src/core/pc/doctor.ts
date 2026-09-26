@@ -6,6 +6,7 @@ import { detectBrowserRuntime } from "../browser_runtime.js";
 import { defaultTelemetryInputs, TelemetrySampler } from "../device_runtime/telemetry.js";
 
 export const PC_SCHEMA = "aether.pc/1" as const;
+export const PC_SCHEMA_V2 = "aether.pc/2" as const;
 export type PcTarget = "aether-cloud" | "claude" | "chatgpt" | "ollama";
 export type PcState = "available" | "unavailable" | "unverified" | "denied";
 export type MetricState = "measured" | "unavailable" | "not-checked";
@@ -21,6 +22,25 @@ export interface PcMap {
   platform: NodeJS.Platform;
   observedAt: string;
   capabilities: PcCapability[];
+}
+
+export interface PcCapabilityV2 {
+  id: string;
+  platformSupport: "supported" | "unsupported" | "unqualified";
+  runtimeReadiness: "ready" | "unverified" | "unavailable" | "not-applicable";
+  permission: "none" | "fresh-local-approval" | "denied" | "unavailable";
+  lastProof: { observedAt: null; ageMs: null; scope: null };
+  qualification: { source: "implemented" | "unimplemented"; installed: "unverified"; hosted: "unverified" };
+  detail: string;
+}
+
+export interface PcMapV2 {
+  schema: typeof PC_SCHEMA_V2;
+  legacySchema: typeof PC_SCHEMA;
+  platform: NodeJS.Platform;
+  observedAt: string;
+  session: { active: false; interactive: boolean };
+  capabilities: PcCapabilityV2[];
 }
 
 export interface PcMetric {
@@ -104,6 +124,48 @@ export function pcMap(platform: NodeJS.Platform = process.platform, now: () => n
       { id: "device.runtime", state: "unavailable", detail: "development-only and default-off; Job Objects contain only device-launched groups, not the PC or legacy shell" },
       { id: "cloud.act", state: "unverified", detail: "hosted PC tool round-trip has not been proved" },
     ],
+  };
+}
+
+/** Split static support, runtime readiness, authority, and release proof. */
+export function pcMapV2(
+  platform: NodeJS.Platform = process.platform,
+  now: () => number = Date.now,
+  interactive = Boolean(process.stdin.isTTY),
+): PcMapV2 {
+  const legacy = pcMap(platform, now);
+  const implemented = new Set(["pc.inspect", "process.inspect", "browser.open", "browser.verify"]);
+  const browserApproval = new Set(["browser.open", "browser.verify", "browser.inspect"]);
+  const localReads = new Set(["pc.inspect", "process.inspect"]);
+  return {
+    schema: PC_SCHEMA_V2,
+    legacySchema: PC_SCHEMA,
+    platform,
+    observedAt: legacy.observedAt,
+    session: { active: false, interactive },
+    capabilities: legacy.capabilities.map((row) => {
+      const platformSupport = row.id === "process.inspect" && platform !== "win32" ? "unsupported"
+        : implemented.has(row.id) ? "supported" : "unqualified";
+      const runtimeReadiness = row.state === "available" ? "ready"
+        : row.state === "denied" ? "not-applicable" : row.state;
+      const permission = localReads.has(row.id) ? "none"
+        : browserApproval.has(row.id) ? "fresh-local-approval"
+          : row.id === "command.execute" ? "denied" : "unavailable";
+      return {
+        id: row.id,
+        platformSupport,
+        runtimeReadiness,
+        permission,
+        // V1 browser callbacks and source checks were never persisted as
+        // target/session-scoped proof. Do not manufacture an age from them.
+        lastProof: { observedAt: null, ageMs: null, scope: null },
+        qualification: {
+          source: implemented.has(row.id) ? "implemented" : "unimplemented",
+          installed: "unverified", hosted: "unverified",
+        },
+        detail: row.detail,
+      };
+    }),
   };
 }
 
