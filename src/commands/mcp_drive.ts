@@ -6,6 +6,11 @@ import type { AppContext } from "../core/context.js";
 import {
   DriveReadError, getDriveEvents, getDriveMission, previewDrive,
 } from "../core/predator_drive_client.js";
+import { driveStaffContext } from "../core/drive_staff_session.js";
+import {
+  DriveStaffLoginError, loginDriveStaffSession, logoutDriveStaffSession,
+} from "../core/drive_staff_oauth.js";
+import { browserHint, openBrowserTyped } from "../core/browser.js";
 import { sanitizeTerm } from "../ui/text.js";
 
 const MAX_INTAKE_BYTES = 256 * 1024;
@@ -39,10 +44,13 @@ function safe(value: string): string {
 
 export function driveMcpUsage(): string {
   return [
-    "usage: aether mcp drive preview <intake.json>",
+    "usage: aether mcp drive login [--no-browser]",
+    "       aether mcp drive logout",
+    "       aether mcp drive preview <intake.json>",
     "       aether mcp drive status <lane-id>",
     "       aether mcp drive events <lane-id> [after-cursor] [limit]",
-    "Reads use an existing bound Cloud staff session. Device-login aek_ API keys cannot control Drive.",
+    "Browser sign-in binds a separate Cloud staff session after a staff-role probe.",
+    "Device-login aek_ API keys cannot control Drive.",
     "Preview is read-only and currently returns a G0 blocker; no mission or spend is created.",
   ].join("\n") + "\n";
 }
@@ -64,8 +72,36 @@ export async function cmdMcpDrive(
     return verb ? 0 : 2;
   }
   try {
+    if (verb === "login" && argv.length === 1) {
+      const progress = ctx.flags.json ? process.stderr : out;
+      await loginDriveStaffSession(ctx, {
+        onAuthorizeUrl: async (url) => {
+          progress.write(`Open this GitHub sign-in URL on this computer:\n  ${url}\n`);
+          if (!ctx.flags.noBrowser) {
+            const opened = await openBrowserTyped(url);
+            if (!opened.launched) {
+              progress.write(`Browser did not open (${opened.code}): ${browserHint(opened.code)}. Use the URL above.\n`);
+            }
+          }
+          progress.write("Waiting for the browser callback…\n");
+        },
+      });
+      out.write(ctx.flags.json
+        ? JSON.stringify({ status: "BOUND", release_gate: "G0", execution_enabled: false }) + "\n"
+        : "Cloud staff session bound for Drive reads. Drive execution remains G0 blocked.\n");
+      return 0;
+    }
+    if (verb === "logout" && argv.length === 1) {
+      const revoked = await logoutDriveStaffSession(ctx);
+      out.write(ctx.flags.json
+        ? JSON.stringify({ status: "CLEARED", cloud_revocation_confirmed: revoked }) + "\n"
+        : revoked ? "Drive staff session revoked and cleared.\n"
+          : "Drive staff session cleared locally; Cloud revocation was not confirmed.\n");
+      return revoked ? 0 : 1;
+    }
+    const driveCtx = await driveStaffContext(ctx);
     if (verb === "preview" && argv.length === 2) {
-      const result = await previewDrive(ctx, intakeFile(argv[1]!));
+      const result = await previewDrive(driveCtx, intakeFile(argv[1]!));
       out.write(ctx.flags.json
         ? JSON.stringify(result) + "\n"
         : `Predator Drive preview: ${result.decision} (${result.release_gate})\n` +
@@ -74,7 +110,7 @@ export async function cmdMcpDrive(
       return 1;
     }
     if (verb === "status" && argv.length === 2) {
-      const result = await getDriveMission(ctx, argv[1]!);
+      const result = await getDriveMission(driveCtx, argv[1]!);
       out.write(ctx.flags.json
         ? JSON.stringify(result) + "\n"
         : `Predator Drive ${safe(result.lane_id)}: ${safe(result.state)}\n` +
@@ -87,7 +123,7 @@ export async function cmdMcpDrive(
     if (verb === "events" && argv.length >= 2 && argv.length <= 4) {
       const afterCursor = parseIntArg(argv[2], 0);
       const limit = parseIntArg(argv[3], 50);
-      const result = await getDriveEvents(ctx, argv[1]!, afterCursor, limit);
+      const result = await getDriveEvents(driveCtx, argv[1]!, afterCursor, limit);
       out.write(ctx.flags.json
         ? JSON.stringify(result) + "\n"
         : `Predator Drive ${safe(result.lane_id)}: ${result.events.length} event(s), next cursor ${result.next_cursor}${result.has_more ? " (more)" : ""}\n` +
@@ -99,9 +135,14 @@ export async function cmdMcpDrive(
     out.write(driveMcpUsage());
     return 2;
   } catch (error) {
-    const code = error instanceof DriveReadError ? error.code : "CLOUD_ROUTE_UNAVAILABLE";
+    const code = error instanceof DriveReadError || error instanceof DriveStaffLoginError
+      ? error.code : "CLOUD_ROUTE_UNAVAILABLE";
     const hint = code === "AUTH_REQUIRED" || code === "STAFF_SESSION_REQUIRED"
-      ? "Use a bound staff session; aether auth login device keys are API keys, not Drive authority."
+      ? "Run `aether mcp drive login`; aether auth login device keys are not Drive authority."
+      : code === "ACCOUNT_LINK_REQUIRED"
+        ? "Link this GitHub identity to your existing Aether account in the portal, then retry."
+        : code === "OAUTH_CALLBACK_TIMEOUT"
+          ? "Finish GitHub sign-in in the browser on this computer, then retry."
       : code === "CLOUD_ROUTE_UNAVAILABLE"
         ? "Check Cloud deployment and the VPS2 API route."
         : code === "LANE_NOT_FOUND"

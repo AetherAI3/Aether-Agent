@@ -10,7 +10,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./core/config.js";
-import { tokenStoreFromEnv } from "./core/auth.js";
+import { FileTokenStore, tokenStoreFromEnv } from "./core/auth.js";
 import { ApiClient } from "./core/transport.js";
 import type { AppContext, GlobalFlags } from "./core/context.js";
 import { cmdChat } from "./commands/chat.js";
@@ -117,6 +117,7 @@ export async function main(argv: string[]): Promise<number> {
     effort: sf(values["effort"]),
     agent: typeof values["agent"] === "string" ? values["agent"] : undefined,
     json: Boolean(values["json"]),
+    noBrowser: Boolean(values["no-browser"]),
     audit: Boolean(values["audit"]),
     yes: Boolean(values["yes"]),
     local: Boolean(values["local"]),
@@ -143,7 +144,10 @@ export async function main(argv: string[]): Promise<number> {
             res(/^y(es)?$/i.test(a.trim()));
           });
         });
-  const ctx: AppContext = { cfg, api, tokens, flags, confirm };
+  const ctx: AppContext = {
+    cfg, api, tokens, driveStaffTokens: new FileTokenStore(".drive-staff-session"),
+    flags, confirm,
+  };
 
   const loginOpts: LoginOpts = {
     token: sf(values["token"]),

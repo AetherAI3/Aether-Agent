@@ -3,6 +3,7 @@
 import type { AppContext } from "./context.js";
 import { isApiKeyToken } from "./auth.js";
 import { HttpError } from "./errors.js";
+import { driveStaffContext } from "./drive_staff_session.js";
 
 export const PREDATOR_DRIVE_DIAGNOSE_PATH =
   "/internal/dev/supercluster/predator-drive/diagnose?mode=oss&host=auto";
@@ -100,17 +101,18 @@ function fromBoard(value: unknown): DriveReadinessReport {
  * this one read-only probe; the server still validates the staff role.
  */
 export async function diagnosePredatorDrive(ctx: AppContext): Promise<DriveReadinessReport> {
-  const token = await ctx.tokens.get();
-  if (!token) return blocked("LOCAL_CREDENTIAL_GATE", ["AUTH_REQUIRED"], "Sign in with a bound staff session.");
+  const staffCtx = await driveStaffContext(ctx);
+  const token = await staffCtx.tokens.get();
+  if (!token) return blocked("LOCAL_CREDENTIAL_GATE", ["AUTH_REQUIRED"], "Run `aether mcp drive login`.");
   if (isApiKeyToken(token) || token.startsWith("agt_")) {
     return blocked(
       "LOCAL_CREDENTIAL_GATE",
       ["STAFF_SESSION_REQUIRED"],
-      "Aether Agent's API/device token is not Cloud Predator execute authority. Use a bound staff session.",
+      "Aether Agent's API/device token is not Cloud Predator execute authority. Run `aether mcp drive login`.",
     );
   }
   try {
-    const board = await ctx.api.getJson<unknown>(PREDATOR_DRIVE_DIAGNOSE_PATH, undefined, 10_000);
+    const board = await staffCtx.api.getJson<unknown>(PREDATOR_DRIVE_DIAGNOSE_PATH, undefined, 10_000);
     return fromBoard(board);
   } catch (error) {
     const reason: DriveBlocker = error instanceof HttpError && [401, 403].includes(error.status)
