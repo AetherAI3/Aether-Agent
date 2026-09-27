@@ -87,6 +87,12 @@ jobs:
           test "$("$prefix/bin/aether" --version)" = "${RELEASE_TAG#v}"
           "$prefix/bin/aether" --help > /dev/null
 
+      - name: Recover installed interactive chat from a stalled 401
+        shell: bash
+        run: |
+          prefix="$RUNNER_TEMP/aether-install"
+          node dist/scripts/packed-repl-auth-smoke.js "$prefix/lib/node_modules/aether-agents/dist/src/main.js"
+
       - name: Attest package provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

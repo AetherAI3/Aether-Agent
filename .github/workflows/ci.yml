@@ -171,6 +171,12 @@ jobs:
           "
         shell: bash
 
+      - name: Recover the installed interactive REPL from a stalled 401
+        run: |
+          cd "${RUNNER_TEMP}/cleanroom"
+          node "${GITHUB_WORKSPACE}/dist/scripts/packed-repl-auth-smoke.js"
+        shell: bash
+
       - name: The installed package has the exact reviewed dependency graph
         run: |
           set -euo pipefail
