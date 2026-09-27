@@ -94,17 +94,16 @@ actions.
 
 ## Model stack
 
-The dated public snapshot marks Aether Neo, DeepSeek V4, GPT-5.4/5.5/5.6, and
-Claude 4.5/4.8/5 text entries as available at the catalogue level. That is not an
-account entitlement: **`aether models` is the authoritative live result for the
-signed-in account.** Kimi K2.6/K3 and Gemma 4 are catalogued but marked
-**unavailable** in the current snapshot, so they are not presented here as usable.
+The dated public snapshot below lists model entries and their publication
+status. Listing is not an account entitlement: **`aether models` is the
+authoritative live result for the signed-in account.** Availability can change
+after the snapshot was generated.
 
 Local Ollama availability is independent of that hosted catalogue and depends on
 the models installed at the configured Ollama endpoint.
 
 <!-- MODEL-CATALOGUE:START -->
-A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-catalogue/index.html), [JSON](docs/model-catalogue/catalogue.json), and [Markdown](docs/generated/model-catalogue.md). It was generated at `2026-08-23T00:00:00.000Z` from Cloud public projection `model-catalogue-v1` with verified digest `sha256:80ba3ba1144d301e2cca407ceced74cb2b371f1da6e3982b87305ff12a3d4712`. Listed availability is not an account entitlement; use `aether models` while signed in.
+A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-catalogue/index.html), [JSON](docs/model-catalogue/catalogue.json), and [Markdown](docs/generated/model-catalogue.md). It was generated at `2026-09-27T21:15:38.529Z` from Cloud public projection `model-catalogue-v1` with verified digest `sha256:f4601f14ac7829b51e95d92abc1631c74097fa193bc566151a2161c5a799ba7f`. Listed availability is not an account entitlement; use `aether models` while signed in.
 <!-- MODEL-CATALOGUE:END -->
 
 ## Core commands
@@ -171,7 +170,7 @@ badge or `npm view aether-agents version` for the npm `latest` dist-tag, and
 |---|---:|---|
 | npm `latest` | [![npm latest](https://img.shields.io/npm/v/aether-agents?label=&color=14b8a6)](https://www.npmjs.com/package/aether-agents) | Published package; the badge resolves the live dist-tag. |
 | PyPI `aether-agent` | [![PyPI latest](https://img.shields.io/pypi/v/aether-agent?label=&color=3775a9)](https://pypi.org/project/aether-agent/) | Launcher that installs and runs the npm CLI; it fetches the npm `latest` dist-tag unless you pin one. |
-| `main` source build | **0.3.2** | Current repository source: the 0.3 workflow plus every 0.3.1 maintenance fix. |
+| `release/0.3` source | **0.3.3** | Maintenance source with the home-folder chat repair; check the live npm badge for the published package version. |
 
 The [release record](docs/releases/2026-08-22.md),
 [release notes](RELEASE_NOTES.md), and

@@ -123,6 +123,33 @@ test("ApiClient: aek_ API keys never attempt refresh — the 401 surfaces direct
   }
 });
 
+test("ApiClient: a stalled 401 response body is bounded for JSON and stream requests", async () => {
+  const real = globalThis.fetch;
+  let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) { bodyController = controller; },
+    }), { status: 401, headers: { "content-type": "application/json" } });
+  }) as typeof globalThis.fetch;
+  try {
+    const api = new ApiClient("https://api.example", new StaticTokenStore("aek_key"));
+    await assert.rejects(() => api.getJson("/models", undefined, 80),
+      (error: unknown) => error instanceof HttpError && error.status === 401);
+    bodyController?.close();
+    bodyController = undefined;
+    await assert.rejects(
+      () => api.stream("/agent/chat/stream", {}, { timeoutMs: 80 }),
+      (error: unknown) => error instanceof HttpError && error.status === 401,
+    );
+    assert.equal(calls, 2, "one request per call; no retry after a stalled detail body");
+  } finally {
+    bodyController?.close();
+    globalThis.fetch = real;
+  }
+});
+
 test("ApiClient: failed refresh surfaces the ORIGINAL 401 (no retry loop)", async () => {
   const real = globalThis.fetch;
   const calls: Call[] = [];
@@ -134,6 +161,32 @@ test("ApiClient: failed refresh surfaces the ORIGINAL 401 (no retry loop)", asyn
     assert.deepEqual(urls, ["/models", "/auth/refresh"], "exactly one refresh attempt, no loop");
   } finally {
     globalThis.fetch = real;
+  }
+});
+
+test("ApiClient: stalled successful refresh body is bounded and surfaces original 401", async () => {
+  const real = globalThis.fetch;
+  const previousTimeout = process.env["AETHER_REQUEST_TIMEOUT_MS"];
+  process.env["AETHER_REQUEST_TIMEOUT_MS"] = "80";
+  const calls: Call[] = [];
+  let refreshBody: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const store = new StaticTokenStore("sess_expired");
+  stubFetch((url) => url.endsWith("/auth/refresh")
+    ? new Response(new ReadableStream<Uint8Array>({ start(controller) { refreshBody = controller; } }), {
+      status: 200, headers: { "content-type": "application/json" },
+    })
+    : jsonRes(401, { detail: "expired" }), calls);
+  try {
+    const api = new ApiClient("https://api.example", store);
+    await assert.rejects(() => api.getJson("/models"),
+      (error: unknown) => error instanceof HttpError && error.status === 401);
+    assert.deepEqual(calls.map((call) => call.url.replace("https://api.example", "")), ["/models", "/auth/refresh"]);
+    assert.equal(await store.get(), "sess_expired", "a stalled refresh must not replace the credential");
+  } finally {
+    refreshBody?.close();
+    globalThis.fetch = real;
+    if (previousTimeout === undefined) delete process.env["AETHER_REQUEST_TIMEOUT_MS"];
+    else process.env["AETHER_REQUEST_TIMEOUT_MS"] = previousTimeout;
   }
 });
 

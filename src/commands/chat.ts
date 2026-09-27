@@ -124,6 +124,7 @@ export async function runTurn(
   const opened = openRunSession({
     projectRoot: ctx.flags.cwd,
     prompt,
+    allowIncompleteInstructionDiscovery: backend === "cloud",
     ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
     ...(skillOpts.noSkills ? { noSkills: true } : {}),
   });
@@ -263,7 +264,10 @@ async function runCloudTurn(
       onFrame?.(frame);
       renderer.frame(frame);
     }
-    if (sawError) throw new ChatTurnError(sawError);
+    // Presence of an error frame is authoritative even when its message is
+    // empty. A later done frame can carry cost, but cannot turn failure into
+    // success (or let a one-shot command exit zero).
+    if (sawError !== null) throw new ChatTurnError(sawError);
     if (!sawTerminal) throw new StreamIncompleteError();
   } catch (err) {
     if (err instanceof StreamUnavailableError) {

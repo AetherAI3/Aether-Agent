@@ -433,7 +433,7 @@ const PINNED_REGISTRY_CLAIM_PATTERNS: readonly { id: string; pattern: RegExp }[]
 
 export function derivePublicRegistryClaim(docs: Record<string, string>): PublicRegistryClaim {
   const readme = docs["README.md"] ?? "";
-  const sourceVersion = /\|\s*`main`\s+source build\s*\|\s*\*\*([^*]+)\*\*/i.exec(readme)?.[1]?.trim() ?? null;
+  const sourceVersion = /\|\s*`(?:main|release\/0\.3)`\s+source(?: build)?\s*\|\s*\*\*([^*]+)\*\*/i.exec(readme)?.[1]?.trim() ?? null;
   const pinnedRegistryClaims = Object.entries(docs)
     .flatMap(([path, text]) => PINNED_REGISTRY_CLAIM_PATTERNS.filter((candidate) => candidate.pattern.test(text)).map((candidate) => `${path}: ${candidate.id}`))
     .sort();

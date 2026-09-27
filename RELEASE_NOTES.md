@@ -1,3 +1,22 @@
+# Aether Agent v0.3.3 — home-folder chat recovery
+
+**September 27, 2026**
+
+- **Chat starts from broad home directories.** Nested `AGENTS.md` discovery now
+  has explicit entry, directory, and time limits. Hosted chat shows a warning
+  when discovery is incomplete and continues; local tool runs refuse until all
+  applicable local rules can be checked from a smaller project directory.
+- **An HTTP error cannot hide behind a stalled detail body.** The CLI bounds
+  reading optional error details and keeps the known HTTP status, including
+  the sign-in hint for a 401. This does not assert that every reported 401 has
+  the same cause.
+- **Stream errors remain failed turns.** The CLI shows known fixed public media
+  error text when `msg` is absent, or a clear fallback for untrusted `error`
+  text. A one-shot command exits nonzero even when a zero-cost `done` follows.
+- **Public model documentation refreshed from Cloud's verified projection.**
+  The projection's digest is checked before generating the packed documentation.
+---
+
 # Aether Agent v0.3.2 — one line again
 
 **September 3, 2026**

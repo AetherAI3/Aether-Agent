@@ -150,7 +150,7 @@ export function runScopedSources(sources: readonly InstructionSource[]): Instruc
 
 /** Build the full graph for a project: discovery + run-scope conflict pass. */
 export function resolveInstructionGraph(projectRoot: string): InstructionGraph {
-  const { sources, skipped } = discoverInstructionSources(projectRoot);
+  const { sources, skipped, nestedScanComplete } = discoverInstructionSources(projectRoot);
   // runScopedSources drops a source whose glob frontmatter would not parse: its
   // scope is unknown, so applying it to the whole run would be a guess about
   // which files it governs. Dropping it is right; dropping it SILENTLY is not —
@@ -165,6 +165,7 @@ export function resolveInstructionGraph(projectRoot: string): InstructionGraph {
     sources,
     conflicts: detectConflicts(runScopedSources(sources)),
     skipped: [...skipped, ...unparsable],
+    nestedScanComplete,
   };
 }
 

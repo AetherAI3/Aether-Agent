@@ -13,6 +13,7 @@ export const SKILL_ERROR_CODES = [
   "skill.dependency_missing",
   "skill.dependency_cycle",
   "skill.context_budget_exceeded",
+  "skill.instruction_scan_incomplete",
   "skill.tool_not_declared",
   "skill.permission_unavailable",
   "skill.permission_denied",

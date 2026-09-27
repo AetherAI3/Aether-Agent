@@ -126,13 +126,16 @@ test("README states npm and source versions in a way publishing cannot falsify",
   assert.match(npmCell, /img\.shields\.io\/npm\/v\/aether-agents/, "the npm `latest` cell must resolve the live dist-tag");
   assert.doesNotMatch(readme, /future published/i, "README asserts an unpublished state that publishing invalidates");
 
-  assert.ok(readme.includes(`| ${tick}main${tick} source build | **${sourceVersion}** |`));
+  assert.ok(readme.includes(`| ${tick}release/0.3${tick} source | **${sourceVersion}** |`));
 
   const sourceStart = readme.indexOf("<!-- SOURCE-0.3-WORKFLOWS:START -->");
   const sourceEnd = readme.indexOf("<!-- SOURCE-0.3-WORKFLOWS:END -->");
   assert.ok(sourceStart >= 0 && sourceEnd > sourceStart, "README source-only scope markers are missing");
   const sourceScope = readme.slice(sourceStart, sourceEnd);
-  assert.match(sourceScope, new RegExp(`Requires ${sourceVersion.replaceAll(".", "\\.")} or newer`));
+  // The workflows in this section first shipped in 0.3.2; a maintenance
+  // candidate may advance its own version without rewriting that truthful
+  // minimum installed version.
+  assert.match(sourceScope, /Requires 0\.3\.2 or newer/);
 });
 
 test("README fenced shell examples use registered commands and flags", () => {

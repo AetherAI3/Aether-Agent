@@ -87,6 +87,9 @@ jobs:
           test "$("$prefix/bin/aether" --version)" = "${RELEASE_TAG#v}"
           "$prefix/bin/aether" --help > /dev/null
 
+      - name: Smoke-test exact tarball from a broad home directory
+        run: node dist/scripts/packed-home-chat-smoke.js "${{ steps.pack.outputs.tarball }}"
+
       - name: Attest package provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

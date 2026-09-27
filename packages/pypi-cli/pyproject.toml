@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 # The pip/pipx front door to the Aether Agent CLI. Aether Agent itself is the Node package
 # `aether-agents` on npm; this package installs and launches it. The version below tracks
-# main's package.json so the two halves of the repository release together -- it is not the
+# this branch's package.json so the two halves of the repository stay aligned -- it is not the
 # version installed, which is the npm `latest` dist-tag unless pinned.
 # packages/sync-version.mjs copies package.json's version here, and tests/test_packaging.py
 # fails the build if they drift.
 [project]
 name = "aether-agent"
-version = "0.3.2"
+version = "0.3.3"
 description = "Install and run Aether Agent, the open-source terminal coding agent, from pip or pipx."
 readme = "README.md"
 requires-python = ">=3.10"
