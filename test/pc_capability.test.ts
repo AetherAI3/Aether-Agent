@@ -85,6 +85,8 @@ test("PC map v2 separates readiness, permission, proof, and release qualificatio
   assert.equal(inspection.qualification.installed, "unverified");
   assert.equal(inspection.qualification.hosted, "unverified");
   assert.equal(pcMapV2("linux").capabilities.find((row) => row.id === "browser.inspect")?.platformSupport, "unsupported");
+  assert.equal(pcMapV2("linux").capabilities.find((row) => row.id === "browser.draft")?.platformSupport, "unsupported");
+  assert.equal(pcMapV2("win32").capabilities.find((row) => row.id === "browser.draft")?.permission, "fresh-local-approval");
   const command = map.capabilities.find((row) => row.id === "command.execute")!;
   assert.equal(command.permission, "denied");
   assert.equal(command.runtimeReadiness, "not-applicable");
@@ -172,7 +174,7 @@ test("target set and command manifest stay closed and visible", () => {
 
 test("CLI cannot turn --yes into PC browser approval", () => {
   const entry = fileURLToPath(new URL("../src/main.js", import.meta.url));
-  for (const args of [["verify-browser"], ["open", "claude"], ["inspect-browser", "aether-cloud"]]) {
+  for (const args of [["verify-browser"], ["open", "claude"], ["inspect-browser", "aether-cloud"], ["draft-browser", "aether-cloud"]]) {
     const result = spawnSync(process.execPath, [entry, "pc", ...args, "--yes", "--json"], {
       encoding: "utf8", timeout: 10_000, windowsHide: true,
     });

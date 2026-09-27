@@ -147,7 +147,7 @@ export function pcMapV2(
     platform,
     observedAt: legacy.observedAt,
     session: { active: false, interactive },
-    capabilities: legacy.capabilities.map((row) => {
+    capabilities: [...legacy.capabilities.map((row): PcCapabilityV2 => {
       const platformSupport = (row.id === "process.inspect" || row.id === "browser.inspect") && platform !== "win32" ? "unsupported"
         : implemented.has(row.id) ? "supported" : "unqualified";
       const runtimeReadiness = row.state === "available" ? "ready"
@@ -169,7 +169,15 @@ export function pcMapV2(
         },
         detail: row.detail,
       };
-    }),
+    }), {
+      id: "browser.draft",
+      platformSupport: platform === "win32" ? "supported" : "unsupported",
+      runtimeReadiness: controlledEdgeExecutable(process.env, platform) ? "unverified" : "unavailable",
+      permission: "fresh-local-approval",
+      lastProof: { observedAt: null, ageMs: null, scope: null },
+      qualification: { source: "implemented", installed: "unverified", hosted: "unverified" },
+      detail: "single empty composer text insertion in controlled Edge after separate page and element approval; site behavior may send data",
+    } satisfies PcCapabilityV2],
   };
 }
 

@@ -1,7 +1,7 @@
-// Read-only inspection of a real page in an Aether-owned, disposable Edge
-// profile. The only page code evaluated is the fixed document.readyState probe;
-// no page text, DOM dump, cookies, storage, screenshots, or user profile data
-// enters the result. The CLI supplies fixed HTTPS targets after local approval.
+// Inspection of a real page in an Aether-owned, disposable Edge profile is
+// read-only by default. The optional draft port requires a separate host grant
+// before it inserts text. No page text, DOM dump, cookies, storage, screenshots,
+// or user profile data enters the result. The CLI supplies fixed HTTPS targets.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -42,6 +42,18 @@ export interface BrowserInspectOptions {
   /** Headless is for qualification tests; the CLI opens a visible browser. */
   headless?: boolean;
   timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/** A single observed composer in the controlled page. No page text is exposed. */
+export interface BrowserDraftPort {
+  readonly identity: string;
+  readonly kind: "textarea" | "contenteditable";
+  readonly origin: string;
+  /** Returns "stale" if the document, tab, element, or empty state changed. */
+  observe(): Promise<string>;
+  /** Call only inside the approved gateway effect. */
+  insert(text: string): Promise<{ dispatched: boolean; verified: boolean }>;
 }
 
 interface DevtoolsPort { port: number; browserPath: string }
@@ -95,8 +107,9 @@ async function pause(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, POLL_MS));
 }
 
-async function readDevtoolsPort(dir: string, child: ChildProcess, deadline: number): Promise<DevtoolsPort> {
+async function readDevtoolsPort(dir: string, child: ChildProcess, deadline: number, signal?: AbortSignal): Promise<DevtoolsPort> {
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error("cancelled");
     if (child.exitCode !== null) throw new Error("controlled browser exited before inspection");
     try {
       const lines = (await readFile(join(dir, "DevToolsActivePort"), "utf8")).trim().split(/\r?\n/);
@@ -110,8 +123,9 @@ async function readDevtoolsPort(dir: string, child: ChildProcess, deadline: numb
   throw new Error("controlled browser did not start in time");
 }
 
-async function pageWebSocket(port: number, deadline: number): Promise<string> {
+async function pageWebSocket(port: number, deadline: number, signal?: AbortSignal): Promise<string> {
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error("cancelled");
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(remaining(deadline, 1_000)) });
       if (!response.ok) throw new Error("DevTools target list unavailable");
@@ -141,7 +155,7 @@ async function pageCount(port: number, deadline: number): Promise<number> {
 class CdpConnection {
   private sequence = 0;
   private eventHandler: ((method: string, params: unknown) => void) | null = null;
-  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+  private readonly pending = new Map<number, { method: string; resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
 
   private constructor(private readonly socket: WebSocket) {
     socket.addEventListener("message", (event) => {
@@ -157,7 +171,7 @@ class CdpConnection {
       if (!waiting) return;
       clearTimeout(waiting.timer);
       this.pending.delete(message.id!);
-      if (message.error) waiting.reject(new Error("browser protocol refused a read-only command"));
+      if (message.error) waiting.reject(new Error(`browser protocol refused ${waiting.method}`));
       else waiting.resolve(message.result);
     });
     socket.addEventListener("close", () => {
@@ -189,7 +203,7 @@ class CdpConnection {
         this.pending.delete(id);
         reject(new Error("browser inspection timed out"));
       }, remaining(deadline, maxMs));
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { method, resolve, reject, timer });
       this.socket.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -231,6 +245,102 @@ async function structure(cdp: CdpConnection, deadline: number): Promise<NonNulla
   return flags;
 }
 
+async function draftPort(
+  cdp: CdpConnection, port: DevtoolsPort, frame: FrameIdentity, origin: string,
+  deadline: number, hasUnexpectedPage: () => boolean, isCancelled: () => boolean,
+): Promise<BrowserDraftPort | null> {
+  const response = await cdp.command("DOM.getDocument", { depth: 0, pierce: false }, deadline) as { root?: { nodeId?: unknown } };
+  const root = response?.root?.nodeId;
+  if (typeof root !== "number" || root < 1) return null;
+  const matches = await cdp.command("DOM.querySelectorAll", {
+    nodeId: root, selector: 'textarea, [contenteditable="true"]',
+  }, deadline) as { nodeIds?: unknown };
+  if (!Array.isArray(matches?.nodeIds) || matches.nodeIds.length !== 1 ||
+      typeof matches.nodeIds[0] !== "number") return null;
+  const nodeId = matches.nodeIds[0] as number;
+  const described = await cdp.command("DOM.describeNode", { nodeId, depth: 0 }, deadline) as {
+    node?: { backendNodeId?: unknown; nodeName?: unknown; attributes?: unknown };
+  };
+  const backendId = described?.node?.backendNodeId;
+  const name = described?.node?.nodeName;
+  const attributes = described?.node?.attributes;
+  if (typeof backendId !== "number" || !Number.isSafeInteger(backendId) || backendId < 1 ||
+      typeof name !== "string" || !Array.isArray(attributes)) return null;
+  const kind = name.toUpperCase() === "TEXTAREA" ? "textarea" :
+    attributes.some((value, index) => index % 2 === 0 && value === "contenteditable" &&
+      attributes[index + 1] === "true") ? "contenteditable" : null;
+  if (!kind) return null;
+  const identity = createHash("sha256")
+    .update(`${frame.id}:${frame.loaderId}:${frame.url}:${backendId}:${kind}`)
+    .digest("hex").slice(0, 24);
+  const world = await cdp.command("Page.createIsolatedWorld", {
+    frameId: frame.id, worldName: "aether-pc-draft",
+  }, deadline) as { executionContextId?: unknown };
+  const contextId = world?.executionContextId;
+  if (typeof contextId !== "number" || !Number.isSafeInteger(contextId) || contextId < 1) return null;
+
+  const elementMatches = async (expectedText?: string): Promise<boolean> => {
+    const current = await frameIdentity(cdp, deadline);
+    if (isCancelled() || current.id !== frame.id || current.loaderId !== frame.loaderId || current.url !== frame.url ||
+        new URL(current.url).origin !== origin || hasUnexpectedPage() ||
+        await pageCount(port.port, deadline) !== 1) return false;
+    const fresh = await cdp.command("DOM.getDocument", { depth: 0, pierce: false }, deadline) as { root?: { nodeId?: unknown } };
+    const freshRoot = fresh?.root?.nodeId;
+    if (typeof freshRoot !== "number" || freshRoot < 1) return false;
+    const found = await cdp.command("DOM.querySelectorAll", {
+      nodeId: freshRoot, selector: 'textarea, [contenteditable="true"]',
+    }, deadline) as { nodeIds?: unknown };
+    if (!Array.isArray(found?.nodeIds) || found.nodeIds.length !== 1 || typeof found.nodeIds[0] !== "number") return false;
+    const freshId = found.nodeIds[0] as number;
+    const detail = await cdp.command("DOM.describeNode", { nodeId: freshId, depth: 0 }, deadline) as {
+      node?: { backendNodeId?: unknown };
+    };
+    if (detail?.node?.backendNodeId !== backendId) return false;
+    try {
+      const box = await cdp.command("DOM.getBoxModel", { nodeId: freshId }, deadline) as {
+        model?: { width?: unknown; height?: unknown };
+      };
+      if (typeof box?.model?.width !== "number" || box.model.width <= 0 ||
+          typeof box.model.height !== "number" || box.model.height <= 0) return false;
+    }
+    catch { return false; }
+    const resolved = await cdp.command("DOM.resolveNode", {
+      nodeId: freshId, executionContextId: contextId,
+    }, deadline) as { object?: { objectId?: unknown } };
+    const objectId = resolved?.object?.objectId;
+    if (typeof objectId !== "string") return false;
+    // The fixed probe runs in an isolated world and returns a boolean only.
+    // Existing composer content never reaches the host or the audit journal.
+    const expression = kind === "textarea"
+      ? "function(expected) { return this.isConnected && !this.disabled && !this.readOnly && this.value === expected; }"
+      : "function(expected) { return this.isConnected && this.isContentEditable && this.textContent === expected; }";
+    const probe = await cdp.command("Runtime.callFunctionOn", {
+      objectId, functionDeclaration: expression, arguments: [{ value: expectedText ?? "" }],
+      returnByValue: true, silent: true,
+    }, deadline) as { result?: { value?: unknown } };
+    if (probe?.result?.value !== true) return false;
+    const confirmed = await frameIdentity(cdp, deadline);
+    return confirmed.id === frame.id && confirmed.loaderId === frame.loaderId &&
+      confirmed.url === frame.url && !hasUnexpectedPage();
+  };
+
+  if (!await elementMatches()) return null;
+  return {
+    identity, kind, origin,
+    observe: async () => await elementMatches() ? identity : "stale",
+    insert: async (text) => {
+      if (text.length < 1 || text.length > 2000 || /[\r\n\0]/.test(text)) {
+        return { dispatched: false, verified: false };
+      }
+      if (!await elementMatches()) return { dispatched: false, verified: false };
+      await cdp.command("DOM.focus", { backendNodeId: backendId }, deadline);
+      if (!await elementMatches()) return { dispatched: true, verified: false };
+      await cdp.command("Input.insertText", { text }, deadline);
+      return { dispatched: true, verified: await elementMatches(text) };
+    },
+  };
+}
+
 function newResult(origin: string): BrowserInspection {
   return {
     schema: SCHEMA, state: "failed", browserLaunched: false, navigationAttempted: false,
@@ -267,12 +377,16 @@ async function closeBrowser(child: ChildProcess | null, profileDir: string, port
 }
 
 /** Inspect a selected page without taking browser actions or reading content. */
-export async function inspectControlledPage(rawUrl: string, options: BrowserInspectOptions = {}): Promise<BrowserInspection> {
+export async function inspectControlledPage(
+  rawUrl: string, options: BrowserInspectOptions = {},
+  onDraftReady?: (port: BrowserDraftPort) => Promise<void>,
+): Promise<BrowserInspection> {
   const requested = inspectedUrl(rawUrl, options.allowHttpLoopback ?? false);
   const result = newResult(requested.origin);
+  if (options.signal?.aborted) return { ...result, reason: "controlled browser inspection cancelled", profileCleaned: true };
   const executable = controlledEdgeExecutable();
   if (!executable) return { ...result, reason: "controlled Edge driver unavailable", profileCleaned: true };
-  const deadline = Date.now() + boundedTimeout(options.timeoutMs);
+  let deadline = Date.now() + boundedTimeout(options.timeoutMs);
   const profileDir = await mkdtemp(join(tmpdir(), "aether-pc-browser-"));
   const args = [
     `--user-data-dir=${profileDir}`, "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0",
@@ -287,13 +401,20 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
   let unexpectedPage = false;
   let monitorArmed = false;
   let phase = "launch";
+  const onAbort = () => {
+    cdp?.close();
+    browserControl?.close();
+    if (child?.exitCode === null) child.kill();
+  };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
   try {
+    if (options.signal?.aborted) throw new Error("cancelled");
     child = spawn(executable, args, { shell: false, windowsHide: options.headless ?? false, stdio: "ignore", env: childEnv() });
     result.browserLaunched = child.pid !== undefined;
     // A policy or filesystem race can make spawn fail after the executable check.
     // Observe the error so it never becomes an unhandled process exception.
     child.on("error", () => {});
-    port = await readDevtoolsPort(profileDir, child, deadline);
+    port = await readDevtoolsPort(profileDir, child, deadline, options.signal);
     phase = "download denial";
     browserControl = await CdpConnection.connect(`ws://127.0.0.1:${port.port}${port.browserPath}`, deadline);
     // A site can initiate a download while being visited. Refuse it before
@@ -311,7 +432,7 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
       throw new Error("controlled browser did not start with exactly one page");
     }
     phase = "target discovery";
-    const ws = await pageWebSocket(port.port, deadline);
+    const ws = await pageWebSocket(port.port, deadline, options.signal);
     phase = "protocol connection";
     cdp = await CdpConnection.connect(ws, deadline);
     phase = "Page.enable";
@@ -337,6 +458,7 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
     phase = "document readiness";
     let frame: FrameIdentity | null = null;
     while (Date.now() < deadline) {
+      if (options.signal?.aborted) throw new Error("cancelled");
       try {
         frame = await frameIdentity(cdp, deadline);
         if (frame.url !== "about:blank" && await readyState(cdp, deadline) === "complete") break;
@@ -380,12 +502,26 @@ export async function inspectControlledPage(rawUrl: string, options: BrowserInsp
     result.structure = flags;
     result.reason = result.state === "login-required" ? "login form or route observed; authentication not verified"
       : "page rendered; authentication not verified";
+    if (onDraftReady && result.state === "rendered") {
+      phase = "draft composer observation";
+      // The first deadline covers browser startup/navigation. Give the
+      // separate human approval its own bounded window after observation.
+      deadline = Date.now() + 60_000;
+      const composer = await draftPort(cdp, port, after, final.origin, deadline,
+        () => unexpectedPage, () => options.signal?.aborted ?? false);
+      if (composer) await onDraftReady(composer);
+    }
+    if (options.signal?.aborted) throw new Error("cancelled");
     return result;
   } catch (error) {
-    result.reason = error instanceof Error && /timed out/i.test(error.message)
+    result.state = "failed";
+    result.structure = null;
+    result.documentDigest = null;
+    result.reason = options.signal?.aborted ? "controlled browser inspection cancelled" : error instanceof Error && /timed out/i.test(error.message)
       ? `controlled browser inspection timed out during ${phase}` : `controlled browser inspection failed during ${phase}`;
     return result;
   } finally {
+    options.signal?.removeEventListener("abort", onAbort);
     cdp?.close();
     browserControl?.close();
     result.profileCleaned = await closeBrowser(child, profileDir, port);
