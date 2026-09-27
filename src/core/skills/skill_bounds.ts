@@ -32,6 +32,10 @@ export const SKILL_BOUNDS = {
   maxContextPacketBytes: 512 * 1024,
   /** Nested AGENTS.md depth below the project root. */
   maxNestedInstructionDepth: 6,
+  /** Bound the synchronous nested-rule walk before any chat pulse or request. */
+  maxNestedInstructionDirectories: 256,
+  maxNestedInstructionEntries: 2048,
+  maxNestedInstructionScanMs: 500,
   /** One instruction file. */
   maxInstructionFileBytes: 64 * 1024,
   /** Description / name / trigger phrase field lengths. */
