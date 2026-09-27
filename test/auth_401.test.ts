@@ -299,6 +299,50 @@ test("ApiClient: cancelling the sole 401 waiter aborts refresh and prevents a la
   }
 });
 
+test("ApiClient: a stalled 200 refresh body releases a cancelled flight so a later 401 can retry", async () => {
+  const real = globalThis.fetch;
+  const store = new StaticTokenStore("sess_old");
+  let refreshRequests = 0;
+  let announceBodyRead: (() => void) | undefined;
+  const bodyRead = new Promise<void>((resolve) => { announceBodyRead = resolve; });
+  let releaseBody: ((value: { session_token: string }) => void) | undefined;
+  const bodyGate = new Promise<{ session_token: string }>((resolve) => { releaseBody = resolve; });
+  globalThis.fetch = (async (url: unknown) => {
+    if (String(url).endsWith("/auth/refresh")) {
+      refreshRequests += 1;
+      if (refreshRequests > 1) return jsonRes(401, { detail: "refresh unavailable" });
+      const stalled = jsonRes(200, { session_token: "ignored" });
+      // Model a fetch implementation that returned 200 headers but leaves
+      // res.json() pending even after the request's signal aborts.
+      Object.defineProperty(stalled, "json", {
+        value: () => { announceBodyRead?.(); return bodyGate; },
+      });
+      return stalled;
+    }
+    return jsonRes(401, { detail: "expired" });
+  }) as typeof globalThis.fetch;
+  try {
+    const api = new ApiClient("https://api.example", store);
+    const firstController = new AbortController();
+    const first = api.getJson("/models", firstController.signal, 1_000);
+    await bodyRead;
+    firstController.abort();
+    await assert.rejects(first, (error: unknown) => (error as Error).name === "AbortError");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    await assert.rejects(
+      () => api.getJson("/models", AbortSignal.timeout(500), 1_000),
+      (error: unknown) => error instanceof HttpError && error.status === 401,
+      "a later 401 must start a new refresh instead of joining the dead body reader",
+    );
+    assert.equal(refreshRequests, 2);
+    assert.equal(await store.get(), "sess_old", "aborted refresh cannot rotate the token");
+  } finally {
+    releaseBody?.({ session_token: "sess_late" });
+    globalThis.fetch = real;
+  }
+});
+
 test("ApiClient: one cancelled 401 waiter does not abort a shared refresh needed by another request", async () => {
   const real = globalThis.fetch;
   let token = "sess_old";
@@ -306,7 +350,9 @@ test("ApiClient: one cancelled 401 waiter does not abort a shared refresh needed
   let refreshRequests = 0;
   let releaseRefresh: (() => void) | undefined;
   let announceBothOld: (() => void) | undefined;
+  let announceBodyRead: (() => void) | undefined;
   const bothOld = new Promise<void>((resolve) => { announceBothOld = resolve; });
+  const bodyRead = new Promise<void>((resolve) => { announceBodyRead = resolve; });
   const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
   const store: import("../src/core/auth.js").TokenStore = {
     async get() { return token; },
@@ -318,8 +364,11 @@ test("ApiClient: one cancelled 401 waiter does not abort a shared refresh needed
     const target = String(url);
     if (target.endsWith("/auth/refresh")) {
       refreshRequests += 1;
-      await refreshGate;
-      return jsonRes(200, { session_token: "sess_new" });
+      const response = jsonRes(200, { session_token: "ignored" });
+      Object.defineProperty(response, "json", {
+        value: () => { announceBodyRead?.(); return refreshGate.then(() => ({ session_token: "sess_new" })); },
+      });
+      return response;
     }
     if (bearer(init ?? {}) === "Bearer sess_new") return jsonRes(200, { ok: true });
     oldRequests += 1;
@@ -332,6 +381,7 @@ test("ApiClient: one cancelled 401 waiter does not abort a shared refresh needed
     const first = api.getJson("/models", firstController.signal, 1_000);
     const second = api.getJson<{ ok: boolean }>("/models", undefined, 1_000);
     await bothOld;
+    await bodyRead;
     await new Promise<void>((resolve) => setImmediate(resolve));
     firstController.abort();
     await assert.rejects(first, (error: unknown) => (error as Error).name === "AbortError");
