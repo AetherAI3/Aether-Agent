@@ -68,6 +68,14 @@ const V032_PACKET = {
   "Package manifest": "The same current local dry run reported 673 entries. Hosted exact-head package evidence remains required before release.",
   "Provenance evidence": "Pending the trusted-publishing workflow — no v0.3.2 provenance attestation exists yet.",
 } as const;
+const V033_PACKET = {
+  "Package": "`aether-agents`",
+  "Proposed tag": "`v0.3.3`",
+  "Release line base": "`e234bf6bcd283dd81691158e70e826a47013eea6` (`release/0.3`, synced to published v0.3.2)",
+  "Candidate branch": "`fix/032-home-scan`",
+  "Archive evidence": "No v0.3.3 release archive or published npm package exists. Exact-head hosted package evidence is pending.",
+  "Provenance evidence": "Pending a future trusted-publishing workflow; no v0.3.3 provenance attestation is claimed.",
+} as const;
 
 function parsePacketRows(packet: string): PacketRows {
   const rows: PacketRows = new Map();
@@ -200,8 +208,13 @@ test("the current operator packet identifies the candidate and v0.3.0 retains it
   const current = readFileSync(path, "utf8");
   assert.ok(current.includes(`v${VERSION}`), "the operator packet does not name the proposed tag");
   const currentRows = parsePacketRows(current);
-  for (const [label, expected] of Object.entries(V032_PACKET)) {
+  for (const [label, expected] of Object.entries(V033_PACKET)) {
     assert.equal(onlyPacketRow(currentRows, label), expected, `the current packet has the wrong ${label}`);
+  }
+  const prior = read("docs", "releases", "OPERATOR-PACKET-v0.3.2.md");
+  const priorRows = parsePacketRows(prior);
+  for (const [label, expected] of Object.entries(V032_PACKET)) {
+    assert.equal(onlyPacketRow(priorRows, label), expected, `the v0.3.2 packet has the wrong ${label}`);
   }
   assert.doesNotMatch(current, /aether-agents-0\.3\.0\.tgz|6176172deb15eea57519408d93f23b3fac8ab5e2b2e541adddc34b4e5fb4c33d/);
   const packet = read("docs", "releases", "OPERATOR-PACKET-v0.3.0.md");

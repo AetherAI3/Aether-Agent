@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - release/0.3
   workflow_dispatch:
 
 permissions:
@@ -54,6 +55,9 @@ jobs:
       # cannot be relabelled as evidence from the other.
       - name: Emit exact-head production package report
         run: npm run verify:production
+
+      - name: Smoke-test packed chat from a broad home directory
+        run: npm run smoke:packed-home
 
   supply-chain:
     runs-on: ubuntu-latest

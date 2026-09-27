@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - release/0.3
+  pull_request:
+    branches:
+      - release/0.3
   schedule:
     - cron: '17 11 * * *'
   workflow_dispatch:

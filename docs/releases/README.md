@@ -12,6 +12,10 @@ manifest, the evidence gathered, and the founder-owned steps that publish it.
 
 ## Index
 
+- [2026-09-27](2026-09-27.md) — **v0.3.3** maintenance candidate: bounded
+  home-folder instruction discovery, finite HTTP error-body reads, and a
+  refreshed verified public model catalogue. Packet:
+  [OPERATOR-PACKET-v0.3.3.md](OPERATOR-PACKET-v0.3.3.md).
 - [2026-09-03](2026-09-03.md) — **v0.3.2** patch candidate: the v0.3.1
   maintenance line merged back into `main`, restoring the browser-launcher
   verification and putting the declared version ahead of the published one.

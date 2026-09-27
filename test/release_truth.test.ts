@@ -349,6 +349,11 @@ test("public registry claims are derived from packed docs and reject pre-publish
   });
   assert.equal(live.sourceVersion, "0.3.0");
   assert.deepEqual(live.pinnedRegistryClaims, []);
+  const maintenance = derivePublicRegistryClaim({
+    "README.md": "| `release/0.3` source | **0.3.3** | Check the live npm badge for the published package version. |",
+  });
+  assert.equal(maintenance.sourceVersion, "0.3.3");
+  assert.deepEqual(maintenance.pinnedRegistryClaims, []);
 });
 
 test("the shipped README states npm status in a way publishing cannot falsify", () => {

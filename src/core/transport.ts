@@ -191,8 +191,15 @@ export class ApiClient {
         if (!res.ok) return false;
         let body: { session_token?: string } | undefined;
         try {
-          body = (await res.json()) as { session_token?: string };
+          // The refresh fetch timeout also needs a bound after headers arrive.
+          // This promise is shared by concurrent 401 callers, so its body
+          // limit is independent of any one caller's AbortSignal.
+          const bodyTimeoutMs = Math.min(defaultRequestTimeoutMs() || 10_000, 10_000);
+          body = (await raceAgainst(
+            res.json(), undefined, bodyTimeoutMs, () => new RequestTimeoutError(bodyTimeoutMs),
+          )) as { session_token?: string };
         } catch {
+          void res.body?.cancel().catch(() => {});
           return false;
         }
         if (!body?.session_token) return false;
@@ -279,7 +286,7 @@ export class ApiClient {
         void res.body?.cancel().catch(() => {});
         res = await open();
       }
-      if (!res.ok) throw await toHttpError(res);
+      if (!res.ok) throw await toHttpError(res, signal, timeoutMs);
       // Fail-soft: server returns plain JSON `{"stream": false}` instead of an
       // SSE body when it can't/shouldn't stream -> caller falls back to /agent/chat.
       const ct = res.headers.get("content-type") ?? "";
@@ -381,7 +388,7 @@ export class ApiClient {
         void res.body?.cancel().catch(() => {});
         res = await send();
       }
-      if (!res.ok) throw await toHttpError(res);
+      if (!res.ok) throw await toHttpError(res, signal, effTimeoutMs);
       if (!res.body) {
         cleanup();
         return res;
@@ -455,7 +462,7 @@ export class ApiClient {
         void res.body?.cancel().catch(() => {});
         res = await send();
       }
-      if (!res.ok) throw await toHttpError(res);
+      if (!res.ok) throw await toHttpError(res, signal, effTimeoutMs);
       return await parseOkBody<T>(res);
     } finally {
       releaseNet();
@@ -511,7 +518,7 @@ export class ApiClient {
         void res.body?.cancel().catch(() => {});
         res = await send();
       }
-      if (!res.ok) throw await toHttpError(res);
+      if (!res.ok) throw await toHttpError(res, signal, timeoutMs);
       return await parseOkBody<T>(res);
     } finally {
       releaseNet();
@@ -574,11 +581,21 @@ export function sanitizeServerText(v: string): string {
   return v.replace(/[\x00-\x1f\x7f-\x9f]+/g, " ").trim().slice(0, 200);
 }
 
-async function toHttpError(res: Response): Promise<HttpError> {
+async function toHttpError(
+  res: Response,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<HttpError> {
   let body: unknown;
   try {
-    body = await res.json();
-  } catch {
+    // Headers already tell us the status. Bound reading an optional detail
+    // body even when the caller disabled the normal stream idle timeout; a
+    // stalled error body must never hide a known HTTP 401 indefinitely.
+    const detailTimeoutMs = timeoutMs > 0 ? Math.min(timeoutMs, 3_000) : 3_000;
+    body = await raceAgainst(res.json(), signal, detailTimeoutMs, () => new RequestTimeoutError(detailTimeoutMs));
+  } catch (error) {
+    if (signal?.aborted) throw abortError(signal);
+    if (error instanceof RequestTimeoutError) void res.body?.cancel().catch(() => {});
     body = undefined;
   }
   // Surface the server's own explanation (FastAPI uses `detail`, others
