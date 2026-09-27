@@ -145,7 +145,7 @@ function normalizeFrameBody(obj: Record<string, unknown>): StreamFrameBody | nul
     case "error":
       return {
         type: "error",
-        msg: String(obj["msg"] ?? obj["message"] ?? ""),
+        msg: streamErrorMessage(obj),
         errorCode: strOrUndef(obj["error_code"] ?? obj["errorCode"] ?? obj["code"]),
         refId: strOrUndef(obj["ref_id"] ?? obj["refId"]),
       };
@@ -367,6 +367,15 @@ function numOrUndef(v: unknown): number | undefined {
 }
 function strOrUndef(v: unknown): string | undefined {
   return v == null ? undefined : String(v);
+}
+function streamErrorMessage(obj: Record<string, unknown>): string {
+  // Some server paths send `error` instead of `msg`. Keep the internal `reason`
+  // field out of user-facing frames, even when all message fields are blank.
+  for (const key of ["msg", "message", "error"]) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
 }
 function parseStrArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
