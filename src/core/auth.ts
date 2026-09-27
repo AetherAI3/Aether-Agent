@@ -140,7 +140,13 @@ async function renameWithWindowsRetry(from: string, to: string): Promise<void> {
 
 /** File-backed token store (0600). Fallback until keychain is wired. */
 export class FileTokenStore implements TokenStore {
-  private path = join(configDir(), ".token");
+  private readonly path: string;
+  private readonly name: ".token" | ".drive-staff-session";
+
+  constructor(name: ".token" | ".drive-staff-session" = ".token") {
+    this.name = name;
+    this.path = join(configDir(), name);
+  }
 
   async sourceInfo(): Promise<TokenSourceInfo> {
     return { source: "stored", storedCredentialShadowed: false };
@@ -210,7 +216,7 @@ export class FileTokenStore implements TokenStore {
     // The temp file is a sibling (same directory, therefore same volume, so the
     // rename cannot degrade to a copy), is created O_EXCL so it can never
     // adopt an attacker's pre-planted file, and is 0600 from creation.
-    const tmp = join(dir, `.token.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
+    const tmp = join(dir, `${this.name}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
     try {
       const fd = openSync(tmp, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | O_NOFOLLOW, 0o600);
       try {

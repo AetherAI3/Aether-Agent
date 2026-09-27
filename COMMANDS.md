@@ -460,6 +460,8 @@ disconnect actions per entry.
 | `aether mcp list` | Print a diagnostics report (providers, connections, tool counts). |
 | `aether mcp doctor` | Same report; exits `1` if any check fails (scriptable health gate). |
 | `aether mcp repair` | Back up and reset a corrupted local MCP registry (confirms first). |
+| `aether mcp drive login [--no-browser]` | Open GitHub sign-in on this computer, bind a separate Cloud session only after the staff route accepts it. Existing `aek_` device API keys remain separate. |
+| `aether mcp drive logout` | Revoke and clear the dedicated Drive staff session. |
 | `aether mcp drive preview <intake.json>` | Read-only Cloud staff preflight. At G0, returns blockers and creates no mission or spend. |
 | `aether mcp drive status <lane-id>` | Read shared C1 mission metadata visible to the bound staff session. |
 | `aether mcp drive events <lane-id> [after-cursor] [limit]` | Page shared C1 control events visible to the bound staff session. |

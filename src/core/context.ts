@@ -13,6 +13,8 @@ export interface GlobalFlags {
   agent?: string;
   /** Emit raw frames as JSON lines (--json). */
   json: boolean;
+  /** Print browser authorization URLs instead of launching a browser. */
+  noBrowser?: boolean;
   /** Show audit signature inline (--audit). */
   audit: boolean;
   /** Auto-confirm prompts (--yes). */
@@ -43,6 +45,8 @@ export interface AppContext {
   cfg: AetherConfig;
   api: ApiClient;
   tokens: TokenStore;
+  /** Separate short-lived, account-bound session for staff Drive routes. */
+  driveStaffTokens?: TokenStore;
   flags: GlobalFlags;
   /** Ask the user a yes/no question (readline y/N; `--yes` short-circuits).
    * Injected so slash-command confirmations are testable. */

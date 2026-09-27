@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:872214953c9585f4be57b0668c055336c912c14cb4528f71c6391653053b4b07 -->
+<!-- manifest-digest: sha256:245165ce8a61a9c39f71a60be3347cca54e3785feec2d261b9d81779aca571b9 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -261,7 +261,7 @@ export a redacted diagnostic support bundle
 
 Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.support-bundle`
 
-#### `aether mcp [list|doctor [drive]|repair]`
+#### `aether mcp [list|doctor [drive]|drive login|drive logout|drive preview|drive status|drive events|repair]`
 
 manage and diagnose MCP servers
 
