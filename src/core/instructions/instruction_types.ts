@@ -66,4 +66,6 @@ export interface InstructionGraph {
   conflicts: readonly InstructionConflict[];
   /** Sources discovered but skipped, with a visible reason (over cap, bad encoding). */
   skipped: readonly { path: string; reason: string }[];
+  /** False when nested AGENTS.md discovery stopped at a scan limit. */
+  nestedScanComplete: boolean;
 }

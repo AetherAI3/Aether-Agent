@@ -124,6 +124,7 @@ export async function runTurn(
   const opened = openRunSession({
     projectRoot: ctx.flags.cwd,
     prompt,
+    allowIncompleteInstructionDiscovery: backend === "cloud",
     ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
     ...(skillOpts.noSkills ? { noSkills: true } : {}),
   });

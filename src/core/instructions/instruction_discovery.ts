@@ -5,8 +5,10 @@
 // fetches includes, and caps file size and source count honestly.
 
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import type { Dirent } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { configDir } from "../config.js";
 import { SKILL_BOUNDS } from "../skills/skill_bounds.js";
 import type { InstructionSource, InstructionSourceKind } from "./instruction_types.js";
@@ -87,21 +89,49 @@ export function parseCursorGlobs(content: string): { globs: readonly string[] | 
   return { globs: globs.length ? globs : null, warnings, body };
 }
 
-/** Locate nested AGENTS.md files, bounded by depth; skips dot/vendor dirs. */
-function findNestedAgents(projectRoot: string): string[] {
+/** Locate nested AGENTS.md files with explicit work and wall-clock limits. */
+function findNestedAgents(projectRoot: string): { paths: string[]; complete: boolean; reason: string } {
   const found: string[] = [];
   const skip = new Set(["node_modules", "dist", "build", "vendor", "target", ".git"]);
+  const started = performance.now();
+  let directories = 0;
+  let entriesSeen = 0;
+  let reason = "";
+  const overBudget = (): boolean => {
+    if (reason) return true;
+    if (performance.now() - started >= SKILL_BOUNDS.maxNestedInstructionScanMs) {
+      reason = `nested AGENTS.md scan exceeded ${SKILL_BOUNDS.maxNestedInstructionScanMs} ms`;
+      return true;
+    }
+    if (directories >= SKILL_BOUNDS.maxNestedInstructionDirectories) {
+      reason = `nested AGENTS.md scan reached ${SKILL_BOUNDS.maxNestedInstructionDirectories} directories`;
+      return true;
+    }
+    return false;
+  };
   const walk = (dir: string, depth: number): void => {
     if (depth > SKILL_BOUNDS.maxNestedInstructionDepth) return;
-    let entries: string[];
+    if (overBudget()) return;
+    directories++;
+    let entries: Dirent<string>[];
     try {
-      entries = readdirSync(dir);
+      entries = readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
-    for (const entry of entries.sort()) {
-      if (entry.startsWith(".") || skip.has(entry)) continue;
-      const full = join(dir, entry);
+    // A single directory can contain tens of thousands of names. Do not sort
+    // or stat any of them when the remaining entry budget cannot cover it.
+    // The readdirSync call itself is one synchronous filesystem operation; the
+    // incomplete marker below makes this limit explicit to callers.
+    if (entriesSeen + entries.length > SKILL_BOUNDS.maxNestedInstructionEntries) {
+      reason = `nested AGENTS.md scan reached ${SKILL_BOUNDS.maxNestedInstructionEntries} entries`;
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      if (overBudget()) return;
+      entriesSeen++;
+      if (entry.name.startsWith(".") || skip.has(entry.name) || !entry.isDirectory()) continue;
+      const full = join(dir, entry.name);
       let isDirectory = false;
       try {
         isDirectory = lstatSync(full).isDirectory();
@@ -116,12 +146,13 @@ function findNestedAgents(projectRoot: string): string[] {
     }
   };
   walk(projectRoot, 1);
-  return found;
+  return { paths: found, complete: !reason, reason };
 }
 
 export function discoverInstructionSources(projectRoot: string): {
   sources: InstructionSource[];
   skipped: { path: string; reason: string }[];
+  nestedScanComplete: boolean;
 } {
   const root = resolve(projectRoot);
   const candidates: DiscoveredFile[] = [];
@@ -132,7 +163,8 @@ export function discoverInstructionSources(projectRoot: string): {
 
   addIfPresent("aether-project", join(root, ".aether", "instructions.md"));
   addIfPresent("agents-root", join(root, "AGENTS.md"));
-  for (const nested of findNestedAgents(root)) {
+  const nestedScan = findNestedAgents(root);
+  for (const nested of nestedScan.paths) {
     const scopeDir = relative(root, join(nested, "..")).split(sep).join("/");
     candidates.push({ kind: "agents-nested", path: nested, scopeDir, globs: null, warnings: [] });
   }
@@ -156,6 +188,12 @@ export function discoverInstructionSources(projectRoot: string): {
 
   const sources: InstructionSource[] = [];
   const skipped: { path: string; reason: string }[] = [];
+  if (!nestedScan.complete) {
+    skipped.push({
+      path: "**/AGENTS.md",
+      reason: nestedScan.reason + "; nested project rules may be missing — start in a smaller project directory",
+    });
+  }
 
   for (const candidate of candidates) {
     if (sources.length >= SKILL_BOUNDS.maxInstructionSources) {
@@ -201,5 +239,5 @@ export function discoverInstructionSources(projectRoot: string): {
     });
   }
 
-  return { sources, skipped };
+  return { sources, skipped, nestedScanComplete: nestedScan.complete };
 }

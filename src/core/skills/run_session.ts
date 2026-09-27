@@ -51,6 +51,8 @@ export interface RunSessionOptions {
   noSkills?: boolean;
   /** Injected for tests. */
   builtinRoot?: string;
+  /** Hosted cloud chat has no local tool authority; it may proceed with a visible scan warning. */
+  allowIncompleteInstructionDiscovery?: boolean;
   /**
    * The operator's live permissions. Skills never contribute to this set — it
    * is passed in so a caller can narrow it, and so no cached policy can widen
@@ -392,6 +394,12 @@ export function openRunSession(options: RunSessionOptions): OpenRunSession {
       ...(options.noSkills ? { noSkills: true } : {}),
       ...(options.builtinRoot ? { builtinRoot: options.builtinRoot } : {}),
     });
+    if (!session.instructionGraph.nestedScanComplete && !options.allowIncompleteInstructionDiscovery) {
+      return refused({
+        code: "skill.instruction_scan_incomplete",
+        detail: "Nested AGENTS.md discovery stopped at a scan limit. Start from a smaller project directory so all local rules can be checked before local tools run",
+      });
+    }
     // A skill the user NAMED that requires authority this session does not hold
     // does not run at all: the user asked for it, so a silent downgrade would
     // run something other than what was asked for.
