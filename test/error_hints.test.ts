@@ -21,6 +21,16 @@ test("network failures point at connectivity", () => {
   assert.match(hintFor(new Error("connect ECONNREFUSED 1.2.3.4:443"))!, /network/);
 });
 
+test("TLS trust failures get a secure CA repair rather than a network hint", () => {
+  const tls = new TypeError("fetch failed", {
+    cause: { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" },
+  });
+  const hint = hintFor(tls) ?? "";
+  assert.match(hint, /TLS certificate trust failed/);
+  assert.match(hint, process.platform === "win32" ? /NODE_USE_SYSTEM_CA=1/ : /NODE_EXTRA_CA_CERTS/);
+  assert.doesNotMatch(hint, /TLS_REJECT_UNAUTHORIZED/);
+});
+
 // LOOP-06 round 3: undici puts the failure code on err.cause.code, not in
 // the message text, for real fetch failures — errors.errorHint already
 // checked this via NETWORK_CODES; hintFor only pattern-matched the message

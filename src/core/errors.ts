@@ -153,6 +153,22 @@ export const NETWORK_CODES = new Set([
   "UND_ERR_SOCKET",
 ]);
 
+/** TLS failures are different from offline/network failures. Keep verification on. */
+const TLS_CA_CODES = new Set([
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+]);
+
+export function tlsCaHint(err: unknown): string | null {
+  if (!(err instanceof Error)) return null;
+  const code = (err.cause as { code?: unknown } | undefined)?.code;
+  if (typeof code !== "string" || !TLS_CA_CODES.has(code)) return null;
+  return process.platform === "win32"
+    ? "TLS certificate trust failed — set NODE_USE_SYSTEM_CA=1 for Aether Agent so Node uses the Windows trust store"
+    : "TLS certificate trust failed — install the trusted issuer or configure NODE_EXTRA_CA_CERTS";
+}
+
 /**
  * True when `err` is the client-side cancellation of an in-flight turn
  * (AbortController fired). Undici surfaces this two ways depending on where
@@ -198,6 +214,8 @@ export function httpStatusHint(status: number): string | null {
  * actionable next step at all.
  */
 export function nonHttpErrorHint(err: unknown): string | null {
+  const tlsHint = tlsCaHint(err);
+  if (tlsHint !== null) return tlsHint;
   if (err instanceof MalformedResponseError) return "retry, or /doctor to check connectivity";
   if (err instanceof StreamEventTooLargeError) return "retry, or /doctor to inspect the server stream";
   if (err instanceof StreamTimeoutError) return "the stream went quiet - retry, or /doctor to check connectivity";
