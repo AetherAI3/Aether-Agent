@@ -31,8 +31,8 @@ function npm(args: string[], cwd: string): string {
   return result.stdout;
 }
 
-async function runInstalled(main: string, cwd: string, baseUrl: string, configDir: string, lines: string, streamTimeoutMs?: number): Promise<{ stdout: string; stderr: string; code: number | null; timedOut: boolean }> {
-  const child = spawn(process.execPath, [main], {
+async function runInstalled(main: string, cwd: string, baseUrl: string, configDir: string, lines: string, streamTimeoutMs?: number, oneShotPrompt?: string): Promise<{ stdout: string; stderr: string; code: number | null; timedOut: boolean }> {
+  const child = spawn(process.execPath, oneShotPrompt ? [main, "chat", oneShotPrompt] : [main], {
     cwd,
     env: {
       ...process.env,
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   for (let i = 0; i < 2_100; i++) mkdirSync(join(home, `folder-${String(i).padStart(4, "0")}`));
   let requests = 0;
   let requestBodies: string[] = [];
-  let mode: "success" | "recover-401" = "success";
+  let mode: "success" | "recover-401" | "empty-error" | "error-field" = "success";
   let heldResponse: import("node:http").ServerResponse | undefined;
   const server = createServer((request, response) => {
     let body = "";
@@ -94,6 +94,14 @@ async function main(): Promise<void> {
           response.writeHead(401, { "Content-Type": "application/json" });
           response.write('{"detail":');
           heldResponse = response;
+          return;
+        }
+        if (mode === "empty-error" || mode === "error-field") {
+          response.writeHead(200, { "Content-Type": "text/event-stream" });
+          const error = mode === "error-field"
+            ? { type: "error", error: "The media studio agent hit an error.", reason: "private internal reason" }
+            : { type: "error", msg: "" };
+          response.end(`data: ${JSON.stringify(error)}\n\ndata: {"type":"done","uvt":0,"cents":0}\n\n`);
           return;
         }
         response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -137,7 +145,21 @@ async function main(): Promise<void> {
       throw new Error(`packed 401 continuation smoke failed: ${JSON.stringify({ ...recovered, requests, requestBodies })}`);
     }
     heldResponse?.destroy();
-    process.stdout.write("packed home chat smoke passed: bounded scan, answer 1, visible 401 and continued answer 2\n");
+    mode = "empty-error";
+    requests = 0;
+    requestBodies = [];
+    const emptyError = await runInstalled(installedMain, home, baseUrl, configDir, "", undefined, prompt);
+    if (emptyError.timedOut || emptyError.code !== 1 || requests !== 1 || !requestBodies[0]?.includes(prompt) || !/cloud turn failed; the server did not provide details/.test(emptyError.stderr) || /\n✗\s*\n/.test(emptyError.stderr)) {
+      throw new Error(`packed empty-error one-shot smoke failed: ${JSON.stringify({ ...emptyError, requests, requestBodies })}`);
+    }
+    mode = "error-field";
+    requests = 0;
+    requestBodies = [];
+    const publicError = await runInstalled(installedMain, home, baseUrl, configDir, "", undefined, prompt);
+    if (publicError.timedOut || publicError.code !== 1 || requests !== 1 || !requestBodies[0]?.includes(prompt) || !/The media studio agent hit an error\./.test(publicError.stderr) || /private internal reason/.test(publicError.stderr)) {
+      throw new Error(`packed public-error one-shot smoke failed: ${JSON.stringify({ ...publicError, requests, requestBodies })}`);
+    }
+    process.stdout.write("packed home chat smoke passed: bounded scan, answer 1, visible 401 and continued answer 2, empty/public error exits 1\n");
   } finally {
     heldResponse?.destroy();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));

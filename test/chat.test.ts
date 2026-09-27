@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runTurn, ChatTurnError, applyRestart, buildPromptContext, repaintString } from "../src/commands/chat.js";
+import { cmdChat, runTurn, ChatTurnError, applyRestart, buildPromptContext, repaintString } from "../src/commands/chat.js";
 import { handleSlash } from "../src/commands/slash.js";
 import { ApiClient } from "../src/core/transport.js";
 import { StreamIncompleteError } from "../src/core/errors.js";
+import { STREAM_ERROR_NO_DETAILS } from "../src/core/stream.js";
 import type { GlobalFlags, AppContext } from "../src/core/context.js";
 import type { TokenStore } from "../src/core/auth.js";
 
@@ -56,6 +57,38 @@ test("runTurn throws ChatTurnError when the server streams an error frame", asyn
     await assert.rejects(() => runTurn(ctxWith(), "hi"), ChatTurnError);
   } finally {
     globalThis.fetch = real;
+  }
+});
+
+test("one-shot chat exits nonzero and renders the public error field or a fallback even when done follows", async () => {
+  const realFetch = globalThis.fetch;
+  const realStderrWrite = process.stderr.write.bind(process.stderr);
+  let stderr = "";
+  process.stderr.write = ((chunk: unknown): boolean => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    for (const { wire, expected } of [
+      { wire: { type: "error" }, expected: STREAM_ERROR_NO_DETAILS },
+      { wire: { type: "error", msg: "   " }, expected: STREAM_ERROR_NO_DETAILS },
+      { wire: { type: "error", error: "The media studio agent hit an error.", reason: "private internal reason" }, expected: "The media studio agent hit an error." },
+    ]) {
+      stderr = "";
+      globalThis.fetch = sseFetch([
+        JSON.stringify(wire),
+        JSON.stringify({ type: "done", uvt: 0, cents: 0 }),
+      ]);
+      const ctx = ctxWith();
+      ctx.flags.json = false;
+      assert.equal(await cmdChat(ctx, "just testing reply 1"), 1);
+      assert.ok(stderr.includes(`✗ ${expected}`));
+      assert.doesNotMatch(stderr, /\n✗\s*\n/, "the operator must not see a bare error glyph");
+      assert.doesNotMatch(stderr, /private internal reason/, "the private reason must not reach the terminal");
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    process.stderr.write = realStderrWrite;
   }
 });
 

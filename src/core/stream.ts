@@ -9,6 +9,8 @@
 // be ignored. The CF-flush preamble (`:<4096 spaces>`) and `ping` heartbeat are
 // handled here (comment lines skipped; ping surfaced as a typed liveness frame).
 
+export const STREAM_ERROR_NO_DETAILS = "cloud turn failed; the server did not provide details";
+
 export type StreamFrame = StreamFrameBody & {
   /** Per-session monotonic sequence number (dev-session frames only). A
    *  reconnecting client resumes with ?last_seq=N and MUST skip seq <= N so a
@@ -127,7 +129,11 @@ function normalizeFrameBody(obj: Record<string, unknown>): StreamFrameBody | nul
     case "error":
       return {
         type: "error",
-        msg: String(obj["msg"] ?? obj["message"] ?? ""),
+        // Cloud may send its public-safe copy as `error` with a separate
+        // internal `reason`. Show the former and never expose the latter.
+        msg: [obj["msg"], obj["message"], obj["error"]]
+          .find((value): value is string => typeof value === "string" && value.trim().length > 0)
+          ?.trim() ?? STREAM_ERROR_NO_DETAILS,
         errorCode: strOrUndef(obj["error_code"] ?? obj["errorCode"] ?? obj["code"]),
         refId: strOrUndef(obj["ref_id"] ?? obj["refId"]),
       };
