@@ -13,6 +13,11 @@ as prerelease evidence while the registry and tag remain authoritative.
 
 ## Index
 
+- [2026-09-27](2026-09-27.md) — **v0.4.0 interactive chat qualification
+  update** after an installed-package home-directory stall. This is a
+  candidate incident record, not a publication. The
+  [operator packet](OPERATOR-PACKET-v0.4.0.md#2026-09-27-interactive-chat-incident-gate)
+  tracks the exact-head and remaining release gates.
 - [2026-09-17](2026-09-17.md) — **v0.4.0 source candidate**
   for shared managed agents and ATS setup. No publication or live-service
   qualification is established by this entry. Packet:
