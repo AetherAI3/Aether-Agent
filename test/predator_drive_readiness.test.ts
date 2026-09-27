@@ -85,8 +85,25 @@ test("staff refusal and Cloud outage have separate non-disclosing blockers", asy
   const forbidden = await diagnosePredatorDrive(context("staff-session", new HttpError(403, "secret")).ctx);
   const unavailable = await diagnosePredatorDrive(context("staff-session", new HttpError(504, "secret")).ctx);
   assert.deepEqual(forbidden.blockers, ["STAFF_SESSION_REQUIRED"]);
+  assert.match(forbidden.nextStep, /predator_reader, operator, or admin role for reads/);
+  assert.match(forbidden.nextStep, /Drive execution remains G0 blocked/);
+  assert.equal(forbidden.missionAdmitted, false);
   assert.deepEqual(unavailable.blockers, ["CLOUD_ROUTE_UNAVAILABLE"]);
   assert.doesNotMatch(JSON.stringify([forbidden, unavailable]), /secret/);
+});
+
+test("aether mcp doctor drive explains the reader role without claiming control", async () => {
+  const { ctx, calls } = context("staff-session", new HttpError(403, "secret"));
+  const chunks: string[] = [];
+  const out = { write: (value: string) => (chunks.push(value), true) } as unknown as Writable;
+  assert.equal(await cmdMcp(ctx, ["doctor", "drive"], { out }), 1);
+  assert.deepEqual(calls, [PREDATOR_DRIVE_DIAGNOSE_PATH]);
+  const report = JSON.parse(chunks.join("")) as Record<string, unknown>;
+  assert.match(String(report["nextStep"]), /predator_reader, operator, or admin role for reads/);
+  assert.match(String(report["nextStep"]), /Drive execution remains G0 blocked/);
+  assert.equal(report["missionAdmitted"], false);
+  assert.equal(report["laneId"], null);
+  assert.doesNotMatch(chunks.join(""), /secret/);
 });
 
 test("aether mcp doctor drive emits a typed blocked report", async () => {

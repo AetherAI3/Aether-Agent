@@ -122,7 +122,7 @@ export async function diagnosePredatorDrive(ctx: AppContext): Promise<DriveReadi
       "CLOUD_ROUTE_ERROR",
       [reason],
       reason === "STAFF_SESSION_REQUIRED"
-        ? "Cloud refused this identity. Use a bound staff session with operator role."
+        ? "Cloud refused this identity. Use a bound staff session with a linked predator_reader, operator, or admin role for reads. Drive execution remains G0 blocked."
         : "The Cloud Drive diagnosis route is unavailable; check the API deployment and VPS2 health.",
     );
   }
