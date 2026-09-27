@@ -9,7 +9,7 @@
 // be ignored. The CF-flush preamble (`:<4096 spaces>`) and `ping` heartbeat are
 // handled here (comment lines skipped; ping surfaced as a typed liveness frame).
 
-import { StreamEventTooLargeError } from "./errors.js";
+import { StreamEventTooLargeError, StreamIncompleteError } from "./errors.js";
 
 /** One event may contain model text, but never an unbounded delimiter-free body. */
 export const MAX_SSE_EVENT_BYTES = 1_048_576;
@@ -349,8 +349,15 @@ export async function* decodeSse(
       throw new StreamEventTooLargeError(MAX_SSE_EVENT_BYTES);
     }
   }
-  const tail = parseEvent(buf);
-  if (tail) yield tail;
+  // SSE dispatches an event only after a blank-line delimiter. A connection
+  // that closes after `data: {"type":"done"}` has not delivered a terminal
+  // frame: accepting that tail would turn a truncated response into success.
+  // A trailing comment/whitespace is harmless, but any unfinished data line
+  // leaves the turn uncertain (and lets dev-session consumers reconnect).
+  buf = (buf + td.decode()).replace(/\r\n/g, "\n");
+  if (buf.split("\n").some((line) => line.startsWith("data:"))) {
+    throw new StreamIncompleteError();
+  }
 }
 
 function numOrUndef(v: unknown): number | undefined {

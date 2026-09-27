@@ -5,8 +5,9 @@ import {
   decodeSse,
   normalizeFrame,
   parseEvent,
+  type StreamFrame,
 } from "../src/core/stream.js";
-import { StreamEventTooLargeError } from "../src/core/errors.js";
+import { StreamEventTooLargeError, StreamIncompleteError } from "../src/core/errors.js";
 
 test("normalizeFrame done maps token fields and carries no signature", () => {
   const f = normalizeFrame({
@@ -110,6 +111,36 @@ test("decodeSse handles a frame split across chunks", async () => {
   const frames = [];
   for await (const f of decodeSse(bytes())) frames.push(f);
   assert.deepEqual(frames, [{ type: "delta", text: "split" }]);
+});
+
+test("decodeSse refuses an undelimited terminal frame at EOF", async () => {
+  async function* bytes(): AsyncGenerator<Uint8Array> {
+    const enc = new TextEncoder();
+    yield enc.encode('data: {"type":"delta","text":"partial"}\n\n');
+    yield enc.encode('data: {"type":"done","uvt":1,"cents":0}');
+  }
+  const frames: StreamFrame[] = [];
+  await assert.rejects(async () => {
+    for await (const frame of decodeSse(bytes())) frames.push(frame);
+  }, StreamIncompleteError);
+  assert.deepEqual(frames, [{ type: "delta", text: "partial" }]);
+});
+
+test("decodeSse refuses a truncated data frame but ignores a trailing comment", async () => {
+  const enc = new TextEncoder();
+  async function* truncated(): AsyncGenerator<Uint8Array> {
+    yield enc.encode('data: {"type":"done"');
+  }
+  await assert.rejects(async () => {
+    for await (const _frame of decodeSse(truncated())) { /* drain */ }
+  }, StreamIncompleteError);
+
+  async function* comment(): AsyncGenerator<Uint8Array> {
+    yield enc.encode(': keepalive');
+  }
+  const frames = [];
+  for await (const frame of decodeSse(comment())) frames.push(frame);
+  assert.deepEqual(frames, []);
 });
 
 test("decodeSse rejects an oversized delimiter-free event and closes its source", async () => {

@@ -304,6 +304,23 @@ test("EOF without a terminal frame preserves partial output and exits nonzero as
   }
 });
 
+test("an undelimited done at EOF cannot make a headless chat turn succeed", async () => {
+  resetRegistry();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(
+    'data: {"type":"delta","text":"partial answer"}\n\ndata: {"type":"done","uvt":1,"cents":0}',
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  )) as typeof globalThis.fetch;
+  try {
+    const result = await captureWrites(() => cmdChat(cloudContext(), "ship this"));
+    assert.equal(result.value, 1);
+    assert.equal(result.stdout, "partial answer");
+    assert.match(result.stderr, /connection ended before the server finished/i);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("a successful stream returns its stable succeeded outcome", async () => {
   resetRegistry();
   const realFetch = globalThis.fetch;
