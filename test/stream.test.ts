@@ -31,16 +31,25 @@ test("normalizeFrame error uses contract keys msg/error_code/ref_id", () => {
   assert.deepEqual(f, { type: "error", msg: "boom", errorCode: "E42", refId: "r1" });
 });
 
-test("normalizeFrame takes the first nonblank error text and never exposes reason", () => {
+test("normalizeFrame accepts canonical and fixed legacy public error text only", () => {
   const base = { type: "error", reason: "internal detail" };
-  assert.deepEqual(normalizeFrame({ ...base, msg: "primary", error: "fallback" }), {
+  assert.deepEqual(normalizeFrame({ ...base, msg: "primary", error: "private provider exception" }), {
     type: "error", msg: "primary", errorCode: undefined, refId: undefined,
   });
-  assert.deepEqual(normalizeFrame({ ...base, msg: "  ", message: "alternate", error: "fallback" }), {
+  assert.deepEqual(normalizeFrame({ ...base, msg: "  ", message: "alternate", error: "private provider exception" }), {
     type: "error", msg: "alternate", errorCode: undefined, refId: undefined,
   });
-  assert.deepEqual(normalizeFrame({ ...base, msg: "", error: "server failure" }), {
-    type: "error", msg: "server failure", errorCode: undefined, refId: undefined,
+  assert.deepEqual(normalizeFrame({ ...base, msg: "", error: "The media studio agent hit an error." }), {
+    type: "error", msg: "The media studio agent hit an error.", errorCode: undefined, refId: undefined,
+  });
+  assert.deepEqual(normalizeFrame({ ...base, error: "generation registry did not reach a terminal state" }), {
+    type: "error", msg: "generation registry did not reach a terminal state", errorCode: undefined, refId: undefined,
+  });
+  assert.deepEqual(normalizeFrame({ ...base, error: "private provider exception: token=SECRET" }), {
+    type: "error", msg: "", errorCode: undefined, refId: undefined,
+  });
+  assert.deepEqual(normalizeFrame({ ...base, error: "The media studio agent hit an error. " }), {
+    type: "error", msg: "", errorCode: undefined, refId: undefined,
   });
   assert.deepEqual(normalizeFrame({ ...base, error: { secret: true } }), {
     type: "error", msg: "", errorCode: undefined, refId: undefined,
