@@ -2,98 +2,64 @@
 
 # Aether Agent
 
-**A terminal coding agent built around verifiable results and portable work.**
+**Aether Agent is an open-source terminal coding agent that edits your repository, runs your chosen checks, and reports verified results through hosted models or local Ollama.**
+
+<img width="847" alt="Aether Agent cyan-to-violet wordmark on a dark textured background" src="assets/aether-agent-hero.png" />
 
 [![CI](https://github.com/AetherAI3/aether-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/AetherAI3/aether-agent/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/aether-agents?label=npm)](https://www.npmjs.com/package/aether-agents)
+[![PyPI](https://img.shields.io/pypi/v/aether-agent?label=PyPI&color=3775a9)](https://pypi.org/project/aether-agent/)
 [![Node 24+](https://img.shields.io/badge/node-24%2B-14b8a6)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-06b6d4)](LICENSE)
 
-[Install](#install-the-right-version) · [Hosted or Ollama](#hosted-or-ollama) · [Workflow](#a-verified-coding-workflow) · [Handoffs](#continue-on-another-model-or-machine) · [Commands](#essential-commands) · [Security](#security-and-permissions) · [Develop](#development)
+[Quickstart](#quickstart) · [Choose a model route](#choose-a-model-route) · [Why Aether](#why-aether-agent) · [Commands](#core-commands) · [Security](#security-and-local-authority) · [Docs](#documentation-and-support)
 
 </div>
 
-Aether Agent is an open-source TypeScript CLI for coding, testing, review, and
-handoff. Use Aether-hosted models when the required local-authority service
-capability is available, or run through Ollama without an Aether account. The same
-local host owns workspace tools, permissions, sessions, review, and verification.
+<!-- SOURCE-0.3-WORKFLOWS:START -->
 
-## Install the right version
+> **Requires 0.3.2 or newer.** Check the installed CLI with `aether --version`.
 
-Two surfaces exist at once: the package published to npm, and the `main` source
-build in this repository. Publishing is an owner-controlled operation, so source
-presence is not registry availability, and the two can hold different versions.
+## Quickstart
 
-| Install | Version | What you get |
-|---|---:|---|
-| npm `latest` | [![npm latest](https://img.shields.io/npm/v/aether-agents?label=&color=14b8a6)](https://www.npmjs.com/package/aether-agents) | Whatever that badge resolves to right now — it tracks the live `latest` dist-tag. |
-| `main` source build | **0.3.1** | The 0.3 coding, Ollama, session, review, and ship workflows below. |
-
-> **Confirm your version before following a version-labelled section.** Run
-> `npm view aether-agents version` for the live `latest` dist-tag, and
-> `aether --version` for what you actually have installed. Sections marked
-> “source 0.3.0” require **0.3.0 or newer**; if your installed version is lower,
-> use the source build below. The
-> [release record](docs/releases/2026-08-22.md) and
-> [operator packet](docs/releases/OPERATOR-PACKET-v0.3.0.md) preserve the evidence.
-
-Install from npm:
+From the repository you want Aether to work on:
 
 ```bash
 npm install -g aether-agents@latest --ignore-scripts
-aether --version
-```
-
-If that reports **0.3.0 or newer**, every section below applies. If it reports an
-earlier version, npm has not caught up with `main` yet — sign in, inspect models,
-and use chat, then build from source for the rest:
-
-```bash
 aether auth login
-aether models
-aether chat "hello"
-```
-
-<!-- SOURCE-0.3-WORKFLOWS:START -->
-
-> **Requires 0.3.1 or newer**, from npm or from the source build below.
-
-Node.js 24 or newer is required:
-
-```bash
-git clone https://github.com/AetherAI3/aether-agent.git
-cd aether-agent
-npm ci --ignore-scripts
-npm run build
-npm link
-```
-
-## Hosted or Ollama
-
-Both routes use the same local host for workspace confinement, permission prompts,
-tool execution, session records, review, and final verification. Only the model
-transport changes.
-
-### Hosted Aether
-
-```bash
-aether auth login
-aether models
 aether agent --test-cmd "npm test" "fix the failing test"
 ```
 
-Hosted coding is capability- and account-dependent. The task and context you supply
-are sent to the Aether API, but tools and verification execute in your checkout. If
-the service cannot provide that local-authority protocol, the CLI refuses the run
-instead of silently moving tool execution to the server.
+Prefer Python tooling? `pipx install aether-agent` installs the same CLI and forwards
+every command to it, so `aether-agent code "..."` and `aether code "..."` do the same
+work. See [`packages/pypi-cli`](packages/pypi-cli/README.md).
 
-<!-- MODEL-CATALOGUE:START -->
-A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-catalogue/index.html), [JSON](docs/model-catalogue/catalogue.json), and [Markdown](docs/generated/model-catalogue.md). It was generated at `2026-08-23T00:00:00.000Z` from Cloud public projection `model-catalogue-v1` with verified digest `sha256:80ba3ba1144d301e2cca407ceced74cb2b371f1da6e3982b87305ff12a3d4712`. Listed availability is not an account entitlement; use `aether models` while signed in.
-<!-- MODEL-CATALOGUE:END -->
+The third command gives Aether one task and one verification command. The local
+host runs `npm test`; its real exit code determines whether the result is verified.
 
-### Ollama
+## Choose a model route
 
-Install [Ollama](https://ollama.com/), start its app or server, then select a model:
+Both routes keep workspace tools, permission decisions, session records, and
+verification on the CLI host. The difference is where model inference runs.
+
+### Hosted Aether models
+
+Sign in, then inspect the models available to your account:
+
+```bash
+aether auth login
+aether models
+```
+
+Hosted runs send the task and context you provide to the Aether API. Repository
+tools and verification still execute in your checkout. Hosted coding is account-
+and capability-dependent; if the service cannot provide the required local-
+authority protocol, the CLI refuses the run instead of silently moving tool
+execution to the server.
+
+### Local Ollama
+
+Install [Ollama](https://ollama.com/), start it, then prepare and select a model:
 
 ```bash
 aether setup --local
@@ -102,82 +68,59 @@ aether local use qwen2.5-coder:7b --yes
 aether agent --local --test-cmd "npm test" "fix the failing test"
 ```
 
-This route requires no Aether account. By default it talks to Ollama on
-`http://localhost:11434`; if you configure `OLLAMA_HOST`, requests go to that
-endpoint. Pulls and configuration changes show a plan and require confirmation.
+This route requires no Aether account. With Ollama on the default
+`http://localhost:11434` endpoint, inference can stay on the machine after Ollama
+and the model are downloaded. If `OLLAMA_HOST` points elsewhere, prompts go to
+that configured endpoint. Network-capable tools remain separate, permissioned
+actions.
 
 ## Why Aether Agent
 
-- **Evidence, not confidence.** The host reruns the command supplied through
-  `--test-cmd`; its real exit code determines the verified result. Without one, the
-  run is recorded as unverified.
-- **One workflow across model routes.** Switching between hosted and Ollama changes
-  the brain, not the host that owns tools, permissions, sessions, and verification.
-- **Work that can move.** Export a bounded continuation record and resume it in
-  another checkout, on another machine, or with another model.
-- **Review before publication.** Inspect the measured repository state and its
-  verification status before `aether ship` proposes a push and pull request.
+- **Terminal-first coding.** Start from the repository and keep the task, diff,
+  tests, and review in one command-line workflow.
+- **Local and offline-capable inference.** Use a local Ollama endpoint without an
+  Aether account; after installation and model download, model inference does not
+  require the hosted Aether service.
+- **Hosted frontier-model access.** Use the live model set exposed to your Aether
+  account when you want hosted inference.
+- **Repository-aware tools.** File, search, shell, Git, session, and review tools
+  operate against the selected workspace rather than an unbounded machine view.
+- **Verification loops.** Supply `--test-cmd` so completion is tied to a real
+  command and exit code; later repository changes make that evidence stale.
+- **MCP support.** Inspect and diagnose configured MCP servers from the same CLI,
+  without bypassing tool permissions.
+- **Operator-controlled execution.** Writes, shell commands, network access, Git
+  operations, and publication stay behind host-side authority checks.
 
-## A verified coding workflow
+## Model stack
 
-```mermaid
-flowchart LR
-    A[Task] --> B{Model route}
-    B -->|Hosted| C[Aether model]
-    B -->|Ollama| D[Configured Ollama model]
-    C --> E[Local host and permission gate]
-    D --> E
-    E --> F[Tools in your checkout]
-    F --> G[Your test command]
-    G --> H[Verified or unverified result]
-```
+The dated public snapshot marks Aether Neo, DeepSeek V4, GPT-5.4/5.5/5.6, and
+Claude 4.5/4.8/5 text entries as available at the catalogue level. That is not an
+account entitlement: **`aether models` is the authoritative live result for the
+signed-in account.** Kimi K2.6/K3 and Gemma 4 are catalogued but marked
+**unavailable** in the current snapshot, so they are not presented here as usable.
 
-```bash
-aether agent --test-cmd "npm test" "fix the failing test"
-aether review diff
-```
+Local Ollama availability is independent of that hosted catalogue and depends on
+the models installed at the configured Ollama endpoint.
 
-The verification record is bound to the repository state. If the tree changes after
-verification, review and ship report the evidence as stale instead of reusing an old
-green result. `aether ship` prints the branch, commit, destination, and pull-request
-plan before acting; `--yes` alone does not grant publication authority.
+<!-- MODEL-CATALOGUE:START -->
+A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-catalogue/index.html), [JSON](docs/model-catalogue/catalogue.json), and [Markdown](docs/generated/model-catalogue.md). It was generated at `2026-08-23T00:00:00.000Z` from Cloud public projection `model-catalogue-v1` with verified digest `sha256:80ba3ba1144d301e2cca407ceced74cb2b371f1da6e3982b87305ff12a3d4712`. Listed availability is not an account entitlement; use `aether models` while signed in.
+<!-- MODEL-CATALOGUE:END -->
 
-## Continue on another model or machine
-
-```bash
-aether resume export --out aether-handoff.json
-aether agent --resume aether-handoff.json --model <model-id>
-```
-
-A handoff is a bounded continuation record, not a transcript or repository copy. It
-can include the task, prior model, verification result and command, repository
-identity, touched paths, and summarized highlights. It omits file contents, shell
-commands, absolute paths, and the full conversation. Review it before sharing:
-bounded does not mean secret-free.
-
-## In the 0.3 source line
-
-Coding runs, hosted and Ollama routing, verified completion, project sessions,
-portable handoffs, review and ship, skills and capability reporting, doctor and
-support bundles, MCP, workflows, previews, and media commands.
-
-Detailed inventories live in the generated
-[command reference](docs/generated/commands.md) and
-[model catalogue](docs/generated/model-catalogue.md). Hosted model visibility and
-entitlement remain account- and service-dependent; `aether models` is authoritative
-for the signed-in account.
-
-## Essential commands
+## Core commands
 
 | Command | Purpose |
 |---|---|
-| `aether agent [task]` | Start the coding agent or its REPL. |
-| `aether agent --local [task]` | Use the configured Ollama endpoint. |
-| `aether models` | Show models visible to the signed-in account. |
-| `aether resume` | Replay a session or export a portable handoff. |
-| `aether review` | Inspect changes and current verification status. |
-| `aether ship` | Preview and approve branch and pull-request publication. |
+| `aether auth login` | Sign in for hosted model access. |
+| `aether agent [task]` | Run the coding agent or open its REPL. |
+| `aether agent --local [task]` | Run through the configured Ollama endpoint. |
+| `aether models` | Show the hosted models visible to the signed-in account. |
+| `aether local doctor\|models\|use\|pull` | Diagnose and manage local Ollama. |
+| `aether sessions` | Inspect and continue project-scoped sessions. |
+| `aether review` | Inspect changes and current verification evidence. |
+| `aether mcp` | List, diagnose, or repair configured MCP servers. |
 | `aether doctor` | Diagnose the configured environment. |
+| `aether ship` | Preview and approve branch and pull-request publication. |
 
 Use `aether help <command>` or the generated
 [command reference](docs/generated/commands.md) for flags, slash commands,
@@ -185,21 +128,65 @@ environment variables, and exit codes.
 
 <!-- SOURCE-0.3-WORKFLOWS:END -->
 
-## Security and permissions
+## Security and local authority
 
 - File tools are confined to the selected workspace. Write, shell, Git, network,
-  and publishing actions pass through host permission gates.
-- Hosted tasks and supplied context are sent to the configured Aether API. The
-  local-authority coding route refuses incompatible server execution.
-- Ollama requests are sent to the configured Ollama endpoint. Network-capable tools
-  remain separate, permissioned actions.
-- Credentials and session records live outside the repository. Handoffs omit the
-  transcript and repository contents, but should still be reviewed before sharing.
+  and publishing actions pass through host-side permission gates.
+- Hosted tasks and supplied context are sent to the configured Aether API, while
+  repository tools and checks run locally. The local-authority coding route fails
+  closed when the server cannot honor that contract.
+- Ollama prompts go to the configured Ollama endpoint. The default is loopback;
+  offline use also requires avoiding separately permissioned network tools.
+- Credentials and session records live outside the repository. Portable handoffs
+  omit transcripts, file contents, shell commands, and absolute paths, but should
+  still be reviewed before sharing.
+- `aether ship` prints its branch, commit, destination, and pull-request plan
+  before acting. `--yes` alone does not grant publication authority.
 
-Read [SECURITY.md](SECURITY.md) for vulnerability reporting and supported versions.
-Protocol and architecture contracts live under [`docs/`](docs/). Other Aether web
-and desktop products are separate surfaces; this CLI does not claim cross-product
-session continuation.
+Read [SECURITY.md](SECURITY.md) for supported versions, the security boundary,
+and private vulnerability reporting.
+
+## Documentation and support
+
+- [Generated command reference](docs/generated/commands.md) and
+  [model catalogue](docs/generated/model-catalogue.md)
+- [Protocol and architecture documentation](docs/) and
+  [production operations](docs/PRODUCTION_OPERATIONS.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [GitHub issues](https://github.com/AetherAI3/aether-agent/issues) for bugs and
+  feature requests; use the private path in [SECURITY.md](SECURITY.md) for
+  vulnerabilities
+- [Apache-2.0 license](LICENSE) and [Aether name/service notice](NOTICE.md)
+
+Other Aether web and desktop products are separate surfaces; this CLI does not
+claim cross-product session continuation.
+
+## Release and source notes
+
+The repository and published package are versioned independently. Use the live
+badge or `npm view aether-agents version` for the npm `latest` dist-tag, and
+`aether --version` for the installed CLI.
+
+| Install | Version | What it represents |
+|---|---:|---|
+| npm `latest` | [![npm latest](https://img.shields.io/npm/v/aether-agents?label=&color=14b8a6)](https://www.npmjs.com/package/aether-agents) | Published package; the badge resolves the live dist-tag. |
+| PyPI `aether-agent` | [![PyPI latest](https://img.shields.io/pypi/v/aether-agent?label=&color=3775a9)](https://pypi.org/project/aether-agent/) | Launcher that installs and runs the npm CLI; it fetches the npm `latest` dist-tag unless you pin one. |
+| `main` source build | **0.3.2** | Current repository source: the 0.3 workflow plus every 0.3.1 maintenance fix. |
+
+The [release record](docs/releases/2026-08-22.md),
+[release notes](RELEASE_NOTES.md), and
+[operator packet](docs/releases/OPERATOR-PACKET-v0.3.0.md) preserve detailed
+release and package evidence.
+
+For a source build, Node.js 24 or newer is required:
+
+```bash
+git clone https://github.com/AetherAI3/aether-agent.git
+cd aether-agent
+npm ci --ignore-scripts
+npm run build
+npm link
+```
 
 ## Development
 
@@ -214,9 +201,8 @@ npm run release:truth
 npm pack --dry-run
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Security issues
-follow [SECURITY.md](SECURITY.md), not the public issue tracker. The package has no
-runtime dependencies; TypeScript and Node types are development-only.
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. The package
+has no runtime dependencies; TypeScript and Node types are development-only.
 
 Apache-2.0 — use it, fork it, and ship it. The license covers the code, not the
 Aether name or hosted service ([LICENSE](LICENSE) · [NOTICE.md](NOTICE.md)).

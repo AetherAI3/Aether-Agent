@@ -41,7 +41,8 @@ const sf = (v: unknown): string | undefined => (typeof v === "string" ? v : unde
 
 export const MINIMUM_NODE_MAJOR = 24;
 
-/** Make an unsupported runtime actionable before it reaches a later syntax or API failure. */
+/** A preflight that turns an engine mismatch into a recovery command instead
+ * of letting an older runtime fail later with an opaque syntax/API error. */
 export function unsupportedNodeMessage(version: string): string | null {
   const majorText = version.trim().replace(/^v/i, "").split(".", 1)[0] ?? "";
   const major = Number.parseInt(majorText, 10);

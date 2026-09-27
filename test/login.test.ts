@@ -193,7 +193,7 @@ test("cmdLogin (device-code flow): a denied authorization still gets the styled 
   }
 });
 
-test("cmdLogin reports an unavailable browser and continues with the displayed device URL", async () => {
+test("cmdLogin reports an unavailable browser and continues with the printed device URL", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (url: unknown) => {
     const value = String(url);

@@ -1,0 +1,161 @@
+name: Publish PyPI launcher
+
+# Ships packages/pypi-cli to PyPI as `aether-agent`: the pip/pipx front door that installs
+# and runs the npm CLI. Separate from release.yml (which publishes the npm package itself)
+# -- own ecosystem, own artifact, own job. A release publishes it from that release's own
+# immutable tag; the first publish is dispatched from main, because no tag cut before the
+# launcher existed contains packages/pypi-cli at all.
+#
+# Authentication is PyPI Trusted Publishing (OIDC): no token, nothing to rotate or leak. The
+# `pypi-production` environment scopes which GitHub identity PyPI will accept; its Trusted
+# Publisher must be registered with owner AetherAI3, repo aether-agent, workflow
+# publish-pypi.yml, and environment name "pypi-production" (Manage project -> Publishing on
+# pypi.org).
+#
+# workflow_dispatch is there to rehearse and to repair: it defaults to a dry run, and it
+# publishes only when dry_run is explicitly false.
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Ref to build -- a release tag, or main for the first publish
+        required: false
+        default: main
+        type: string
+      dry_run:
+        description: Build and verify without publishing
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-production-${{ github.event.release.tag_name || inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: pypi-production
+    permissions:
+      contents: read
+      id-token: write # PyPI Trusted Publishing (OIDC)
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.ref }}
+    steps:
+      - name: Checkout the release tag, or main for a first publish
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release commit belongs to main
+        shell: bash
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor HEAD origin/main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # The floor declared by requires-python, so the published wheel is proved on the
+          # oldest interpreter it claims to support.
+          python-version: '3.10'
+
+      # The launcher's version must always agree with package.json, and with the tag when
+      # the ref is one. The first publish is cut from main because no existing tag contains
+      # packages/pypi-cli at all, so the tag check applies only to a ref that is a tag.
+      - name: Verify the launcher and the npm package agree
+        id: version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node packages/sync-version.mjs --check
+          version="$(node -p "require('./package.json').version")"
+          if [ "$RELEASE_TAG" = "main" ]; then
+            test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+            echo "building main at $(git rev-parse HEAD) as version ${version}"
+          else
+            test "$version" = "${RELEASE_TAG#v}"
+            echo "ref ${RELEASE_TAG} agrees with package.json ${version}"
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse runtime dependencies
+        working-directory: packages/pypi-cli
+        run: grep -qx 'dependencies = \[\]' pyproject.toml
+
+      - name: Unit tests
+        working-directory: packages/pypi-cli
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
+      - name: Type check
+        working-directory: packages/pypi-cli
+        run: |
+          python -m pip install --disable-pip-version-check mypy==2.3.1
+          python -m mypy src
+
+      - name: Build sdist and wheel
+        shell: bash
+        working-directory: packages/pypi-cli
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --upgrade pip build==1.4.0 twine==6.2.0
+          python -m build
+          python -m twine check --strict dist/*
+          version="${{ steps.version.outputs.version }}"
+          test -f "dist/aether_agent-${version}.tar.gz"
+          test -f "dist/aether_agent-${version}-py3-none-any.whl"
+          sha256sum dist/*
+
+      - name: Smoke-test the exact wheel
+        shell: bash
+        working-directory: packages/pypi-cli
+        run: |
+          set -Eeuo pipefail
+          python -m venv "$RUNNER_TEMP/launcher"
+          "$RUNNER_TEMP/launcher/bin/pip" install --quiet \
+            "dist/aether_agent-${{ steps.version.outputs.version }}-py3-none-any.whl"
+          test "$("$RUNNER_TEMP/launcher/bin/aether-agent" self --version)" \
+            = "${{ steps.version.outputs.version }}"
+          # doctor exits 1 until the npm CLI is present, which is the correct answer on a
+          # clean runner; what is being proved here is that the console script runs at all.
+          "$RUNNER_TEMP/launcher/bin/aether-agent" self doctor || true
+          "$RUNNER_TEMP/launcher/bin/aether-agent" self --help > /dev/null
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-release-${{ env.RELEASE_TAG }}
+          path: packages/pypi-cli/dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish to PyPI
+        if: ${{ github.event_name == 'release' || !inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: packages/pypi-cli/dist
+
+      - name: Dry run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "Dry run only. Built aether-agent ${{ steps.version.outputs.version }}."
+          echo "Re-run with dry_run=false to publish."

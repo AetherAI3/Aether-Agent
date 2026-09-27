@@ -310,6 +310,9 @@ export function renderManifestHelp(surface: "shell" | "slash", target = ""): str
       target,
       footer: [
         "Global flags: --model <id> --agent <id> --cwd <dir> --json --audit -y/--yes -h/--help -v/--version",
+        "First run: aether auth login -> aether auth status -> aether models",
+        'Hosted task: aether agent "explain this repository"',
+        "Local setup: aether setup --local",
         "Unknown command text remains a bare prompt.",
       ],
     });

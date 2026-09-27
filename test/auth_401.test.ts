@@ -307,7 +307,7 @@ test("renderAuthBox: a 403 from /models also renders 'Session expired' (not sile
   }
 });
 
-test("renderAuthBox: a genuine network outage (no HttpError) still falls back to the silent 'Authenticated' panel", async () => {
+test("renderAuthBox: a genuine network outage reports a stored but unverified credential", async () => {
   const real = globalThis.fetch;
   const tokens = new StaticTokenStore("aek_deadtoken1234");
   globalThis.fetch = (async () => {
@@ -316,7 +316,10 @@ test("renderAuthBox: a genuine network outage (no HttpError) still falls back to
   try {
     const api = new ApiClient("https://api.example", tokens);
     const panel = stripAnsi(await renderAuthBox(fakeCtx(api, tokens)));
-    assert.match(panel, /Authenticated/, "an unreachable server is not a rejected session");
+    assert.match(panel, /Verification unavailable/);
+    assert.match(panel, /Credential stored, but the server could not verify it/);
+    assert.match(panel, /aether doctor --live/);
+    assert.doesNotMatch(panel, /Authenticated/, "an unreachable server must not be reported as verified");
     assert.doesNotMatch(panel, /Session expired/);
   } finally {
     globalThis.fetch = real;
@@ -427,6 +430,27 @@ test("cmdAuth bare `aether auth` (no subcommand): same loading line before the /
     const code = await done;
     assert.equal(code, 0);
     assert.ok(cap.writes.some((w) => w.includes(PANEL_MARKER)));
+  } finally {
+    globalThis.fetch = real;
+    cap.restore();
+  }
+});
+
+test("cmdAuth status exits nonzero when signed out or rejected, and zero only after live verification", async () => {
+  const cases = [
+    { token: "", response: null, expected: 1 },
+    { token: "aek_rejected", response: jsonRes(401, { detail: "expired" }), expected: 1 },
+    { token: "aek_verified", response: jsonRes(200, { tier: "pro", default: "aether-large" }), expected: 0 },
+  ] as const;
+  const real = globalThis.fetch;
+  const cap = captureStdout();
+  try {
+    for (const item of cases) {
+      const tokens = new StaticTokenStore(item.token);
+      if (item.response) stubFetch(() => item.response, []);
+      const api = new ApiClient("https://api.example", tokens);
+      assert.equal(await cmdAuth(fakeCtx(api, tokens), ["status"], {} as LoginOpts), item.expected);
+    }
   } finally {
     globalThis.fetch = real;
     cap.restore();

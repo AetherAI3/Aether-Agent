@@ -226,7 +226,11 @@ export function renderCommandReference(commands: readonly CommandManifestEntry[]
     "",
     "Global shell flags accepted by the manifest:",
     "",
-    [...new Set(visible.filter((entry) => entry.surface === "shell").flatMap((entry) => entry.acceptedGlobalFlags))].sort().map((flag) => inlineCode(`--${flag}`)).join(", "),
+    [...new Set(visible.filter((entry) => entry.surface === "shell").flatMap((entry) => entry.acceptedGlobalFlags))]
+      .filter((flag) => flag !== "swarm")
+      .sort()
+      .map((flag) => inlineCode(`--${flag}`))
+      .join(", "),
     "",
   ];
   for (const surface of ["shell", "slash"] as const satisfies readonly CommandSurface[]) {

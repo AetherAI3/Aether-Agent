@@ -29,6 +29,23 @@ export interface AetherConfig {
   /** Which brain runs a turn. 'auto' is local-first: cloud when authed, else
    * local Ollama. Overridden per-process by the AETHER_BACKEND env var. */
   backend: BackendPref;
+  /** Dev-only persistent device runtime (SC-DEVICE-01). Absent or
+   * `{enabled:false}` keeps the daemon fully OFF — it refuses to run unless
+   * this is explicitly true or the env override AETHER_DEVICE_RUNTIME=1 is set.
+   * Outbound-only telemetry/command service; never listens on a network port. */
+  deviceRuntime?: DeviceRuntimeConfig;
+}
+
+/** Operator opt-in for the persistent device runtime. Default-off by omission. */
+export interface DeviceRuntimeConfig {
+  /** The one switch that lets the daemon run at all. Absent or false keeps it
+   * off; the AETHER_DEVICE_RUNTIME=1 env var is the other opt-in. */
+  enabled?: boolean;
+  /** Display-only device name sent as observation `display_name`; never identity. */
+  displayName?: string;
+  /** Declared lane capacity this device offers, published as `lanes_reserved`
+   * so the Cloud can see headroom. Omitted means "only what is running". */
+  lanes?: number;
 }
 
 // Wire DTO from GET /models (snake_case mirrors the server catalog). A single

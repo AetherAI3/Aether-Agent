@@ -1,3 +1,19 @@
+# Aether Agent v0.3.2 — one line again
+
+**September 3, 2026**
+
+- **The v0.3.1 fixes are on `main`.** v0.3.1 was released from a branch that was
+  never merged, so `main` moved forward without its browser-launcher
+  verification and browser-login recovery path — while still declaring `0.3.0`,
+  a version older than the one on the registry. That line is merged, and the
+  declared version leads the published one again.
+- **Browser sign-in reports what actually happened.** Opening the sign-in page
+  now waits for the operating system launcher to start or fail, so a machine
+  with no browser says so instead of reporting a launch it only attempted.
+- **No new surface.** This patch adds no command, flag, or contract of its own.
+
+---
+
 # Aether Agent v0.3.1 — first-run recovery
 
 **August 28, 2026**

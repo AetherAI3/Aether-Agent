@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+# The pip/pipx front door to the Aether Agent CLI. Aether Agent itself is the Node package
+# `aether-agents` on npm; this package installs and launches it. The version below tracks
+# main's package.json so the two halves of the repository release together -- it is not the
+# version installed, which is the npm `latest` dist-tag unless pinned.
+# packages/sync-version.mjs copies package.json's version here, and tests/test_packaging.py
+# fails the build if they drift.
+[project]
+name = "aether-agent"
+version = "0.3.2"
+description = "Install and run Aether Agent, the open-source terminal coding agent, from pip or pipx."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE.md"]
+authors = [{ name = "Brandon Barrante (Aether AI)", email = "aetherai@aethersystems.net" }]
+keywords = [
+  "coding-agent",
+  "ai-coding-assistant",
+  "developer-tools",
+  "terminal-agent",
+  "local-first",
+  "local-llm",
+  "ollama",
+  "mcp",
+  "code-review",
+  "software-engineering",
+  "cli",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Utilities",
+]
+# No runtime dependencies, deliberately: this shells out to node and npm, which the agent
+# requires anyway.
+dependencies = []
+
+[project.urls]
+Homepage = "https://aethersystems.net"
+Repository = "https://github.com/AetherAI3/aether-agent"
+Issues = "https://github.com/AetherAI3/aether-agent/issues"
+Documentation = "https://github.com/AetherAI3/aether-agent/blob/main/COMMANDS.md"
+
+[project.scripts]
+aether-agent = "aether_agent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aether_agent"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE", "NOTICE.md", "pyproject.toml"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["aether_agent"]
+mypy_path = "src"

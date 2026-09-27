@@ -7,7 +7,14 @@
 
 import { homedir } from "node:os";
 
-export const SENSITIVE_KEY = /token|secret|password|authorization|api[_-]?key|private[_-]?key|credential|pat/i;
+// `[_-]key` (rather than only the enumerated `api_key` / `private_key`) so a
+// secret named for what it unlocks is still classified as one. SC-DEVICE-01's
+// own `device_command_key` matched none of the enumerated spellings, which is
+// exactly the failure mode a name-by-name allowlist has: the newest secret is
+// always the one it does not know about. Over-matching a `cache_key` costs
+// nothing — the detectors that consult this only fire on 32+ char hex values
+// and on environment variables, both already opaque.
+export const SENSITIVE_KEY = /token|secret|password|authorization|[_-]key|api[_-]?key|private[_-]?key|credential|pat/i;
 
 /** Inline redaction for short event fields — behavior owned by session_log's
  * contract: bearer/key-value scrubbing plus a hard 512-char cap. */

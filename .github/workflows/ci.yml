@@ -92,3 +92,56 @@ jobs:
           path: aether-agents.cdx.json
           if-no-files-found: error
           retention-days: 90
+
+  pypi-launcher:
+    name: PyPI launcher
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # The floor requires-python declares, so the published wheel is proved on the
+          # oldest interpreter it claims to support.
+          python-version: '3.10'
+
+      - name: Launcher version tracks package.json
+        run: node packages/sync-version.mjs --check
+
+      - name: Refuse runtime dependencies
+        working-directory: packages/pypi-cli
+        run: grep -qx 'dependencies = \[\]' pyproject.toml
+
+      - name: Unit tests
+        working-directory: packages/pypi-cli
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
+      - name: Type check
+        working-directory: packages/pypi-cli
+        run: |
+          python -m pip install --disable-pip-version-check mypy==2.3.1
+          python -m mypy src
+
+      - name: Build and smoke-test the wheel
+        working-directory: packages/pypi-cli
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --disable-pip-version-check build==1.4.0 twine==6.2.0
+          python -m build
+          python -m twine check --strict dist/*
+          python -m venv "$RUNNER_TEMP/launcher"
+          "$RUNNER_TEMP/launcher/bin/pip" install --quiet dist/*.whl
+          "$RUNNER_TEMP/launcher/bin/aether-agent" self --version
+          "$RUNNER_TEMP/launcher/bin/aether-agent" self --help > /dev/null

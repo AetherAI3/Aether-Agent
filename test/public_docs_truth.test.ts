@@ -43,6 +43,10 @@ test("README has durable assets and canonical public repository URLs", () => {
   assert.doesNotMatch(readme, /github\.com\/AetherAI3\/aether-agent-cli/i);
   assert.match(readme, /git clone https:\/\/github\.com\/AetherAI3\/aether-agent\.git/);
   assert.match(readme, /https:\/\/www\.npmjs\.com\/package\/aether-agents/);
+  const packageManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { files?: unknown };
+  assert.ok(Array.isArray(packageManifest.files));
+  assert.ok(packageManifest.files.includes("assets/aether-agent-hero.png"));
+  assert.ok(existsSync(join(root, "assets", "aether-agent-hero.png")));
 
   for (const match of readme.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
     const target = match[1]!;

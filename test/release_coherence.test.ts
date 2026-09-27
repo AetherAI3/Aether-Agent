@@ -59,14 +59,14 @@ const EXPECTED_HOSTED_WINDOWS_UNPACKED = 3_690_927;
 const EXPECTED_LOCAL_WINDOWS_UNPACKED = 3_690_927;
 const EXPECTED_LINUX_PACKED = 835_957;
 const EXPECTED_WINDOWS_PACKED = 836_234;
-const V031_PACKET = {
+const V032_PACKET = {
   "Package": "`aether-agents`",
-  "Proposed tag": "`v0.3.1`",
-  "Release line base": "`fb7ceb9c78fdacf84a864a07523185fb4387f531` (`v0.3.0`)",
-  "Candidate branch": "`codex/patch-release-031`",
-  "Archive evidence": "No release archive exists. The current local Windows `npm pack --dry-run --json --ignore-scripts` reported `aether-agents-0.3.1.tgz`, 837,371 packed bytes, 3,695,485 unpacked bytes, `shasum` `889864b707b5611eefa93461bde5f90757538731`, and integrity `sha512-wJjcMrxHQbdo7RfTciMD7evZJSt2wo1CNsrONNRI8w4zPeBILxNG+2/1WHaH7RVFeXz563gp1T4Bd0abpgTHqw==`; dry-run metadata is not a release checksum or provenance attestation.",
-  "Package manifest": "The same current local dry run reported 618 entries. Hosted exact-head package evidence remains required before release.",
-  "Provenance evidence": "Pending the trusted-publishing workflow — no v0.3.1 provenance attestation exists yet.",
+  "Proposed tag": "`v0.3.2`",
+  "Release line base": "`c4a16242ad117a499f91e3b531baa80f1a3ff0bd` (`v0.3.1`)",
+  "Candidate branch": "`fix/reconcile-v031-into-main`",
+  "Archive evidence": "No release archive exists. The current local Windows `npm pack --dry-run --json --ignore-scripts` reported `aether-agents-0.3.2.tgz`, 1,387,500 packed bytes, 4,461,548 unpacked bytes, `shasum` `3e22664fe2bc647efe87a72a4d4fb95cb5566e83`, and integrity `sha512-AKvvYi40h64DvOylTk3qDKbs6k+MLP5kt3tUBtoQUDLcu+nTOiEnPxYDbmcmelynROKZjPVnsKxzlOCFJfodow==`; dry-run metadata is not a release checksum or provenance attestation.",
+  "Package manifest": "The same current local dry run reported 673 entries. Hosted exact-head package evidence remains required before release.",
+  "Provenance evidence": "Pending the trusted-publishing workflow — no v0.3.2 provenance attestation exists yet.",
 } as const;
 
 function parsePacketRows(packet: string): PacketRows {
@@ -200,7 +200,7 @@ test("the current operator packet identifies the candidate and v0.3.0 retains it
   const current = readFileSync(path, "utf8");
   assert.ok(current.includes(`v${VERSION}`), "the operator packet does not name the proposed tag");
   const currentRows = parsePacketRows(current);
-  for (const [label, expected] of Object.entries(V031_PACKET)) {
+  for (const [label, expected] of Object.entries(V032_PACKET)) {
     assert.equal(onlyPacketRow(currentRows, label), expected, `the current packet has the wrong ${label}`);
   }
   assert.doesNotMatch(current, /aether-agents-0\.3\.0\.tgz|6176172deb15eea57519408d93f23b3fac8ab5e2b2e541adddc34b4e5fb4c33d/);
@@ -281,6 +281,7 @@ test(
     const count = (predicate: (path: string) => boolean): number => paths.filter(predicate).length;
     const groups = [
       ["`COMMANDS.md`, `LICENSE`, `NOTICE.md`, `README.md`, `package.json`", count((path) => !path.includes("/"))],
+      ["`assets/**`", count((path) => path.startsWith("assets/"))],
       ["`docs/generated/**`, `docs/model-catalogue/**`", count((path) => path.startsWith("docs/"))],
       ["`dist/src/core/**`", count((path) => path.startsWith("dist/src/core/"))],
       ["`dist/src/ui/**`", count((path) => path.startsWith("dist/src/ui/"))],
@@ -311,6 +312,7 @@ test(
       json: count((path) => path.endsWith(".json")),
       md: count((path) => path.endsWith(".md")),
       html: count((path) => path.endsWith(".html")),
+      png: count((path) => path.endsWith(".png")),
       extensionless: count((path) => !/\.[^/]+$/.test(path)),
     };
     const normalizedPacket = packet.replace(/\s+/g, " ");
@@ -319,6 +321,7 @@ test(
         `By extension: ${extensionCounts.js} \`.js\`, ${extensionCounts.dts} \`.d.ts\`, `
         + `${extensionCounts.map} \`.js.map\`, ${extensionCounts.json} \`.json\`, `
         + `${extensionCounts.md} \`.md\`, ${extensionCounts.html} \`.html\`, `
+        + `${extensionCounts.png} \`.png\`, `
         + `${extensionCounts.extensionless} extensionless.`,
       ),
       "the packet has a stale extension manifest",

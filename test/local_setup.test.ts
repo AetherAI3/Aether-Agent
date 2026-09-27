@@ -142,6 +142,44 @@ test("hosted model selection rejects an Ollama namespace before network or confi
   assert.equal(ctx.cfg.defaultModel, "");
 });
 
+test("hosted model catalogue failures are actionable and never save unavailable choices", async () => {
+  const signedOut = context({}, null);
+  signedOut.api = new Proxy({} as AppContext["api"], { get: () => { throw new Error("hosted API touched"); } });
+  const noAuth = await capture(() => cmdModels(signedOut, []));
+  assert.equal(noAuth.code, 1);
+  assert.match(noAuth.stderr, /aether auth login.*aether models/s);
+
+  const ctx = context({}, "aek_test");
+  ctx.api = {
+    getJson: async () => ({
+      tier: "free",
+      default: "model-ready",
+      models: [
+        {
+          id: "model-ready", label: "Ready", kind: "model", provider: "test",
+          context_window: 1000, tier_min: "free", enabled: true, available: true,
+          monthly_uvt_cap: 100, is_default: true,
+        },
+        {
+          id: "model-locked", label: "Locked", kind: "model", provider: "test",
+          context_window: 1000, tier_min: "pro", enabled: true, available: false,
+          monthly_uvt_cap: null, is_default: false,
+        },
+      ],
+    }),
+  } as unknown as AppContext["api"];
+
+  const missing = await capture(() => cmdModels(ctx, ["use", "model-missing"]));
+  assert.equal(missing.code, 1);
+  assert.match(missing.stderr, /not in the live catalogue.*aether models/);
+  assert.equal(ctx.cfg.defaultModel, "");
+
+  const locked = await capture(() => cmdModels(ctx, ["use", "model-locked"]));
+  assert.equal(locked.code, 1);
+  assert.match(locked.stderr, /unavailable for this account.*requires pro.*aether models/);
+  assert.equal(ctx.cfg.defaultModel, "");
+});
+
 test("auto-local rejects a bare explicit model before starting a brain", async () => {
   const ctx = context({ model: "gpt-5.6-sol", local: false });
   await assert.rejects(

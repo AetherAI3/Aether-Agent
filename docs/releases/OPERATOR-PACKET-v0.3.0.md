@@ -18,7 +18,7 @@ created or changed by those probes.
 | Historical candidate | `fb96ee44b03f37a386954a32412728fa7e98a046` (PR-local evidence commit; historical only, not reachable from current `main`) |
 | Historical archive | `aether-agents-0.3.0.tgz` — 739,977 bytes packed / 3,022,168 unpacked / 575 entries |
 | Historical archive sha256 | `70a48aca8baa8b63f551980256eafa42531cd22fc5ca1146829d31f8b4bd2e4d` |
-| Current exact-head dry run | 618 entries / 4 workflows |
+| Current exact-head dry run | 673 entries / 4 workflows |
 | GitHub-hosted Ubuntu value | 3,688,966 unpacked bytes — exact-head CI run `33160594500` passed |
 | GitHub-hosted Windows value | 3,690,927 unpacked bytes — exact-head CI run `33160594500` passed |
 | Current local Windows default-checkout measurement | 3,690,927 unpacked bytes / 836,234 predicted packed bytes |
@@ -279,29 +279,30 @@ catch a dropped feature, because it does not know what the notes promised.
 
 ### Current dry-run packaged file manifest
 
-The exact-head candidate dry runs reported 618 entries on clean Linux/LF and
+The exact-head candidate dry runs reported 673 entries on clean Linux/LF and
 Windows/default checkouts. Exact-head CI confirmed their 3,688,966 and
 3,690,927 unpacked-byte results on the corresponding hosted platforms;
 local default and LF checkouts measured 3,690,927 and 3,688,966 respectively
 because byte totals can move with checkout line
-endings and toolchain metadata. Five files are at the package root, four
-generated public documents are under `docs/`, and everything else is under
-`dist/src/`. The publication-base candidate produced the archive recorded at
+endings and toolchain metadata. Five files are at the package root, one owned
+asset is under `assets/`, four generated public documents are under `docs/`,
+and everything else is under `dist/src/`. The publication-base candidate produced the archive recorded at
 the top of this packet from exactly this membership.
 
 | Path | Entries |
 |---|---:|
 | `COMMANDS.md`, `LICENSE`, `NOTICE.md`, `README.md`, `package.json` | 5 |
+| `assets/**` | 1 |
 | `docs/generated/**`, `docs/model-catalogue/**` | 4 |
-| `dist/src/core/**` | 327 |
+| `dist/src/core/**` | 378 |
 | `dist/src/ui/**` | 117 |
-| `dist/src/commands/**` | 132 |
+| `dist/src/commands/**` | 135 |
 | `dist/src/skills/**` (six built-in skills) | 18 |
 | `dist/src/generated/**` | 3 |
 | `dist/src/{index,main,types,version}.*` | 12 |
 
-By extension: 197 `.js`, 197 `.d.ts`, 197 `.js.map`, 14 `.json`, 11 `.md`, 1
-`.html`, 1 extensionless. Source maps ship, as they did in 0.1.0; that is
+By extension: 215 `.js`, 215 `.d.ts`, 215 `.js.map`, 14 `.json`, 11 `.md`, 1
+`.html`, 1 `.png`, 1 extensionless. Source maps ship, as they did in 0.1.0; that is
 existing policy, unchanged by this release.
 
 No compiled tests, no `.env`, no `.tgz`, no `dist/scripts`. `verify-production`

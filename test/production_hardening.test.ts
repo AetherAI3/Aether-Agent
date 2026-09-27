@@ -19,7 +19,7 @@ const manifest = {
   types: "dist/src/index.d.ts",
   bin: { aether: "dist/src/main.js" },
   files: [
-    "dist/src", "README.md", "COMMANDS.md", "LICENSE", "NOTICE.md",
+    "dist/src", "README.md", "assets/aether-agent-hero.png", "COMMANDS.md", "LICENSE", "NOTICE.md",
     "docs/generated/commands.md", "docs/generated/model-catalogue.md",
     "docs/model-catalogue/catalogue.json", "docs/model-catalogue/index.html",
   ],
@@ -40,6 +40,7 @@ const pack: PackReport = {
     "LICENSE",
     "NOTICE.md",
     "README.md",
+    "assets/aether-agent-hero.png",
     "package.json",
     "docs/generated/commands.md",
     "docs/generated/model-catalogue.md",

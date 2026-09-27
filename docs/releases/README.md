@@ -12,6 +12,10 @@ manifest, the evidence gathered, and the founder-owned steps that publish it.
 
 ## Index
 
+- [2026-09-03](2026-09-03.md) — **v0.3.2** patch candidate: the v0.3.1
+  maintenance line merged back into `main`, restoring the browser-launcher
+  verification and putting the declared version ahead of the published one.
+  Packet: [OPERATOR-PACKET-v0.3.2.md](OPERATOR-PACKET-v0.3.2.md).
 - [2026-08-28](2026-08-28.md) — **v0.3.1** patch candidate: actionable
   Node.js-version recovery and browser-login fallback. Packet:
   [OPERATOR-PACKET-v0.3.1.md](OPERATOR-PACKET-v0.3.1.md).

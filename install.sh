@@ -78,6 +78,14 @@ fi
 
 NODE_V=$(node -v 2>/dev/null | sed 's/^v//')
 NODE_MAJ=$(echo "$NODE_V" | cut -d. -f1)
+case "$NODE_MAJ" in
+  ""|*[!0-9]*)
+    echo ""
+    error "Could not read the Node.js version (received: ${NODE_V:-empty})."
+    info "Repair Node.js, reopen your terminal, then run: node --version"
+    exit 1
+    ;;
+esac
 success "Node.js v${NODE_V}"
 
 if [ "$NODE_MAJ" -lt 24 ]; then
@@ -125,39 +133,46 @@ if ! npm install -g "aether-agents@${AETHER_VERSION}" --ignore-scripts; then
     echo ""
   fi
   info "If you see EACCES errors, try one of:"
-  info "  npm install -g aether-agents@${AETHER_VERSION} --ignore-scripts --prefix ~/.local"
-  info "  Or install Node with a version manager from https://nodejs.org/en/download"
+  info "  npm install -g aether-agents@${AETHER_VERSION} --ignore-scripts --prefix \"${HOME}/.local\""
+  info "  export PATH=\"${HOME}/.local/bin:\$PATH\""
+  info "Persist that PATH in your shell profile, or install Node with a version manager."
+  exit 1
+fi
+
+# ── Verify ──
+if ! command -v aether >/dev/null 2>&1; then
+  NPM_PREFIX=$(npm config get prefix 2>/dev/null || true)
+  AETHER_BIN="${NPM_PREFIX}/bin"
+  error "aether command not found on PATH after install."
+  info "npm global prefix: ${NPM_PREFIX}"
+  info "Add it for this shell, then retry:"
+  info "  export PATH=\"${AETHER_BIN}:\$PATH\""
+  info "  aether --version"
+  echo ""
+  info "For nvm users: nvm use --delete-prefix v24 --silent"
   exit 1
 fi
 
 AETH_V=$(aether --version 2>/dev/null || echo "unknown")
 success "Aether Agent ${AETH_V} installed!"
 
-# ── Verify ──
-if ! command -v aether >/dev/null 2>&1; then
-  error "aether command not found on PATH after install."
-  info "npm global prefix: $(npm config get prefix)"
-  info "Add $(npm config get prefix)/bin to your PATH, or reinstall Node."
-  echo ""
-  info "For nvm users: nvm use --delete-prefix v24 --silent"
-  exit 1
-fi
-
-# ── Next steps box ──
+# ── Next steps ──
 echo ""
-echo "${cyan}┌──────────────────────────────────────────────────────────────┐${n}"
-echo "${cyan}│${n}                                                              ${cyan}│${n}"
-echo "${cyan}│${n}  ${green}${check}${n} ${bold}Ready!${n}  Next: sign in to unlock the full model fleet.       ${cyan}│${n}"
-echo "${cyan}│${n}                                                              ${cyan}│${n}"
-echo "${cyan}│${n}    ${bold}${cyan}aether auth login${n}                                         ${cyan}│${n}"
-echo "${cyan}│${n}                                                              ${cyan}│${n}"
-echo "${cyan}│${n}  ${dim}Opens aethersystems.net/platform in your browser.${n}           ${cyan}│${n}"
-echo "${cyan}│${n}  ${dim}${arrow} click Approve ${arrow} you're in.${n}                                ${cyan}│${n}"
-echo "${cyan}│${n}                                                              ${cyan}│${n}"
-echo "${cyan}│${n}  ${dim}Then start coding:${n}                                           ${cyan}│${n}"
-echo "${cyan}│${n}    ${dim}aether \"explain src/router.ts\"${n}                             ${cyan}│${n}"
-echo "${cyan}│${n}    ${dim}aether agent \"fix the failing tests\"${n}                        ${cyan}│${n}"
-echo "${cyan}│${n}    ${dim}aether agent --local \"same, fully offline\"${n}                   ${cyan}│${n}"
-echo "${cyan}│${n}                                                              ${cyan}│${n}"
-echo "${cyan}└──────────────────────────────────────────────────────────────┘${n}"
+header "Ready — hosted first run"
+printf '%s\n' \
+  "  aether --version" \
+  "  aether auth login" \
+  "  aether auth status" \
+  "  aether models" \
+  "  aether agent \"explain this repository\"" \
+  "  aether doctor" \
+  "  aether doctor --live"
+info "No browser: aether auth login --no-browser"
+echo ""
+header "Optional local Ollama path"
+printf '%s\n' \
+  "  aether setup --local" \
+  "  aether local pull qwen2.5-coder:7b --yes" \
+  "  aether agent --local \"explain this repository\""
+info "Ollama must be installed and running before the local steps."
 echo ""

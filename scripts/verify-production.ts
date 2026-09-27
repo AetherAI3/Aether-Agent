@@ -49,6 +49,8 @@ export const REQUIRED_GENERATED_DOCS = [
   "docs/model-catalogue/index.html",
 ] as const;
 const ALLOWED_GENERATED_DOCS = new Set<string>(REQUIRED_GENERATED_DOCS);
+const REQUIRED_PUBLIC_ASSETS = ["assets/aether-agent-hero.png"] as const;
+const ALLOWED_PUBLIC_ASSETS = new Set<string>(REQUIRED_PUBLIC_ASSETS);
 
 const MAX_UNPACKED_BYTES = 5_000_000;
 
@@ -84,6 +86,7 @@ export function validateManifest(manifest: PackageManifest, expectedTag?: string
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   if (!files.includes("dist/src")) errors.push("package files must include dist/src");
   for (const path of REQUIRED_GENERATED_DOCS) if (!files.includes(path)) errors.push(`package files must include generated public document ${path}`);
+  for (const path of REQUIRED_PUBLIC_ASSETS) if (!files.includes(path)) errors.push(`package files must include public asset ${path}`);
   if (files.includes("dist") || files.some((value) => typeof value === "string" && value.includes("test"))) {
     errors.push("package files must not include compiled tests");
   }
@@ -104,6 +107,9 @@ export function validatePack(report: PackReport, manifest: PackageManifest): str
   for (const required of REQUIRED_GENERATED_DOCS) {
     if (!paths.has(required)) errors.push(`package is missing generated public document ${required}`);
   }
+  for (const required of REQUIRED_PUBLIC_ASSETS) {
+    if (!paths.has(required)) errors.push(`package is missing public asset ${required}`);
+  }
   for (const required of [manifest.main, manifest.types]) {
     if (typeof required === "string" && !paths.has(required.replace(/^\.\//, ""))) {
       errors.push(`package is missing entrypoint ${required}`);
@@ -117,7 +123,7 @@ export function validatePack(report: PackReport, manifest: PackageManifest): str
   }
 
   for (const path of paths) {
-    const allowed = REQUIRED_ROOT_FILES.has(path) || ALLOWED_GENERATED_DOCS.has(path) || path.startsWith("dist/src/");
+    const allowed = REQUIRED_ROOT_FILES.has(path) || ALLOWED_GENERATED_DOCS.has(path) || ALLOWED_PUBLIC_ASSETS.has(path) || path.startsWith("dist/src/");
     if (!allowed) errors.push(`unexpected package content: ${path}`);
     if (/(^|\/)(test|tests|_loopstate)(\/|$)/i.test(path) || /(^|\/)\.env(?:\.|$)/i.test(path)) {
       errors.push(`sensitive or non-runtime package content: ${path}`);

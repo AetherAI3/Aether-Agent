@@ -1,4 +1,4 @@
-# Aether Agent installer — Windows (PowerShell).
+# Aether Agent installer - Windows (PowerShell).
 #
 #   Download, inspect, then run this file with: .\install.ps1
 #
@@ -16,69 +16,27 @@ if ($Version -notmatch '^[0-9A-Za-z.+-]+$') {
   throw "Invalid Version: use latest, a dist-tag, or a semver."
 }
 
-# ── Color helpers ──
-$cyan  = 11  # BrightCyan  (ANSI 44 ≈ #1aa6b7)
-$ice   = 12  # BrightBlue  (ANSI 117 ≈ #87d7ff)
+# Color helpers
+$cyan  = 11  # BrightCyan
 $green = 10  # BrightGreen
-$red   = 12  # Red (error — redefined below)
 $dim   = 8   # DarkGray
 
 $red_error  = 12
 $green_ok   = 10
 
 function Write-Header($msg) { Write-Host $msg -ForegroundColor $cyan }
-function Write-Success($msg) { Write-Host "  ✓ " -NoNewline -ForegroundColor $green_ok; Write-Host $msg -ForegroundColor $dim }
-function Write-ErrorMsg($msg) { Write-Host "  ✗ " -NoNewline -ForegroundColor $red_error; Write-Host $msg }
+function Write-Success($msg) { Write-Host "  [ok] " -NoNewline -ForegroundColor $green_ok; Write-Host $msg -ForegroundColor $dim }
+function Write-ErrorMsg($msg) { Write-Host "  [error] " -NoNewline -ForegroundColor $red_error; Write-Host $msg }
 function Write-Info($msg) { Write-Host "  $msg" -ForegroundColor $dim }
 function Write-Step($msg) { Write-Host "$msg... " -NoNewline -ForegroundColor $dim }
 
-# ── Cloud glyph ──
-function Write-Cloud {
-  Write-Host "                            ▄▄███▄▄   " -ForegroundColor $ice
-  Write-Host "                           ▄█████████▄ " -ForegroundColor $ice
-  Write-Host "                           ███▄███▄███ " -ForegroundColor $ice
-  Write-Host "                           ▀████▄████▀ " -ForegroundColor $ice
-  Write-Host "                             ▀ ▀ ▀ ▀   " -ForegroundColor $ice
-}
-
-# ── Box drawing helper (PowerShell terminal supports Unicode box-drawing) ──
-function Write-BoxTop($width = 62) {
-  $h  = "─" * ($width - 2)
-  Write-Host "┌${h}┐" -ForegroundColor $cyan
-}
-function Write-BoxBottom($width = 62) {
-  $h = "─" * ($width - 2)
-  Write-Host "└${h}┘" -ForegroundColor $cyan
-}
-function Write-BoxLine($text, $width = 62) {
-  $inner = $width - 6
-  $pad = [Math]::Max(0, $inner - $text.Length)
-  Write-Host "│" -NoNewline -ForegroundColor $cyan
-  Write-Host "  ${text}" -NoNewline
-  Write-Host (" " * $pad + "  ") -NoNewline
-  Write-Host "│" -ForegroundColor $cyan
-}
-function Write-BoxEmpty($width = 62) {
-  Write-BoxLine "" $width
-}
-
-# ── Banner ──
+# Banner
 Write-Host ""
-Write-Cloud
-Write-Host ""
-Write-BoxTop
-Write-BoxEmpty
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "  ☁  Aether Agent — Terminal Coding Agent Installer              " -NoNewline
-Write-Host "│" -ForegroundColor $cyan
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "     npm release $Version  ·  aethersystems.net                    " -NoNewline -ForegroundColor $dim
-Write-Host "│" -ForegroundColor $cyan
-Write-BoxEmpty
-Write-BoxBottom
+Write-Header "Aether Agent - Terminal Coding Agent Installer"
+Write-Info "npm release $Version | aethersystems.net"
 Write-Host ""
 
-# ── Check Node.js ──
+# Check Node.js
 if (-not $SkipNodeCheck) {
   Write-Step "Checking Node.js"
   $nodePath = Get-Command node -ErrorAction SilentlyContinue
@@ -102,7 +60,7 @@ if (-not $SkipNodeCheck) {
   }
 }
 
-# ── Check npm ──
+# Check npm
 Write-Step "Checking npm"
 $npmPath = Get-Command npm -ErrorAction SilentlyContinue
 if (-not $npmPath) {
@@ -113,15 +71,15 @@ if (-not $npmPath) {
 $npmVersion = npm -v 2>$null
 Write-Success "npm v${npmVersion}"
 
-# ── Check if already installed ──
+# Check if already installed
 $alreadyInstalled = $false
 $aetherPath = Get-Command aether -ErrorAction SilentlyContinue
 if ($aetherPath) {
   $alreadyInstalled = $true
-  Write-Info "aether-agent already installed — will install $Version."
+  Write-Info "aether-agent already installed - will install $Version."
 }
 
-# ── Install ──
+# Install
 Write-Host ""
 if ($alreadyInstalled) {
   Write-Step "Updating aether-agent"
@@ -136,67 +94,47 @@ if ($alreadyInstalled) {
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
   Write-ErrorMsg "Install failed. Check your network and npm permissions."
   Write-Host ""
-  Write-Info "If you see EACCES or permission errors:"
-  Write-Info "  1. Run PowerShell as Administrator"
-  Write-Info "  2. Or configure npm prefix: npm config set prefix $env:APPDATA\`npm"
+  if ($Version -ne "latest") {
+    Write-Info "If npm reports 'No matching version found', $Version is not published."
+    Write-Info "Published versions: npm view aether-agents versions"
+  }
+  $userPrefix = Join-Path $env:LOCALAPPDATA "npm"
+  Write-Info "For EACCES or permission errors, use a per-user prefix:"
+  Write-Info ('  npm install -g "aether-agents@{0}" --ignore-scripts --prefix "{1}"' -f $Version, $userPrefix)
+  Write-Info ("Then add $userPrefix to your user PATH and reopen PowerShell.")
   exit 1
 }
 
 $aetherPath = Get-Command aether -ErrorAction SilentlyContinue
-$aetherVersion = "unknown"
-if ($aetherPath) {
-  try { $aetherVersion = (aether --version 2>$null) } catch {}
-}
-Write-Success "Aether Agent ${aetherVersion} installed!"
-
-# ── Verify ──
-if (-not (Get-Command aether -ErrorAction SilentlyContinue)) {
+# Verify
+if (-not $aetherPath) {
+  $npmPrefix = (npm config get prefix 2>$null | Select-Object -First 1)
   Write-ErrorMsg "aether command not found on PATH after install."
-  Write-Info "npm global prefix: $(npm config get prefix)"
-  Write-Info "Add $(npm config get prefix) to your PATH, or reinstall Node."
+  Write-Info "npm global prefix: $npmPrefix"
+  Write-Info "Add that directory to your user PATH, reopen PowerShell, then run:"
+  Write-Info "  aether --version"
   exit 1
 }
 
-# ── Next steps box ──
+$aetherVersion = "unknown"
+try { $aetherVersion = (aether --version 2>$null) } catch {}
+Write-Success "Aether Agent ${aetherVersion} installed!"
+
+# Next steps
 Write-Host ""
-Write-BoxTop
-Write-BoxEmpty
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "  ✓ " -NoNewline -ForegroundColor $green_ok
-Write-Host "Ready!  Next: sign in to unlock the full model fleet.       " -NoNewline
-Write-Host "│" -ForegroundColor $cyan
-Write-BoxEmpty
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "    " -NoNewline
-Write-Host "aether auth login" -NoNewline -ForegroundColor $cyan
-Write-Host (" " * 42) -NoNewline
-Write-Host "│" -ForegroundColor $cyan
-Write-BoxEmpty
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "  Opens aethersystems.net/platform in your browser.           " -NoNewline -ForegroundColor $dim
-Write-Host "│" -ForegroundColor $cyan
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "  → click Approve → you're in.                                " -NoNewline -ForegroundColor $dim
-Write-Host "│" -ForegroundColor $cyan
-Write-BoxEmpty
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "  Then start coding:                                           " -NoNewline -ForegroundColor $dim
-Write-Host "│" -ForegroundColor $cyan
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "    " -NoNewline
-Write-Host "aether `"explain src/router.ts`"" -NoNewline -ForegroundColor $dim
-Write-Host (" " * 28) -NoNewline
-Write-Host "│" -ForegroundColor $cyan
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "    " -NoNewline
-Write-Host "aether agent `"fix the failing tests`"" -NoNewline -ForegroundColor $dim
-Write-Host (" " * 23) -NoNewline
-Write-Host "│" -ForegroundColor $cyan
-Write-Host "│" -NoNewline -ForegroundColor $cyan
-Write-Host "    " -NoNewline
-Write-Host "aether agent --local `"same, fully offline`"" -NoNewline -ForegroundColor $dim
-Write-Host (" " * 19) -NoNewline
-Write-Host "│" -ForegroundColor $cyan
-Write-BoxEmpty
-Write-BoxBottom
+Write-Header "Ready - hosted first run"
+Write-Host '  aether --version'
+Write-Host '  aether auth login'
+Write-Host '  aether auth status'
+Write-Host '  aether models'
+Write-Host '  aether agent "explain this repository"'
+Write-Host '  aether doctor'
+Write-Host '  aether doctor --live'
+Write-Info "No browser: aether auth login --no-browser"
+Write-Host ""
+Write-Header "Optional local Ollama path"
+Write-Host '  aether setup --local'
+Write-Host '  aether local pull qwen2.5-coder:7b --yes'
+Write-Host '  aether agent --local "explain this repository"'
+Write-Info "Ollama must be installed and running before the local steps."
 Write-Host ""

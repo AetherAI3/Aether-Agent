@@ -618,6 +618,85 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "shell:device",
+    "surface": "shell",
+    "name": "device",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "<subcommand>",
+    "summary": "manage the dev-only, default-off Windows device runtime",
+    "detailedHelp": "aether device <subcommand>\nmanage the dev-only, default-off Windows device runtime",
+    "section": "Account",
+    "hidden": true,
+    "permissionClass": "account",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "shell.device",
+    "acceptedGlobalFlags": [
+      "agent",
+      "all",
+      "apply",
+      "audit",
+      "available",
+      "ci",
+      "cwd",
+      "effort",
+      "help",
+      "interactive",
+      "json",
+      "junit",
+      "license-key",
+      "local",
+      "model",
+      "no-browser",
+      "no-log",
+      "no-skills",
+      "out",
+      "password",
+      "pool",
+      "quiet",
+      "repo",
+      "resume",
+      "scope",
+      "skill",
+      "swarm",
+      "test-cmd",
+      "token",
+      "username",
+      "version",
+      "with-token",
+      "worktree",
+      "yes"
+    ],
+    "ownedFlags": {
+      "base-url": {
+        "type": "string"
+      }
+    },
+    "handler": {
+      "id": "handler:shell:device",
+      "kind": "lazy",
+      "module": "src/commands/cli_registry.ts",
+      "symbol": "DISPATCH_COMMANDS"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "device",
+      "usage": "aether device <subcommand>",
+      "visible": false,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "SC-DEVICE-01: dev-only, default-off Windows device runtime (outbound-only telemetry, signed command execution, Job Object containment)."
+    }
+  },
+  {
     "key": "shell:login",
     "surface": "shell",
     "name": "login",

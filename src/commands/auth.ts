@@ -11,7 +11,7 @@ import { cmdLogin, cmdLogout, type LoginOpts } from "./login.js";
 import { MODELS_PATH, REFRESH_PATH } from "../core/transport.js";
 import { HttpError, errorHint, errorMessage } from "../core/errors.js";
 import { isApiKeyToken } from "../core/auth.js";
-import { box, titledBox, hyperlink, orange, green, darkBlue, brightWhite, lightBlue } from "../ui/box.js";
+import { box, titledBox, hyperlink } from "../ui/box.js";
 import { CLOUD } from "../ui/logo.js";
 import { theme } from "../ui/theme.js";
 import { formatErrorLine } from "../ui/error_line.js";
@@ -22,6 +22,13 @@ import { formatErrorLine } from "../ui/error_line.js";
  *  isApiKeyToken (shared with transport.ts's refreshSession). */
 export function isApiToken(token: string | null | undefined): boolean {
   return isApiKeyToken(token);
+}
+
+export type AuthVerificationState = "signed-out" | "verified" | "expired" | "unverified";
+
+interface AuthPanel {
+  output: string;
+  state: AuthVerificationState;
 }
 
 function mask(t: string): string {
@@ -43,9 +50,9 @@ function centeredCloud(): string {
 
 // Exported so tests can render the panel directly against a fake AppContext
 // without going through cmdAuth's stdout write.
-export async function renderAuthBox(ctx: AppContext): Promise<string> {
+async function renderAuthPanel(ctx: AppContext): Promise<AuthPanel> {
   const t = await ctx.tokens.get();
-  if (!t) return renderLoggedOut();
+  if (!t) return { output: renderLoggedOut(), state: "signed-out" };
 
   // Fetch tier info for display
   let tier = "";
@@ -55,9 +62,10 @@ export async function renderAuthBox(ctx: AppContext): Promise<string> {
   // unreachable" and must not be swallowed the same way, or `status` would
   // claim "Authenticated" for a dead session (the stale-AETHER_TOKEN case PR
   // #47 fixed elsewhere). Any other failure (no HttpError, or a 5xx) is a
-  // genuine network/server problem: keep the existing silent local-only
-  // fallback for those.
+  // genuine network/server problem: report a stored-but-unverified credential
+  // rather than claiming the user is authenticated.
   let sessionExpired = false;
+  let verificationUnavailable = false;
   try {
     const cat = await ctx.api.getJson<{ tier?: string; default?: string }>(MODELS_PATH);
     tier = cat.tier ?? "";
@@ -65,14 +73,15 @@ export async function renderAuthBox(ctx: AppContext): Promise<string> {
   } catch (err) {
     if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
       sessionExpired = true;
-    }
-    // Otherwise: server unreachable — still show what we know locally.
+    } else verificationUnavailable = true;
   }
 
   const kind = isApiToken(t) ? "API key" : "session token";
   const header = sessionExpired
     ? theme.yellow("⚠") + "  " + theme.bold("Aether Agent — Session expired")
-    : theme.iceBlue("☁") + "  " + theme.bold("Aether Agent — Authenticated");
+    : verificationUnavailable
+      ? theme.yellow("⚠") + "  " + theme.bold("Aether Agent — Verification unavailable")
+      : theme.iceBlue("☁") + "  " + theme.bold("Aether Agent — Authenticated");
   const lines: string[] = [
     "",
     header,
@@ -88,6 +97,12 @@ export async function renderAuthBox(ctx: AppContext): Promise<string> {
       "",
       "  " + theme.yellow("Server rejected this token — sign in again:"),
       "  " + theme.bold(theme.cyan("aether auth login")),
+    );
+  } else if (verificationUnavailable) {
+    lines.push(
+      "",
+      "  " + theme.yellow("Credential stored, but the server could not verify it."),
+      "  " + theme.bold(theme.cyan("aether doctor --live")),
     );
   } else {
     if (tier) {
@@ -108,8 +123,17 @@ export async function renderAuthBox(ctx: AppContext): Promise<string> {
     "",
   );
 
-  const title = sessionExpired ? "Session expired" : "Authenticated";
-  return [centeredCloud(), "", titledBox(lines, title, { width: BOX_W })].join("\n");
+  const state: AuthVerificationState = sessionExpired
+    ? "expired"
+    : verificationUnavailable
+      ? "unverified"
+      : "verified";
+  const title = state === "expired" ? "Session expired" : state === "unverified" ? "Not verified" : "Authenticated";
+  return { output: [centeredCloud(), "", titledBox(lines, title, { width: BOX_W })].join("\n"), state };
+}
+
+export async function renderAuthBox(ctx: AppContext): Promise<string> {
+  return (await renderAuthPanel(ctx)).output;
 }
 
 // ── Logged-out welcome panel ──
@@ -117,31 +141,17 @@ export async function renderAuthBox(ctx: AppContext): Promise<string> {
 const PLATFORM_URL = process.env["AETHER_LOGIN_URL"] ?? "https://aethersystems.net/platform/device";
 
 function renderLoggedOut(): string {
-  // Per-model brand colors
-  const fleet = [
-    orange("Claude"),
-    green("GPT"),
-    darkBlue("DeepSeek"),
-    brightWhite("Kimi"),
-    lightBlue("Gemma"),
-    theme.dim("& more"),
-  ].join(" \u00b7 ");
-
-  const orch = theme.dim("Aether orchestrators: ") +
-    theme.cyan("Neo") + theme.dim(", ") +
-    theme.cyan("Kronus") + theme.dim(", & more");
-
   const lines = [
     "",
     theme.iceBlue("\u2601") + "  " + theme.bold("Welcome to Aether Agent"),
     "",
-    theme.dim("Sign in to unlock the full model fleet:"),
-    "  " + fleet,
-    "  " + orch,
+    theme.dim("Sign in, verify the session, then query live availability:"),
     "",
     "  " + theme.bold(theme.cyan("aether auth login")),
+    "  " + theme.dim("aether auth status"),
+    "  " + theme.dim("aether models"),
     "",
-    theme.dim("Opens ") + hyperlink(PLATFORM_URL, theme.cyan("aethersystems.net/platform")),
+    theme.dim("Opens ") + hyperlink(PLATFORM_URL, theme.cyan("aethersystems.net/platform/device")),
     theme.dim("in your browser \u2192 click Approve \u2192 done."),
     "",
     "  " + theme.dim("No browser? Head to:"),
@@ -150,7 +160,7 @@ function renderLoggedOut(): string {
     theme.dim("Quick:"),
     theme.dim("  aether auth login              Sign in via browser"),
     theme.dim("  aether auth login --no-browser      Print URL instead"),
-    theme.dim("  aether auth --help             All auth commands"),
+    theme.dim("  aether auth help               All auth commands"),
     "",
   ];
 
@@ -178,9 +188,9 @@ export async function cmdAuth(
       // connection, "the REPL just looks hung" (the exact class PR #47 fixed
       // for slash.ts's catalog fetch). Match that convention here.
       process.stdout.write(theme.dim("checking session…\n"));
-      const panel = await renderAuthBox(ctx);
-      process.stdout.write(panel + "\n");
-      return 0;
+      const panel = await renderAuthPanel(ctx);
+      process.stdout.write(panel.output + "\n");
+      return panel.state === "verified" ? 0 : 1;
     }
     case "token":
       return authToken(ctx);

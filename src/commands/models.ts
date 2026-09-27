@@ -19,12 +19,29 @@ import { saveConfig } from "../core/config.js";
 import { theme } from "../ui/theme.js";
 import { visibleWidth } from "../ui/text.js";
 import { resolveHostedModel } from "../core/local_ollama.js";
+import { errorHint, errorMessage } from "../core/errors.js";
+import { formatErrorLine } from "../ui/error_line.js";
+
+async function liveCatalogue(ctx: AppContext): Promise<CatalogResponse | null> {
+  if (!(await ctx.tokens.get())) {
+    process.stderr.write(
+      formatErrorLine("Not signed in", { hint: "run `aether auth login`, then `aether models`" }),
+    );
+    return null;
+  }
+  try {
+    return await ctx.api.getJson<CatalogResponse>(MODELS_PATH);
+  } catch (error) {
+    process.stderr.write(formatErrorLine(errorMessage(error), { hint: errorHint(error, ctx.cfg.baseUrl) }));
+    return null;
+  }
+}
 
 export async function cmdModels(ctx: AppContext, argv: string[]): Promise<number> {
   const sub = argv[0];
   if (sub === "use") {
     const id = argv[1];
-    if (!id) {
+    if (!id || argv.length !== 2) {
       process.stderr.write("usage: aether models use <id>\n");
       return 2;
     }
@@ -35,13 +52,33 @@ export async function cmdModels(ctx: AppContext, argv: string[]): Promise<number
       process.stderr.write((error instanceof Error ? error.message : String(error)) + "\n");
       return 2;
     }
+    const cat = await liveCatalogue(ctx);
+    if (!cat) return 1;
+    const selected = cat.models.find((model) => model.id === hostedId);
+    if (!selected) {
+      process.stderr.write(`Model ${JSON.stringify(hostedId)} is not in the live catalogue. Run: aether models\n`);
+      return 1;
+    }
+    if (!selected.available) {
+      const tier = selected.tier_min ? ` (requires ${selected.tier_min})` : "";
+      process.stderr.write(
+        `Model ${JSON.stringify(hostedId)} is unavailable for this account${tier}. Run: aether models\n`,
+      );
+      return 1;
+    }
     ctx.cfg.defaultModel = hostedId;
-    saveConfig(ctx.cfg);
-    process.stdout.write(`default model → ${id}\n`);
+    try {
+      saveConfig(ctx.cfg);
+    } catch (error) {
+      process.stderr.write(`Could not save the default model: ${errorMessage(error)}\n`);
+      return 1;
+    }
+    process.stdout.write(`default model → ${hostedId}\n`);
     return 0;
   }
 
-  const cat = await ctx.api.getJson<CatalogResponse>(MODELS_PATH);
+  const cat = await liveCatalogue(ctx);
+  if (!cat) return 1;
   if (ctx.flags.json) {
     process.stdout.write(JSON.stringify(cat, null, 2) + "\n");
     return 0;
@@ -60,7 +97,8 @@ export async function cmdModels(ctx: AppContext, argv: string[]): Promise<number
 }
 
 export async function cmdAgents(ctx: AppContext): Promise<number> {
-  const cat = await ctx.api.getJson<CatalogResponse>(MODELS_PATH);
+  const cat = await liveCatalogue(ctx);
+  if (!cat) return 1;
   const orchestrators = cat.models.filter((m) => m.kind === "orchestrator");
   if (ctx.flags.json) {
     process.stdout.write(JSON.stringify(orchestrators, null, 2) + "\n");

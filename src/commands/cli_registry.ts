@@ -65,6 +65,8 @@ export const GLOBAL_FLAGS: FlagTable = {
   "no-log": { type: "boolean", default: false },
   worktree: { type: "boolean", default: false },
   repo: { type: "string" },
+  // Accepted only so existing experimental callers receive code.ts's explicit
+  // refusal. It is intentionally absent from normal help and generated docs.
   swarm: { type: "string" },
   resume: { type: "string" },
   out: { type: "string" },
@@ -111,6 +113,17 @@ export const SHELL_RUNTIME_HANDLERS: Array<Pick<DispatchedCommand, "name" | "loa
     load: async () => {
       const { cmdPreview, previewOptionsFromFlags } = await import("./preview.js");
       return (ctx, argv, flags) => cmdPreview(ctx, argv, previewOptionsFromFlags(flags));
+    },
+  },
+  {
+    // Lane SC-DEVICE-01. Hidden (dev-only, default-off) but a real dispatch-table
+    // entry so `aether device …` runs the command group instead of billing a
+    // chat turn. It owns no flags — subcommands are positionals and it reads only
+    // the global --json / --yes off ctx.flags.
+    name: "device",
+    load: async () => {
+      const { cmdDevice } = await import("./device.js");
+      return (ctx, argv, flags) => cmdDevice(ctx, argv, flags);
     },
   },
   {
@@ -276,6 +289,9 @@ export function renderCliHelp(target?: string): string {
     target,
     footer: [
       "Global flags: --model <id> --agent <id> --cwd <dir> --json --audit -y/--yes -h/--help -v/--version",
+      "First run: aether auth login -> aether auth status -> aether models",
+      'Hosted task: aether agent "explain this repository"',
+      "Local setup: aether setup --local",
       "Unknown command text remains a bare prompt.",
     ],
   });
