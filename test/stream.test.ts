@@ -31,6 +31,22 @@ test("normalizeFrame error uses contract keys msg/error_code/ref_id", () => {
   assert.deepEqual(f, { type: "error", msg: "boom", errorCode: "E42", refId: "r1" });
 });
 
+test("normalizeFrame takes the first nonblank error text and never exposes reason", () => {
+  const base = { type: "error", reason: "internal detail" };
+  assert.deepEqual(normalizeFrame({ ...base, msg: "primary", error: "fallback" }), {
+    type: "error", msg: "primary", errorCode: undefined, refId: undefined,
+  });
+  assert.deepEqual(normalizeFrame({ ...base, msg: "  ", message: "alternate", error: "fallback" }), {
+    type: "error", msg: "alternate", errorCode: undefined, refId: undefined,
+  });
+  assert.deepEqual(normalizeFrame({ ...base, msg: "", error: "server failure" }), {
+    type: "error", msg: "server failure", errorCode: undefined, refId: undefined,
+  });
+  assert.deepEqual(normalizeFrame({ ...base, error: { secret: true } }), {
+    type: "error", msg: "", errorCode: undefined, refId: undefined,
+  });
+});
+
 test("normalizeFrame surfaces the custody frame (client decides to save)", () => {
   const custody = {
     protocol: "custody-1",
