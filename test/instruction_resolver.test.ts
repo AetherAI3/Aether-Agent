@@ -13,6 +13,7 @@ import {
   sourceAppliesTo,
 } from "../src/core/instructions/instruction_resolver.js";
 import { SKILL_BOUNDS } from "../src/core/skills/skill_bounds.js";
+import { openRunSession } from "../src/core/skills/run_session.js";
 import type { InstructionSource } from "../src/core/instructions/instruction_types.js";
 
 function withEnv<T>(key: string, value: string, fn: () => T): T {
@@ -63,6 +64,37 @@ test("nested AGENTS.md scopes to its subtree only", () => {
     // Nearest nested outranks root for files in its subtree.
     const ordered = applicableSources(sources, "packages/web/app.tsx");
     assert.equal(ordered[0]?.kind, "agents-nested");
+  });
+});
+
+test("a wide project stops nested discovery visibly and refuses local tool authority", () => {
+  const root = makeProject();
+  writeFileSync(join(root, "AGENTS.md"), "Keep the root rule.\n");
+  const userDir = mkdtempSync(join(tmpdir(), "aether-cfg-"));
+  writeFileSync(join(userDir, "instructions.md"), "Keep the user rule.\n");
+  // The old depth-only walk could spend minutes traversing a home directory
+  // before even starting the chat pulse. This exceeds the directory budget
+  // without depending on a machine-specific stopwatch threshold.
+  for (let i = 0; i <= SKILL_BOUNDS.maxNestedInstructionDirectories; i++) {
+    mkdirSync(join(root, `child-${String(i).padStart(4, "0")}`));
+  }
+  withEnv("AETHER_CONFIG_DIR", userDir, () => {
+    const graph = resolveInstructionGraph(root);
+    assert.equal(graph.nestedScanComplete, false);
+    assert.ok(graph.sources.some((source) => source.kind === "agents-root" && source.content.includes("Keep the root rule")));
+    assert.ok(graph.sources.some((source) => source.kind === "aether-user" && source.content.includes("Keep the user rule")));
+    assert.ok(graph.skipped.some((item) => item.path === "**/AGENTS.md" && item.reason.includes("may be missing")));
+
+    const local = openRunSession({ projectRoot: root, prompt: "edit files" });
+    assert.equal(local.ok, false);
+    if (!local.ok) assert.equal(local.refusal.code, "skill.instruction_scan_incomplete");
+
+    const cloudChat = openRunSession({ projectRoot: root, prompt: "reply 1", allowIncompleteInstructionDiscovery: true });
+    assert.equal(cloudChat.ok, true, cloudChat.ok ? "" : cloudChat.lines.join("\n"));
+    if (cloudChat.ok) {
+      assert.equal(cloudChat.run.hasWarnings, true);
+      assert.match(cloudChat.run.headerLines.join("\n"), /nested project rules may be missing/);
+    }
   });
 });
 
