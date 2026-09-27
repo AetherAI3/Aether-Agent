@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   for (let i = 0; i < 2_100; i++) mkdirSync(join(home, `folder-${String(i).padStart(4, "0")}`));
   let requests = 0;
   let requestBodies: string[] = [];
-  let mode: "success" | "recover-401" | "empty-error" | "error-field" = "success";
+  let mode: "success" | "recover-401" | "empty-error" | "error-field" | "private-error" = "success";
   let heldResponse: import("node:http").ServerResponse | undefined;
   const server = createServer((request, response) => {
     let body = "";
@@ -96,11 +96,13 @@ async function main(): Promise<void> {
           heldResponse = response;
           return;
         }
-        if (mode === "empty-error" || mode === "error-field") {
+        if (mode === "empty-error" || mode === "error-field" || mode === "private-error") {
           response.writeHead(200, { "Content-Type": "text/event-stream" });
           const error = mode === "error-field"
             ? { type: "error", error: "The media studio agent hit an error.", reason: "private internal reason" }
-            : { type: "error", msg: "" };
+            : mode === "private-error"
+              ? { type: "error", error: "private provider failure: internal stack trace", reason: "private internal reason" }
+              : { type: "error", msg: "" };
           response.end(`data: ${JSON.stringify(error)}\n\ndata: {"type":"done","uvt":0,"cents":0}\n\n`);
           return;
         }
@@ -159,7 +161,14 @@ async function main(): Promise<void> {
     if (publicError.timedOut || publicError.code !== 1 || requests !== 1 || !requestBodies[0]?.includes(prompt) || !/The media studio agent hit an error\./.test(publicError.stderr) || /private internal reason/.test(publicError.stderr)) {
       throw new Error(`packed public-error one-shot smoke failed: ${JSON.stringify({ ...publicError, requests, requestBodies })}`);
     }
-    process.stdout.write("packed home chat smoke passed: bounded scan, answer 1, visible 401 and continued answer 2, empty/public error exits 1\n");
+    mode = "private-error";
+    requests = 0;
+    requestBodies = [];
+    const privateError = await runInstalled(installedMain, home, baseUrl, configDir, "", undefined, prompt);
+    if (privateError.timedOut || privateError.code !== 1 || requests !== 1 || !requestBodies[0]?.includes(prompt) || !/cloud turn failed; the server did not provide details/.test(privateError.stderr) || /private provider failure|internal stack trace|private internal reason/.test(privateError.stderr)) {
+      throw new Error(`packed private-error one-shot smoke failed: ${JSON.stringify({ ...privateError, requests, requestBodies })}`);
+    }
+    process.stdout.write("packed home chat smoke passed: bounded scan, answer 1, visible 401 and continued answer 2, safe error fallback exits 1\n");
   } finally {
     heldResponse?.destroy();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));

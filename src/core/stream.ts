@@ -11,6 +11,14 @@
 
 export const STREAM_ERROR_NO_DETAILS = "cloud turn failed; the server did not provide details";
 
+// `error` is not the Cloud SSE public-message contract. An older media loop
+// emitted raw exception text under that key; only these route-owned fixed
+// public strings may stand in for an absent `msg`/`message`.
+const PUBLIC_LEGACY_ERROR_TEXT = new Set([
+  "The media studio agent hit an error.",
+  "generation registry did not reach a terminal state",
+]);
+
 export type StreamFrame = StreamFrameBody & {
   /** Per-session monotonic sequence number (dev-session frames only). A
    *  reconnecting client resumes with ?last_seq=N and MUST skip seq <= N so a
@@ -129,11 +137,7 @@ function normalizeFrameBody(obj: Record<string, unknown>): StreamFrameBody | nul
     case "error":
       return {
         type: "error",
-        // Cloud may send its public-safe copy as `error` with a separate
-        // internal `reason`. Show the former and never expose the latter.
-        msg: [obj["msg"], obj["message"], obj["error"]]
-          .find((value): value is string => typeof value === "string" && value.trim().length > 0)
-          ?.trim() ?? STREAM_ERROR_NO_DETAILS,
+        msg: streamErrorMessage(obj),
         errorCode: strOrUndef(obj["error_code"] ?? obj["errorCode"] ?? obj["code"]),
         refId: strOrUndef(obj["ref_id"] ?? obj["refId"]),
       };
@@ -335,6 +339,19 @@ function numOrUndef(v: unknown): number | undefined {
 }
 function strOrUndef(v: unknown): string | undefined {
   return v == null ? undefined : String(v);
+}
+function streamErrorMessage(obj: Record<string, unknown>): string {
+  for (const key of ["msg", "message"]) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const alternate = obj["error"];
+  if (typeof alternate === "string" && PUBLIC_LEGACY_ERROR_TEXT.has(alternate.trim())) {
+    return alternate.trim();
+  }
+  // Never surface raw `error` or `reason`: historically these could carry
+  // provider exceptions or other internal details.
+  return STREAM_ERROR_NO_DETAILS;
 }
 function parseStrArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;

@@ -10,9 +10,9 @@
   reading optional error details and keeps the known HTTP status, including
   the sign-in hint for a 401. This does not assert that every reported 401 has
   the same cause.
-- **Stream errors remain failed turns.** The CLI shows Cloud's public `error`
-  text when `msg` is absent, or a clear fallback when no text is supplied. A
-  one-shot command exits nonzero even when a zero-cost `done` frame follows.
+- **Stream errors remain failed turns.** The CLI shows known fixed public media
+  error text when `msg` is absent, or a clear fallback for untrusted `error`
+  text. A one-shot command exits nonzero even when a zero-cost `done` follows.
 - **Public model documentation refreshed from Cloud's verified projection.**
   The projection's digest is checked before generating the packed documentation.
 ---

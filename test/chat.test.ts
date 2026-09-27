@@ -60,7 +60,7 @@ test("runTurn throws ChatTurnError when the server streams an error frame", asyn
   }
 });
 
-test("one-shot chat exits nonzero and renders the public error field or a fallback even when done follows", async () => {
+test("one-shot chat exits nonzero and renders only known public media errors or a fallback after done", async () => {
   const realFetch = globalThis.fetch;
   const realStderrWrite = process.stderr.write.bind(process.stderr);
   let stderr = "";
@@ -73,6 +73,7 @@ test("one-shot chat exits nonzero and renders the public error field or a fallba
       { wire: { type: "error" }, expected: STREAM_ERROR_NO_DETAILS },
       { wire: { type: "error", msg: "   " }, expected: STREAM_ERROR_NO_DETAILS },
       { wire: { type: "error", error: "The media studio agent hit an error.", reason: "private internal reason" }, expected: "The media studio agent hit an error." },
+      { wire: { type: "error", error: "private provider failure: secret-key", reason: "private internal reason" }, expected: STREAM_ERROR_NO_DETAILS },
     ]) {
       stderr = "";
       globalThis.fetch = sseFetch([
@@ -85,6 +86,7 @@ test("one-shot chat exits nonzero and renders the public error field or a fallba
       assert.ok(stderr.includes(`✗ ${expected}`));
       assert.doesNotMatch(stderr, /\n✗\s*\n/, "the operator must not see a bare error glyph");
       assert.doesNotMatch(stderr, /private internal reason/, "the private reason must not reach the terminal");
+      assert.doesNotMatch(stderr, /private provider failure|secret-key/, "an arbitrary error field must not reach the terminal");
     }
   } finally {
     globalThis.fetch = realFetch;
