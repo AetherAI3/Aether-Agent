@@ -16,11 +16,11 @@ before evaluating release readiness.
 | Source custody | ATS owns the canonical source. The Agent copy must match its recorded upstream source and digest; it is not a separate implementation. |
 | Required Cloud companion | Cloud #1691 at `13a6ef5857d14d036d7275d123c521a889d804f2`: `/agent/managed`, verified `/identity`, typed ATS profile and additive inventory contract `/1.1`, restacked after Cloud #1687 without replacing its admission/runtime ownership. This client also reads legacy `/1` inventories; local setup requires the verified subject endpoint. |
 | Local prerequisites | The ATS Python engine and a reachable Agent Browser runtime are separate prerequisites. The npm context dependency is a launcher, not proof that Python memory is installed or verified. |
-| Platform evidence | Audited `main` at `c0feb1970986cfaf166504ebe51b882aea608e4f` passed Linux and Windows tests plus Linux and Windows clean-install jobs in [CI 35358929047](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929047). Native headed Browser/noVNC remains Linux/POSIX-only and still needs its real-host release canary if browser availability is claimed. |
-| Archive evidence | The production-package verifier passed on audited `main`; the immutable `v0.4.0` tag archive, checksum and publishing provenance remain pending and must be produced from the final verified tag commit. |
-| Hosted checks | Audited `main` is green in [CI 35358929047](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929047), [CodeQL 35358929027](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929027) and its later [scheduled run 35601932145](https://github.com/AetherAI3/Aether-Agent/actions/runs/35601932145), plus [release truth 35358929055](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929055) and its later [scheduled run 35629835836](https://github.com/AetherAI3/Aether-Agent/actions/runs/35629835836). CI includes supply-chain, generated-documentation, production-package, clean-install and PyPI-launcher coverage. The final tag commit must rerun these gates. |
+| Platform evidence | `main` at `b037891d361ab295cd1fcba7e7dae00b626ac4fd` passed Linux and Windows tests plus both clean-install jobs in [CI 36350635579](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350635579). Native headed Browser/noVNC remains Linux/POSIX-only and still needs its real-host release canary if browser availability is claimed. |
+| Archive evidence | The production-package verifier passed on the exact `main` head in CI; the immutable `v0.4.0` tag archive, checksum and publishing provenance remain pending and must be produced from the final verified tag commit. |
+| Hosted checks | Exact `main` head `b037891d361ab295cd1fcba7e7dae00b626ac4fd` passed [CI 36350635579](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350635579), [CodeQL 36350635637](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350635637) and [release truth 36350635471](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350635471). CI includes supply-chain, generated-documentation, production-package, clean-install and PyPI-launcher coverage. The final tag commit must rerun these gates. |
 | Live service evidence | Deployment of the Cloud adapter, actual web/terminal DM sync, model/UVT execution and broker connectivity are not established by local tests. |
-| Publication evidence | No `v0.4.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance or registry dist-tag update is established by this packet. Published `latest` remains a separate registry fact until protected workflows complete. |
+| Publication evidence | At the 2026-09-27 21:09 UTC registry observation, npm `aether-agents` `latest` resolved to 0.3.2. No `v0.4.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance or registry dist-tag update is established by this packet. Recheck the registry immediately before any release decision. |
 | PyPI launcher | Version synchronized with `node packages/sync-version.mjs`; still launches npm `latest` unless explicitly pinned. No Python runtime dependency added. |
 | License scope | The Agent and bundled ATS adapter are Apache-2.0. The paid ATS engine is a separate prerequisite and is not bundled into the CLI. |
 | Governance evidence | Qualified legal review of `ATS_ACCEPTABLE_USE_POLICY.md` is not yet recorded. ATS publication remains withheld until that review and the real-account release canaries are attached. |
@@ -40,6 +40,71 @@ before evaluating release readiness.
    against the final candidate. Record unavailable boundaries as unavailable.
 5. Run the existing release-truth and supply-chain gates. Only the existing
    protected release workflows can establish publication and provenance.
+
+### 2026-09-27 interactive chat incident gate
+
+This addendum is a source and CI snapshot at 21:14 UTC, not a release
+approval. Repository `main` was
+[`b037891d361ab295cd1fcba7e7dae00b626ac4fd`](https://github.com/AetherAI3/Aether-Agent/commit/b037891d361ab295cd1fcba7e7dae00b626ac4fd)
+with `package.json` at 0.4.0; npm `latest` resolved to 0.3.2 in the 21:09 UTC
+registry observation. The
+incident class was an interactive `aether` turn started in a broad Windows
+home directory (`%USERPROFILE%`) that accepted a prompt without visibly
+responding, while one-shot chat from a small project directory returned.
+Reauthentication did not resolve the reported home-directory symptom. These
+are field observations, not a final-package live-account qualification.
+
+- [#180](https://github.com/AetherAI3/Aether-Agent/pull/180) is merged into
+  `main`. Its installed-tarball CI smoke drives the interactive raw-key
+  path with a synthetic loopback HTTP 401 whose response body never closes,
+  requiring a visible error and responsive `/exit` within eight seconds.
+  It ran in Linux and Windows clean-install CI and was added to the protected
+  npm release workflow. The harness emulates TTY input over pipes; it is not a
+  headed Windows console or real account test.
+- [#182](https://github.com/AetherAI3/Aether-Agent/pull/182) merged at
+  `b037891d361ab295cd1fcba7e7dae00b626ac4fd`. Its investigation found a
+  synchronous nested `AGENTS.md` scan before the request, so a broad home
+  directory could appear to hang while the small project directory worked.
+  The PR bounds nested discovery and warns when it is incomplete; local tool
+  authority is refused if nested rules could be missing. Its branch exercised
+  a built 0.4.0 CLI from the home folder with a synthetic invalid key in about
+  1.7 seconds, without a model call. One `readdirSync` operation itself cannot
+  be preempted by the budget. This fix is in `main`, not npm `latest` at this
+  snapshot.
+- [#181](https://github.com/AetherAI3/Aether-Agent/pull/181) merged at
+  `67cb640b36841ea923c143ed859ac9df45742a17`.
+  It rejects an undelimited SSE `done` frame at EOF, so an interrupted turn
+  remains uncertain instead of appearing successful. It is a separate stream
+  integrity fix, not the demonstrated pre-request home-folder stall.
+- The merged [#169](https://github.com/AetherAI3/Aether-Agent/pull/169)
+  credential-status diagnostics, [#170](https://github.com/AetherAI3/Aether-Agent/pull/170)
+  failed-stream termination and [#178](https://github.com/AetherAI3/Aether-Agent/pull/178)
+  Node TLS diagnostics are source fixes; none establishes that the installed
+  0.3.2 binary contains them or that a live account 401 is solved.
+
+The merged #182 PR head `ab70e07cec9282eb5f0da711d4be557bfcc0ba8b`
+passed Linux and Windows tests and clean installs, CodeQL, supply-chain and
+PyPI launcher checks in [CI 36350196224](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350196224)
+and [CodeQL 36350196297](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350196297).
+The exact merged `main` head passed
+[CI run 36350635579](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350635579),
+[CodeQL run 36350635637](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350635637)
+and [release truth 36350635471](https://github.com/AetherAI3/Aether-Agent/actions/runs/36350635471).
+The main CI includes Linux and Windows tests and clean installs,
+production-package verification, generated-documentation checks,
+supply-chain and PyPI launcher checks. The packed interactive 401 smoke ran
+in both clean-install jobs. This is exact source and packaged synthetic
+evidence, not a real home-directory/account canary.
+
+Before qualifying a 0.4.0 publication, establish exact-final-head CI,
+CodeQL, release truth, the production-package verifier and an
+installed-tarball interactive smoke
+from a broad Windows home directory. Follow that with a real headed Windows
+console and authenticated account canary from the same directory, including
+both interactive `aether` and `aether chat "just testing reply 1"`; preserve
+the observed response or terminal error and the absence of a stall. A green
+synthetic 401 fixture alone cannot satisfy the live account canary. The
+existing Cloud/ATS/browser/legal gates in this packet still apply.
 
 ## Product boundary
 
