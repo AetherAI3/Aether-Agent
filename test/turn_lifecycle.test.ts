@@ -224,6 +224,65 @@ test("streamed 402 after a partial delta preserves text and adds actionable sani
   }
 });
 
+test("one-shot fixed legacy media error is visible without exposing reason or trailing done", async () => {
+  resetRegistry();
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return sseResponse([
+      { type: "error", error: "The media studio agent hit an error.", reason: "internal detail" },
+      { type: "done", uvt: 0, cents: 0 },
+    ]);
+  }) as typeof globalThis.fetch;
+  try {
+    const result = await captureWrites(() => cmdChat(cloudContext(), "ship this"));
+    assert.equal(result.value, 1);
+    assert.equal(calls, 1, "a terminal error must not retry or switch transports");
+    assert.match(result.stderr, /The media studio agent hit an error\./);
+    assert.doesNotMatch(result.stderr, /internal detail|0 UVT/i);
+    assert.equal(result.stdout, "", "an error must not fabricate model output");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("one-shot arbitrary error-key text is hidden while the turn still fails", async () => {
+  resetRegistry();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => sseResponse([
+    { type: "error", error: "provider token=SECRET\u001b]52;c;payload\u0007", reason: "internal detail" },
+    { type: "done", uvt: 0, cents: 0 },
+  ])) as typeof globalThis.fetch;
+  try {
+    const result = await captureWrites(() => cmdChat(cloudContext(), "ship this"));
+    assert.equal(result.value, 1);
+    assert.match(result.stderr, /turn failed/i);
+    assert.doesNotMatch(result.stderr, /SECRET|internal detail|\u001b\]52|0 UVT/i);
+    assert.equal(result.stdout, "");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("one-shot blank error frame remains a failed turn with a fallback message", async () => {
+  resetRegistry();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => sseResponse([
+    { type: "error", msg: "  ", reason: "internal detail" },
+    { type: "done", uvt: 0, cents: 0 },
+  ])) as typeof globalThis.fetch;
+  try {
+    const result = await captureWrites(() => cmdChat(cloudContext(), "ship this"));
+    assert.equal(result.value, 1);
+    assert.match(result.stderr, /turn failed/i);
+    assert.doesNotMatch(result.stderr, /internal detail|0 UVT/i);
+    assert.equal(result.stdout, "");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("empty-body 402 still gives a visible balance action and a nonzero one-shot result", async () => {
   resetRegistry();
   const realFetch = globalThis.fetch;

@@ -145,7 +145,7 @@ function normalizeFrameBody(obj: Record<string, unknown>): StreamFrameBody | nul
     case "error":
       return {
         type: "error",
-        msg: String(obj["msg"] ?? obj["message"] ?? ""),
+        msg: streamErrorMessage(obj),
         errorCode: strOrUndef(obj["error_code"] ?? obj["errorCode"] ?? obj["code"]),
         refId: strOrUndef(obj["ref_id"] ?? obj["refId"]),
       };
@@ -367,6 +367,26 @@ function numOrUndef(v: unknown): number | undefined {
 }
 function strOrUndef(v: unknown): string | undefined {
   return v == null ? undefined : String(v);
+}
+
+const LEGACY_PUBLIC_STREAM_ERRORS = new Set([
+  "The media studio agent hit an error.",
+  "generation registry did not reach a terminal state",
+]);
+
+function streamErrorMessage(obj: Record<string, unknown>): string {
+  // Only msg/message are a public message contract. Legacy media frames use
+  // fixed public `error` strings, but other `error` values may be provider
+  // exception text. Never map the internal `reason` field into a frame.
+  for (const key of ["msg", "message"]) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  const legacyError = obj["error"];
+  if (typeof legacyError === "string" && LEGACY_PUBLIC_STREAM_ERRORS.has(legacyError)) {
+    return legacyError;
+  }
+  return "";
 }
 function parseStrArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;

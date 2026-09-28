@@ -222,9 +222,12 @@ export class ApiClient {
   }
 
   private async runSessionRefresh(usedToken: string, flight: RefreshFlight): Promise<boolean> {
+    // Also race the header and body promises against this deadline. A fetch
+    // implementation can return 200 headers while its JSON body never ends,
+    // even after the passed signal aborts; that must not pin the shared flight.
     const signal = AbortSignal.any([flight.controller.signal, AbortSignal.timeout(10_000)]);
     try {
-      const res = await fetch(this.url(REFRESH_PATH), {
+      const res = await raceAgainst(fetch(this.url(REFRESH_PATH), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -233,21 +236,21 @@ export class ApiClient {
         },
         body: "{}",
         signal,
-      });
-      if (flight.controller.signal.aborted || !res.ok) return false;
+      }), signal, 0);
+      if (signal.aborted || !res.ok) return false;
       let body: { session_token?: string } | undefined;
       try {
-        body = (await res.json()) as { session_token?: string };
+        body = (await raceAgainst(res.json(), signal, 0)) as { session_token?: string };
       } catch {
         return false;
       }
-      if (flight.controller.signal.aborted || !body?.session_token) return false;
+      if (signal.aborted || !body?.session_token) return false;
 
       // Do not overwrite a rotation performed by another process while this
       // network request was in flight. A matching fresh value already means
       // callers may retry; any other value belongs to a newer authority.
-      const current = await this.tokens.get();
-      if (flight.controller.signal.aborted) return false;
+      const current = await raceAgainst(this.tokens.get(), signal, 0);
+      if (signal.aborted) return false;
       if (current !== usedToken) return current === body.session_token;
 
       // update() (when the store distinguishes it) swaps the ACTIVE token
@@ -258,7 +261,7 @@ export class ApiClient {
       // never return to the caller before a late credential mutation occurs.
       flight.committing = true;
       await (this.tokens.update?.(body.session_token) ?? this.tokens.set(body.session_token));
-      return !flight.controller.signal.aborted;
+      return !signal.aborted;
     } catch {
       return false;
     }
