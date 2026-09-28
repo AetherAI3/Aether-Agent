@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { controlledEdgeExecutable, inspectControlledPage } from "../src/core/pc/browser_inspect.js";
+import { PcActionBroker } from "../src/core/pc/broker.js";
+import { PcHostGateway, type PcAuditEntry } from "../src/core/pc/gateway.js";
 
 test("controlled Edge inspects a real loopback page without returning page text", {
   skip: !controlledEdgeExecutable() ? "Edge Stable is not installed on this runner" : false,
@@ -39,6 +41,33 @@ test("controlled Edge inspects a real loopback page without returning page text"
 test("controlled Edge refuses non-HTTPS remote URLs before launching", async () => {
   await assert.rejects(() => inspectControlledPage("http://example.com/"), /clean HTTPS target/);
   await assert.rejects(() => inspectControlledPage("https://user:pass@example.com/"), /clean HTTPS target/);
+});
+
+test("a pre-cancelled inspection launches no browser", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const result = await inspectControlledPage("https://app.aethersystems.net/", { signal: controller.signal });
+  assert.equal(result.state, "failed");
+  assert.equal(result.browserLaunched, false);
+  assert.equal(result.navigationAttempted, false);
+  assert.equal(result.profileCleaned, true);
+  assert.match(result.reason, /cancelled/);
+});
+
+test("cancellation closes an owned Edge profile before a draft action", {
+  skip: !controlledEdgeExecutable() ? "Edge Stable is not installed on this runner" : false,
+}, async () => {
+  const controller = new AbortController();
+  let draftReady = false;
+  const pending = inspectControlledPage("http://127.0.0.1:9/", {
+    allowHttpLoopback: true, headless: true, timeoutMs: 45_000, signal: controller.signal,
+  }, async () => { draftReady = true; });
+  setTimeout(() => controller.abort(), 300);
+  const result = await pending;
+  assert.equal(result.state, "failed");
+  assert.match(result.reason, /cancelled/);
+  assert.equal(result.profileCleaned, true);
+  assert.equal(draftReady, false);
 });
 
 test("controlled Edge treats main-document HTTP 4xx and 5xx as errors without inspecting content", {
@@ -99,5 +128,108 @@ test("controlled Edge stops on a cross-origin redirect without inspecting its st
   } finally {
     await new Promise<void>((resolve) => source.close(() => resolve()));
     await new Promise<void>((resolve) => destination.close(() => resolve()));
+  }
+});
+
+test("controlled Edge inserts only into one observed empty composer and returns no draft text", {
+  skip: !controlledEdgeExecutable() ? "Edge Stable is not installed on this runner" : false,
+}, async () => {
+  const secret = "DRAFT-SECRET-MUST-NOT-LEAK";
+  const server = createServer((_req, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end("<html><body><main><h1>Draft</h1><textarea></textarea></main></body></html>");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = (server.address() as AddressInfo).port;
+    const entries: PcAuditEntry[] = [];
+    const broker = new PcActionBroker("session", "user", { interactive: true, approve: async () => true });
+    const gateway = new PcHostGateway(broker, { append: (entry) => { entries.push(entry); } });
+    let action: { dispatched: boolean; verified: boolean } | null = null;
+    const result = await inspectControlledPage(`http://127.0.0.1:${port}/`, {
+      allowHttpLoopback: true, headless: true, timeoutMs: 45_000,
+    }, async (composer) => {
+      assert.equal(composer.kind, "textarea");
+      assert.equal(await composer.observe(), composer.identity);
+      const plan = broker.plan({ adapter: "browser.draft", operation: composer.kind,
+        target: composer.identity, expectedState: composer.identity });
+      const receipt = await gateway.execute(plan, () => composer.observe(), async () => {
+        action = await composer.insert(secret);
+        return action;
+      });
+      assert.equal(receipt.status, "succeeded");
+    });
+    assert.deepEqual(action, { dispatched: true, verified: true }, JSON.stringify(result));
+    assert.equal(result.state, "rendered", result.reason);
+    assert.equal(result.profileCleaned, true);
+    assert.deepEqual(entries.map((entry) => entry.phase), ["intent", "outcome"]);
+    assert.equal(entries[1]?.verified, true);
+    assert.doesNotMatch(JSON.stringify(entries), new RegExp(secret));
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(secret));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("controlled Edge refuses a replaced composer before text insertion", {
+  skip: !controlledEdgeExecutable() ? "Edge Stable is not installed on this runner" : false,
+}, async () => {
+  const server = createServer((_req, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end('<html><body><main><textarea></textarea></main><script>setTimeout(() => { document.querySelector("textarea").replaceWith(document.createElement("textarea")); }, 150)</script></body></html>');
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = (server.address() as AddressInfo).port;
+    let action: { dispatched: boolean; verified: boolean } | null = null;
+    const result = await inspectControlledPage(`http://127.0.0.1:${port}/`, {
+      allowHttpLoopback: true, headless: true, timeoutMs: 45_000,
+    }, async (composer) => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+      assert.equal(await composer.observe(), "stale");
+      action = await composer.insert("MUST-NOT-INSERT");
+    });
+    assert.deepEqual(action, { dispatched: false, verified: false });
+    assert.equal(result.profileCleaned, true);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("declined draft grant has zero input effect and no draft text in the audit", {
+  skip: !controlledEdgeExecutable() ? "Edge Stable is not installed on this runner" : false,
+}, async () => {
+  let inputEffects = 0;
+  const server = createServer((request, response) => {
+    if (request.url === "/effect") {
+      inputEffects++;
+      response.writeHead(204).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end('<html><body><main><textarea></textarea></main><script>document.querySelector("textarea").addEventListener("input", () => fetch("/effect", {method:"POST"}))</script></body></html>');
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = (server.address() as AddressInfo).port;
+    const entries: PcAuditEntry[] = [];
+    const broker = new PcActionBroker("session", "user", { interactive: true, approve: async () => false });
+    const gateway = new PcHostGateway(broker, { append: (entry) => { entries.push(entry); } });
+    let status: string | null = null;
+    const result = await inspectControlledPage(`http://127.0.0.1:${port}/`, {
+      allowHttpLoopback: true, headless: true, timeoutMs: 45_000,
+    }, async (composer) => {
+      const plan = broker.plan({ adapter: "browser.draft", operation: composer.kind,
+        target: composer.identity, expectedState: composer.identity });
+      const receipt = await gateway.execute(plan, () => composer.observe(), () => composer.insert("SECRET-DRAFT"));
+      status = receipt.status;
+    });
+    assert.equal(status, "denied");
+    assert.equal(inputEffects, 0);
+    assert.equal(entries.length, 0);
+    assert.equal(result.profileCleaned, true);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET-DRAFT/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

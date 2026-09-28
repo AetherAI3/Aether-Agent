@@ -5,7 +5,7 @@ import type { AppContext } from "../core/context.js";
 import type { CommandFlags } from "../core/command_dispatch.js";
 import { detectBrowserRuntime, verifyBrowserLaunch, type VerifyResult } from "../core/browser_runtime.js";
 import { openTargetChecked } from "../core/opener.js";
-import { PcActionBroker } from "../core/pc/broker.js";
+import { PcActionBroker, type PcActionReceipt } from "../core/pc/broker.js";
 import { controlledEdgeExecutable, inspectControlledPage, type BrowserInspection } from "../core/pc/browser_inspect.js";
 import { PcFileAudit, PcHostGateway } from "../core/pc/gateway.js";
 import { PC_TARGETS, isPcTarget, pcDoctor, pcMap, pcMapV2, pcTargetUrl, type PcDoctorReport } from "../core/pc/doctor.js";
@@ -28,12 +28,29 @@ function renderDoctor(report: PcDoctorReport): string {
   return lines.join("\n") + "\n";
 }
 
-async function explicitApproval(message: string): Promise<boolean> {
+async function explicitApproval(message: string, signal?: AbortSignal): Promise<boolean> {
   if (!process.stdin.isTTY) return false;
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
-    const answer = await new Promise<string>((resolve) => rl.question(`${message}\nApprove this one action? [y/N] `, resolve));
+    const answer = await new Promise<string>((resolve) => {
+      const done = (value: string) => { signal?.removeEventListener("abort", abort); resolve(value); };
+      const abort = () => { rl.close(); done(""); };
+      if (signal?.aborted) { done(""); return; }
+      signal?.addEventListener("abort", abort, { once: true });
+      rl.question(`${message}\nApprove this one action? [y/N] `, done);
+    });
     return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+async function draftLine(): Promise<string | null> {
+  if (!process.stdin.isTTY) return null;
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const value = await new Promise<string>((resolve) => rl.question("Draft text (one line, at most 2000 characters): ", resolve));
+    return value.length > 0 && value.length <= 2000 && !/[\r\n\0]/.test(value) ? value : null;
   } finally {
     rl.close();
   }
@@ -168,6 +185,65 @@ export async function cmdPc(ctx: AppContext, argv: string[], flags: CommandFlags
       `Browser inspection: ${proof?.state ?? receipt.status}\n${proof?.reason ?? receipt.reason}\n`);
     return receipt.status === "succeeded" ? 0 : 3;
   }
-  process.stderr.write("usage: aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt] | inspect-browser [aether-cloud|claude|chatgpt]\n");
+  if (sub === "draft-browser" && argv.length === 2) {
+    const target = argv[1]!;
+    if (!isPcTarget(target) || target === "ollama") {
+      process.stderr.write("PC browser draft supports aether-cloud, claude and chatgpt.\n");
+      return 2;
+    }
+    if (ctx.flags.yes || !process.stdin.isTTY) {
+      process.stderr.write("PC browser draft requires fresh interactive approval; --yes and headless execution do not grant it.\n");
+      return 3;
+    }
+    const executable = controlledEdgeExecutable();
+    if (!executable) {
+      process.stderr.write("Controlled Edge browser unavailable on this Windows installation.\n");
+      return 3;
+    }
+    const text = await draftLine();
+    if (text === null) {
+      process.stderr.write("Draft text must be one nonempty line of at most 2000 characters.\n");
+      return 2;
+    }
+    const url = pcTargetUrl(target);
+    let draftAbort: AbortController | null = null;
+    const broker = new PcActionBroker(randomUUID(), userInfo().username, {
+      interactive: true,
+      approve: (plan) => plan.adapter === "browser.inspect"
+        ? explicitApproval(`Open and inspect ${new URL(url).origin} in a disposable Edge profile?`)
+        : explicitApproval(`Insert ${text.length} characters into the observed empty ${plan.operation} at ${new URL(url).origin}? Element ${plan.target.split(":").at(-1)}. The site may save or send data when focused or typed into.`, draftAbort?.signal),
+    });
+    const gateway = new PcHostGateway(broker, new PcFileAudit());
+    const plan = broker.plan({ adapter: "browser.inspect", operation: "inspect", target, expectedState: executable });
+    const observation: { inspection?: BrowserInspection; draftReceipt?: PcActionReceipt } = {};
+    const openReceipt = await gateway.execute(plan, () => controlledEdgeExecutable() ?? "unavailable", async () => {
+      draftAbort = new AbortController();
+      const onInterrupt = () => draftAbort?.abort();
+      process.once("SIGINT", onInterrupt);
+      try {
+        observation.inspection = await inspectControlledPage(url, { signal: draftAbort.signal }, async (composer) => {
+          const action = broker.plan({
+            adapter: "browser.draft", operation: composer.kind,
+            target: `${target}:${composer.identity}`, expectedState: composer.identity,
+          }, 60_000);
+          observation.draftReceipt = await gateway.execute(action, () => composer.observe(), () => composer.insert(text));
+        });
+      } finally {
+        process.removeListener("SIGINT", onInterrupt);
+      }
+      return {
+        dispatched: observation.inspection.browserLaunched,
+        verified: observation.inspection.profileCleaned && (observation.inspection.state === "rendered" || observation.inspection.state === "login-required"),
+      };
+    });
+    const finalReceipt = observation.draftReceipt?.status === "succeeded" && openReceipt.status !== "succeeded"
+      ? { ...observation.draftReceipt, status: "unknown" as const, reason: "draft insertion succeeded but browser inspection or cleanup failed; verify before retry" }
+      : observation.draftReceipt;
+    process.stdout.write(ctx.flags.json ? JSON.stringify({ openReceipt, draftReceipt: finalReceipt ?? null, proof: observation.inspection ?? null }) + "\n"
+      : `Browser draft: ${finalReceipt?.status ?? "unavailable"}\n${finalReceipt?.reason ??
+        (observation.inspection?.state === "rendered" ? "No single empty editable composer was observed." : observation.inspection?.reason) ?? openReceipt.reason}\n`);
+    return openReceipt.status === "succeeded" && finalReceipt?.status === "succeeded" ? 0 : 3;
+  }
+  process.stderr.write("usage: aether pc map [v1|v2] | doctor [aether-cloud|claude|chatgpt|ollama] [--probe-network] | verify-browser | open [aether-cloud|claude|chatgpt] | inspect-browser [aether-cloud|claude|chatgpt] | draft-browser [aether-cloud|claude|chatgpt]\n");
   return 2;
 }

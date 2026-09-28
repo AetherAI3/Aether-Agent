@@ -14,6 +14,7 @@ or hosted-service entitlement claim.
 | `aether pc verify-browser` | Opens a loopback readiness page | Interactive approval and a one-use callback prove that a browser rendered the page. The listener closes after the result. |
 | `aether pc open [aether-cloud\|claude\|chatgpt]` | Opens one fixed site | One-use interactive approval bound to target and detected browser state. `--yes` and headless sessions cannot approve. Launcher start is reported as dispatch, not as verified page rendering. |
 | `aether pc inspect-browser [aether-cloud\|claude\|chatgpt] [--json]` | Opens a fixed HTTPS site in a disposable Edge profile | After fresh interactive approval, observes a real top-level document, checks its origin, loader identity, and bounded main-document HTTP status class, then reports only fixed structural booleans for a successful response. HTTP 4xx/5xx return `http-error` without inspecting structure. `rendered` does not mean authenticated; `login-required` means a password field or login route was observed. The profile is closed and removed afterward. |
+| `aether pc draft-browser [aether-cloud\|claude\|chatgpt] [--json]` | Inserts one locally typed line into one observed empty composer in a disposable Edge profile | Requires approval to open the page and a second approval bound to its document and element identity before insertion. It rechecks origin, tab count, document loader, element identity, positive layout box, and empty state before focus and again before insertion; then checks that the DOM contains the entered text without returning it. The site may save or send data in response to typing or focus. It never clicks a send button. Missing or changed composers refuse text insertion. |
 
 `pc doctor` reports recommendations from observed resource pressure. CPU and
 memory now use three timed samples and show their range. The optional fixed
@@ -68,7 +69,12 @@ inspection. It watches for extra page targets during navigation and fails proof
 if one appears, even if that page closes before the final count. Its
 `browser.inspect` map entry remains **unverified** merely from
 driver presence; the receipt from a particular run carries that run's proof.
-Browser clicking, typing, and authenticated-session claims remain unavailable.
+Generic browser clicking, sending, and authenticated-session claims remain unavailable.
+The v2 map lists `browser.draft` separately from generic `browser.act` and does
+not infer runtime, installed, or hosted qualification from source presence.
+Draft text is entered at the terminal, is not accepted in command arguments,
+and is omitted from receipts and the redacted audit journal. A controlled
+page can react to typing, so the second approval explicitly covers that risk.
 The temporary DevTools endpoint is local to this user's session, not an OS
 isolation boundary against another same-user process. A failed profile cleanup
 turns inspection into failure and is reported instead of hidden.
