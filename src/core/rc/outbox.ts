@@ -54,6 +54,12 @@ export const RC_OUTBOX_SCHEMA = "aether.rc_outbox/1";
 /** Spec §6.2 bounds: events per append, and the local queue ceiling. */
 export const RC_MAX_BATCH = 32;
 export const RC_MAX_OUTBOX_EVENTS = 1_000;
+export const RC_MAX_OBSERVED_WORKERS = 1_000;
+
+export interface ObservedWorker {
+  status: string;
+  summary: string;
+}
 
 /** One sanitized event, durable. `payload` has already passed the allowlist. */
 export interface PersistedEvent {
@@ -85,6 +91,8 @@ export interface OutboxRecord {
   quarantined: number;
   /** Spec §5.4: written BEFORE the network revoke, cleared only after it. */
   revoke_pending: boolean;
+  /** Last published worker state, retained after receipts to dedupe replayed trees. */
+  observed_workers: Record<string, ObservedWorker>;
 }
 
 export interface CreateOutboxOptions {
@@ -109,6 +117,7 @@ export function createOutbox(options: CreateOutboxOptions): OutboxRecord {
     dropped: 0,
     quarantined: 0,
     revoke_pending: false,
+    observed_workers: Object.create(null) as Record<string, ObservedWorker>,
   };
 }
 
@@ -261,6 +270,15 @@ export function loadOutbox(path: string, projectRoot: string): OutboxRecord {
   record.dropped = finiteInt(parsed["dropped"], 0);
   record.quarantined = finiteInt(parsed["quarantined"], 0);
   record.revoke_pending = parsed["revoke_pending"] === true;
+  const observed = parsed["observed_workers"];
+  if (isPlainObject(observed)) {
+    for (const [id, value] of Object.entries(observed).slice(0, RC_MAX_OBSERVED_WORKERS)) {
+      if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id) || !isPlainObject(value)) continue;
+      if (typeof value["status"] !== "string" || typeof value["summary"] !== "string") continue;
+      if (value["status"].length > 32 || value["summary"].length > 128) continue;
+      record.observed_workers[id] = { status: value["status"], summary: value["summary"] };
+    }
+  }
 
   const rawEvents = Array.isArray(parsed["events"]) ? parsed["events"] : [];
   let lastSeq = 0;
