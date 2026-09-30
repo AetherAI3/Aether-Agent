@@ -125,6 +125,13 @@ export interface MirrorResult {
   freshness: MirrorFreshness;
 }
 
+/** `ls-remote --symref origin HEAD` is the remote's advertised default, not a local ref. */
+function advertisedDefault(output: string): { branch: string; tip: string } | null {
+  const branch = output.match(/^ref: (refs\/heads\/[^\t\r\n]+)\tHEAD$/m)?.[1];
+  const tip = output.match(/^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})\tHEAD$/m)?.[1];
+  return branch && tip ? { branch, tip: tip.toLowerCase() } : null;
+}
+
 /**
  * Validate and refresh an existing mirror before anything branches off it.
  *
@@ -151,21 +158,17 @@ export function refreshMirror(
   options: { exists: boolean; now?: string },
 ): MirrorResult {
   const checkedAt = options.now ?? new Date().toISOString();
+  const unknown = (reason: string): MirrorResult => ({
+    dir,
+    freshness: { state: "unknown", remoteTip: null, checkedAt, reason },
+  });
   if (!options.exists) {
-    return { dir, freshness: { state: "unknown", remoteTip: null, checkedAt, reason: "no local mirror yet" } };
+    return unknown("no local mirror yet");
   }
 
   const remote = run("git", ["-C", dir, "remote", "get-url", "origin"]);
   if (remote.status !== 0) {
-    return {
-      dir,
-      freshness: {
-        state: "unknown",
-        remoteTip: null,
-        checkedAt,
-        reason: remote.stderr.trim() || "could not read the mirror's origin remote",
-      },
-    };
+    return unknown(remote.stderr.trim() || "could not read the mirror's origin remote");
   }
   // parseRepoSpec already normalizes https/ssh/.git/trailing-slash forms, so
   // comparing through it avoids a second, subtly different URL parser.
@@ -181,21 +184,37 @@ export function refreshMirror(
     throw new Error(`local mirror at ${dir} does not point at ${spec.full} — its origin is ${actual}`);
   }
 
-  const fetched = run("git", ["-C", dir, "fetch", "--prune", "origin"]);
+  const advertised = run("git", ["-C", dir, "ls-remote", "--symref", "origin", "HEAD"]);
+  if (advertised.status !== 0) {
+    return unknown((advertised.stderr || advertised.stdout).trim() || "could not query the remote default branch");
+  }
+  const defaultBranch = advertisedDefault(advertised.stdout);
+  if (!defaultBranch) return unknown("remote did not advertise a default branch and commit");
+
+  // Fetch the advertised branch into its exact tracking ref. A plain fetch's
+  // FETCH_HEAD can instead follow the mirror's checked-out feature branch.
+  const trackingRef = `refs/remotes/origin/${defaultBranch.branch.slice("refs/heads/".length)}`;
+  const fetched = run("git", ["-C", dir, "fetch", "--no-tags", "origin", `+${defaultBranch.branch}:${trackingRef}`]);
   if (fetched.status !== 0) {
-    return {
-      dir,
-      freshness: {
-        state: "unknown",
-        remoteTip: null,
-        checkedAt,
-        reason: (fetched.stderr || fetched.stdout).trim() || "git fetch failed",
-      },
-    };
+    return unknown((fetched.stderr || fetched.stdout).trim() || "git fetch failed");
   }
 
-  const tip = run("git", ["-C", dir, "rev-parse", "FETCH_HEAD"]);
-  const remoteTip = tip.status === 0 ? tip.stdout.trim() || null : null;
+  const tip = run("git", ["-C", dir, "rev-parse", "--verify", `${trackingRef}^{commit}`]);
+  const remoteTip = tip.status === 0 ? tip.stdout.trim().toLowerCase() : "";
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(remoteTip) || remoteTip !== defaultBranch.tip) {
+    return unknown("fetched default branch commit does not match the remote's advertised commit");
+  }
+
+  // A default-branch switch (or force push) during the fetch must not make an
+  // already obsolete base look fresh. The next run can retry the new default.
+  const confirmed = run("git", ["-C", dir, "ls-remote", "--symref", "origin", "HEAD"]);
+  if (confirmed.status !== 0) {
+    return unknown((confirmed.stderr || confirmed.stdout).trim() || "could not confirm the remote default branch");
+  }
+  const currentDefault = advertisedDefault(confirmed.stdout);
+  if (!currentDefault || currentDefault.branch !== defaultBranch.branch || currentDefault.tip !== remoteTip) {
+    return unknown("remote default branch changed during refresh; retry");
+  }
   return { dir, freshness: { state: "fresh", remoteTip, checkedAt } };
 }
 

@@ -174,9 +174,16 @@ test("controlled Edge inserts only into one observed empty composer and returns 
 test("controlled Edge refuses a replaced composer before text insertion", {
   skip: !controlledEdgeExecutable() ? "Edge Stable is not installed on this runner" : false,
 }, async () => {
-  const server = createServer((_req, response) => {
+  let replace = false;
+  const server = createServer((request, response) => {
+    if (request.url === "/replace") {
+      if (request.method === "POST") replace = true;
+      response.writeHead(request.method === "POST" ? 204 : 200, { "content-type": "text/plain" });
+      response.end(request.method === "POST" ? undefined : replace ? "yes" : "no");
+      return;
+    }
     response.writeHead(200, { "content-type": "text/html" });
-    response.end('<html><body><main><textarea></textarea></main><script>setTimeout(() => { document.querySelector("textarea").replaceWith(document.createElement("textarea")); }, 150)</script></body></html>');
+    response.end('<html><body><main><textarea></textarea></main><script>let replaced=false; setInterval(async () => { if (!replaced && await fetch("/replace").then(r => r.text()) === "yes") { replaced=true; document.querySelector("textarea").replaceWith(document.createElement("textarea")); } }, 50)</script></body></html>');
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -185,7 +192,12 @@ test("controlled Edge refuses a replaced composer before text insertion", {
     const result = await inspectControlledPage(`http://127.0.0.1:${port}/`, {
       allowHttpLoopback: true, headless: true, timeoutMs: 45_000,
     }, async (composer) => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+      assert.equal(await composer.observe(), composer.identity);
+      const triggered = await fetch(`http://127.0.0.1:${port}/replace`, { method: "POST" });
+      assert.equal(triggered.status, 204);
+      for (let attempt = 0; attempt < 30 && await composer.observe() !== "stale"; attempt++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      }
       assert.equal(await composer.observe(), "stale");
       action = await composer.insert("MUST-NOT-INSERT");
     });
