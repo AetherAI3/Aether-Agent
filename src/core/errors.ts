@@ -66,6 +66,23 @@ export class MeaningfulProgressTimeoutError extends StreamTimeoutError {
   }
 }
 
+/** Absolute bound for an interactive chat turn, even when bytes keep arriving. */
+export class TurnDeadlineError extends StreamTimeoutError {
+  constructor(timeoutMs: number) {
+    super(timeoutMs);
+    this.name = "TurnDeadlineError";
+    this.message = `turn exceeded its ${Math.round(timeoutMs / 1000)}s maximum duration; the request was cancelled`;
+  }
+}
+
+/** Model text exceeded the per-segment output budget. */
+export class ModelOutputLimitError extends Error {
+  constructor(public limitBytes: number) {
+    super(`model output exceeded ${limitBytes} bytes in one segment; the turn was cancelled`);
+    this.name = "ModelOutputLimitError";
+  }
+}
+
 /**
  * A chat/agent SSE stream ended (the underlying byte stream closed normally,
  * no throw) without ever delivering a terminal `done` or `error` frame.
@@ -165,7 +182,7 @@ export function tlsCaHint(err: unknown): string | null {
   const code = (err.cause as { code?: unknown } | undefined)?.code;
   if (typeof code !== "string" || !TLS_CA_CODES.has(code)) return null;
   return process.platform === "win32"
-    ? "TLS certificate trust failed — set NODE_USE_SYSTEM_CA=1 for Aether Agent so Node uses the Windows trust store"
+    ? "TLS certificate trust failed — set NODE_OPTIONS=--use-system-ca for Aether Agent so Node uses the Windows trust store"
     : "TLS certificate trust failed — install the trusted issuer or configure NODE_EXTRA_CA_CERTS";
 }
 
@@ -218,6 +235,8 @@ export function nonHttpErrorHint(err: unknown): string | null {
   if (tlsHint !== null) return tlsHint;
   if (err instanceof MalformedResponseError) return "retry, or /doctor to check connectivity";
   if (err instanceof StreamEventTooLargeError) return "retry, or /doctor to inspect the server stream";
+  if (err instanceof TurnDeadlineError) return "retry the prompt, or narrow the task into smaller turns";
+  if (err instanceof ModelOutputLimitError) return "retry with a narrower prompt or split the task into smaller turns";
   if (err instanceof StreamTimeoutError) return "the stream went quiet - retry, or /doctor to check connectivity";
   if (err instanceof StreamIncompleteError) return "retry, or /doctor to check connectivity";
   if (err instanceof RequestTimeoutError) return "the request went quiet - retry, or /doctor to check connectivity";

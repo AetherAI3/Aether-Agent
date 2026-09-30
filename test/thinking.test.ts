@@ -65,13 +65,16 @@ test("disabled pulse writes zero bytes, ever", () => {
 test("onPaint fires after every repaint (lets the REPL re-sync its input line)", () => {
   let out = "";
   let paints = 0;
+  let lastFrame = "";
   const p = new ThinkingPulse({
     write: (s) => (out += s),
     intervalMs: 60_000,
-    onPaint: () => paints++,
+    onPaint: (frame) => { paints++; lastFrame = frame; },
   });
   p.start();
   assert.equal(paints, 1);
+  assert.match(lastFrame, /thinking/);
+  assert.ok(out.includes(lastFrame), "the REPL can redraw its input with the live pulse still visible");
   p.stop();
   assert.equal(paints, 1, "stop() must not itself trigger a paint");
 });

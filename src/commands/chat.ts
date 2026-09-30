@@ -16,6 +16,7 @@ import {
   StreamIncompleteError,
   StreamTimeoutError,
   StreamUnavailableError,
+  TurnDeadlineError,
   errorHint,
   errorMessage,
   isAbortError,
@@ -37,6 +38,9 @@ import { InputBuffer } from "../ui/input_line.js";
 import { renderInputView } from "../ui/input_render.js";
 import { decodeKey, splitKeys } from "../ui/keys.js";
 import { ThinkingPulse } from "../ui/thinking.js";
+import { ModelTextProgress } from "../core/model_text_progress.js";
+import { ModelOutputBudget } from "../core/model_output_budget.js";
+import { sanitizeTerm, visibleWidth } from "../ui/text.js";
 import { registerRestore } from "../ui/restore.js";
 import { completeManifestSlash } from "./command_manifest.js";
 // history_store.ts (origin/main's own persistence + AETHER_NO_HISTORY opt-out)
@@ -93,6 +97,13 @@ export interface TurnSkillOptions {
   noSkills?: boolean;
 }
 
+export const DEFAULT_CHAT_TURN_DEADLINE_MS = 30 * 60_000;
+/** A positive override is useful for tests and operators; 0 cannot disable it. */
+export function chatTurnDeadlineMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const parsed = Number(env["AETHER_CHAT_TURN_DEADLINE_MS"]);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.floor(parsed)) : DEFAULT_CHAT_TURN_DEADLINE_MS;
+}
+
 export class ChatTurnError extends Error {
   constructor(
     msg: string,
@@ -109,8 +120,8 @@ export class ChatTurnError extends Error {
  * replayed metadata cannot extend the hard turn deadline; visible text and
  * genuine monotonic/state changes can. */
 class StreamProgressTracker {
-  private maxUsageUvt = Number.NEGATIVE_INFINITY;
-  private maxUsageCents = Number.NEGATIVE_INFINITY;
+  private readonly modelText = new ModelTextProgress();
+  private readonly taskText = new Map<string, ModelTextProgress>();
   private connected = false;
   private projectDone = false;
   private readonly seenStateFrames = new Set<string>();
@@ -126,16 +137,11 @@ class StreamProgressTracker {
         return false;
       case "delta":
       case "reasoning":
-        return sanitizeServerText(frame.text).trim().length > 0;
+        return this.modelText.meaningful(frame.text);
       case "progress":
         return this.nonEmptyOnce("progress:", frame.text ?? "");
-      case "usage": {
-        if (!Number.isFinite(frame.uvt) || !Number.isFinite(frame.cents)) return false;
-        const advanced = frame.uvt > this.maxUsageUvt || frame.cents > this.maxUsageCents;
-        this.maxUsageUvt = Math.max(this.maxUsageUvt, frame.uvt);
-        this.maxUsageCents = Math.max(this.maxUsageCents, frame.cents);
-        return advanced;
-      }
+      case "usage":
+        return false; // spend can rise while a model repeats itself
       case "connected":
         if (this.connected) return false;
         this.connected = true;
@@ -145,9 +151,11 @@ class StreamProgressTracker {
         this.projectDone = true;
         return true;
       case "task_progress":
-        return this.once(
-          `task_progress:${frame.taskId}:${sanitizeServerText(frame.delta ?? "")}:${frame.uvt ?? ""}:${frame.cents ?? ""}`,
-        );
+        if (!this.taskText.has(frame.taskId)) {
+          if (this.taskText.size >= 16) return false;
+          this.taskText.set(frame.taskId, new ModelTextProgress());
+        }
+        return this.taskText.get(frame.taskId)!.meaningful(frame.delta ?? "");
       case "tool_call":
         return this.once(`tool_call:${frame.toolCallId}`);
       case "tool_result_ack":
@@ -200,6 +208,7 @@ class StreamProgressTracker {
  * hosted streams. A cycle of previously-seen status/stage frames is liveness,
  * not evidence that the user's turn is advancing. */
 class LocalBrainProgressTracker {
+  private readonly modelText = new ModelTextProgress();
   private readonly seen = new Set<string>();
   private static readonly MAX_KEYS = 4096;
   private static readonly MAX_KEY_LENGTH = 512;
@@ -212,7 +221,7 @@ class LocalBrainProgressTracker {
       case "stage":
         return this.nonEmptyOnce("stage:", event.name);
       case "monologue":
-        return this.nonEmptyOnce(`monologue:${event.depth}:`, event.text);
+        return this.modelText.meaningful(event.text);
       case "skill":
         return this.once(`skill:${event.name}:${event.reason}`);
       case "turn":
@@ -220,9 +229,9 @@ class LocalBrainProgressTracker {
       case "tool_call":
         return this.once(`tool:${event.id}`);
       case "telemetry":
-        return this.once(`telemetry:${event.tokens}:${event.ctxUsed}:${event.ctxCap}`);
+        return false; // token counters can rise during a repeated answer
       case "status":
-        return this.once(`status:${event.phase}:${event.poolUsed}:${event.poolCap}`);
+        return this.nonEmptyOnce("status:", event.phase);
       case "checkpoint":
         return this.once(`checkpoint:${event.gitSha}`);
       case "memory":
@@ -420,11 +429,25 @@ export async function runTurn(
   prompt: string,
   signal?: AbortSignal,
   onFrame?: (f: StreamFrame) => void,
-  onPulsePaint?: () => void,
+  onPulsePaint?: (frame: string) => void,
   skillOpts: TurnSkillOptions = {},
 ): Promise<TurnOutcome> {
   const lifecycle = new TurnLifecycle(prompt);
   lifecycle.transition("submitted");
+  const boundedSignal = new AbortController();
+  const forwardAbort = (): void => boundedSignal.abort(signal?.reason ?? new DOMException("turn cancelled", "AbortError"));
+  if (signal?.aborted) forwardAbort();
+  else signal?.addEventListener("abort", forwardAbort, { once: true });
+  const deadlineMs = chatTurnDeadlineMs();
+  const deadlineAt = Date.now() + deadlineMs;
+  const deadline = setTimeout(() => boundedSignal.abort(new TurnDeadlineError(deadlineMs)), deadlineMs);
+  deadline.unref?.();
+  const preflightPulse = new ThinkingPulse({
+    enabled: Boolean(process.stderr.isTTY) && !ctx.flags.json && process.env["AETHER_NO_ANIM"] !== "1",
+    write: (s) => process.stderr.write(errTheme.dim(s)),
+    onPaint: onPulsePaint,
+  });
+  preflightPulse.start();
   try {
     const backend = await resolveBackend(ctx);
     // The same seam `aether agent` uses (commands/code.ts). Opened per turn, not
@@ -438,6 +461,7 @@ export async function runTurn(
       ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
       ...(skillOpts.noSkills ? { noSkills: true } : {}),
     });
+    preflightPulse.stop();
     if (!opened.ok) {
       // Painted here, then thrown as a ChatTurnError — the caller's contract is
       // that a ChatTurnError has already been rendered (see cmdChat), so this
@@ -477,7 +501,7 @@ export async function runTurn(
       getRegistry().markLocalUnmetered();
       // The signal used to be dropped here, so the REPL Ctrl+C controller could
       // not reach a local turn at all: the abort fired and nothing observed it.
-      return await runLocalTurn(ctx, brief, signal, { lifecycle }, run.guard);
+      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt }, run.guard);
     }
     // The cloud REPL turn streams from /agent/chat/stream, where the SERVER runs
     // the tools. This host executes nothing on that path, so it can enforce
@@ -493,11 +517,15 @@ export async function runTurn(
         ) + "\n",
       );
     }
-    return await runCloudTurn(ctx, brief, lifecycle, signal, onFrame, onPulsePaint);
+    return await runCloudTurn(ctx, brief, lifecycle, boundedSignal.signal, onFrame, onPulsePaint, deadlineAt, deadlineMs);
   } catch (err) {
     const outcome = finalizeThrownTurn(lifecycle, err, ctx.cfg.baseUrl);
     if (err instanceof ChatTurnError) throw err;
     throw attachTurnOutcome(err, outcome);
+  } finally {
+    clearTimeout(deadline);
+    signal?.removeEventListener("abort", forwardAbort);
+    preflightPulse.stop();
   }
 }
 
@@ -512,7 +540,9 @@ async function runCloudTurn(
   lifecycle: TurnLifecycle,
   signal?: AbortSignal,
   onFrame?: (f: StreamFrame) => void,
-  onPulsePaint?: () => void,
+  onPulsePaint?: (frame: string) => void,
+  deadlineAt = Date.now() + chatTurnDeadlineMs(),
+  deadlineMs = chatTurnDeadlineMs(),
 ): Promise<TurnOutcome> {
   beginConnecting(lifecycle);
   const reg = getRegistry();
@@ -555,6 +585,34 @@ async function runCloudTurn(
     onPaint: onPulsePaint,
   });
   pulse.start();
+  // A carriage-return pulse would erase a partially streamed answer. Once
+  // output starts, use a delayed stderr notice to make later silence visible
+  // without changing any answer bytes on stdout.
+  const silenceNoticeMs = (() => {
+    const parsed = Number(process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] ?? 2_000);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 2_000;
+  })();
+  let silenceNotice: ReturnType<typeof setTimeout> | null = null;
+  let silenceNoticeShown = false;
+  let lastSilenceNoticeAt = 0;
+  let answerStarted = false;
+  const clearSilenceNotice = (): void => {
+    if (silenceNotice) clearTimeout(silenceNotice);
+    silenceNotice = null;
+  };
+  const armSilenceNotice = (): void => {
+    clearSilenceNotice();
+    if (!pulseInteractive || !answerStarted || silenceNoticeShown) return;
+    const throttleMs = Math.max(30, silenceNoticeMs * 3);
+    const delayMs = Math.max(silenceNoticeMs, lastSilenceNoticeAt + throttleMs - Date.now());
+    silenceNotice = setTimeout(() => {
+      silenceNotice = null;
+      silenceNoticeShown = true;
+      lastSilenceNoticeAt = Date.now();
+      process.stderr.write(errTheme.dim("\n· Still waiting for the model · Ctrl+C cancels the turn\n"));
+    }, delayMs);
+    silenceNotice.unref?.();
+  };
   let partialOutput = false;
   let streamedError: ChatTurnError | null = null;
   const progressTimeoutMs = defaultStreamTimeoutMs();
@@ -564,6 +622,8 @@ async function runCloudTurn(
   else signal?.addEventListener("abort", forwardAbort, { once: true });
   let progressTimer: ReturnType<typeof setTimeout> | null = null;
   const progress = new StreamProgressTracker();
+  const modelOutput = new ModelOutputBudget();
+  const pendingToolCalls = new Set<string>();
   const armProgressTimeout = (): void => {
     if (progressTimer) clearTimeout(progressTimer);
     if (progressTimeoutMs === 0 || streamController.signal.aborted) return;
@@ -580,11 +640,27 @@ async function runCloudTurn(
     });
     armProgressTimeout();
     for await (const frame of decodeSse(stream)) {
+      // Buffered SSE can yield through microtasks without running timers.
+      if (Date.now() >= deadlineAt) throw new TurnDeadlineError(deadlineMs);
+      if (frame.type === "delta" || frame.type === "reasoning") modelOutput.add(frame.text);
+      if (frame.type === "task_progress") modelOutput.add(frame.delta ?? "");
       // open/ping are handshake/keepalive — they render nothing. Stopping on
       // them re-created the dead air on keepalive-happy servers; only frames
       // that produce visible output own the line.
-      if (frame.type !== "open" && frame.type !== "ping") pulse.stop();
-      if (progress.meaningful(frame)) armProgressTimeout();
+      const visibleText =
+        ((frame.type === "delta" || frame.type === "reasoning") && visibleWidth(sanitizeTerm(frame.text).trim()) > 0) ||
+        (frame.type === "task_progress" && visibleWidth(sanitizeTerm(frame.delta ?? "").trim()) > 0);
+      if (visibleText || frame.type === "done" || frame.type === "error") pulse.stop();
+      if (visibleText) answerStarted = true;
+      const meaningful = progress.meaningful(frame);
+      if (frame.type === "tool_call" && meaningful && pendingToolCalls.size < 64) pendingToolCalls.add(frame.toolCallId);
+      if (frame.type === "tool_result_ack" && meaningful && pendingToolCalls.delete(frame.toolCallId)) modelOutput.reset();
+      if (meaningful) {
+        armProgressTimeout();
+        if (visibleText) silenceNoticeShown = false;
+        armSilenceNotice();
+      }
+      if (frame.type === "done" || frame.type === "error") clearSilenceNotice();
       // The server signs each turn and returns it; persist the signed receipt
       // locally (best-effort, never breaks the chat).
       // The terminal frame carries the turn's authoritative cost. Settled by
@@ -597,7 +673,7 @@ async function runCloudTurn(
         noteWaitingForTool(lifecycle);
       } else if (frame.type !== "open" && frame.type !== "ping" && frame.type !== "done" && frame.type !== "error") {
         noteStreamingActivity(lifecycle);
-        if (frame.type === "delta" && frame.text.length > 0) partialOutput = true;
+        if (frame.type === "delta" && sanitizeTerm(frame.text).length > 0) partialOutput = true;
       } else if (frame.type === "done" && lifecycle.state !== "completing") {
         lifecycle.transition("completing");
       }
@@ -651,6 +727,8 @@ async function runCloudTurn(
       const r = await ctx.api.postJson<ChatJsonResponse>(CHAT_PATH, req, signal, defaultStreamTimeoutMs());
       pulse.stop();
       const response = r?.response ?? "";
+      if (Date.now() >= deadlineAt) throw new TurnDeadlineError(deadlineMs);
+      modelOutput.add(response);
       if (!response.trim()) {
         const incomplete = new StreamIncompleteError();
         lifecycle.finalize("incomplete", {
@@ -674,6 +752,7 @@ async function runCloudTurn(
     throw err;
   } finally {
     if (progressTimer) clearTimeout(progressTimer);
+    clearSilenceNotice();
     signal?.removeEventListener("abort", forwardAbort);
     pulse.stop();
   }
@@ -692,9 +771,15 @@ export interface LocalTurnDeps {
   };
   /** Reuse runTurn's lifecycle; direct callers get a fresh one automatically. */
   lifecycle?: TurnLifecycle;
+  /** Keep type-ahead visible while the local model has not produced a frame. */
+  onPulsePaint?: (frame: string) => void;
   /** Explicit 0 is a test/embed escape hatch; production uses the finite
    * stream deadline and cannot disable it through environment configuration. */
   meaningfulProgressTimeoutMs?: number;
+  /** Per-model-segment output cap for embedders and focused tests. */
+  modelOutputLimitBytes?: number;
+  /** Shared absolute deadline when called through runTurn. */
+  deadlineAt?: number;
 }
 
 export async function runLocalTurn(
@@ -713,6 +798,11 @@ export async function runLocalTurn(
   const brain = deps.brain ?? new OllamaBrain({ model });
   const exec = deps.exec ?? new ToolExecutor(cwd);
   const renderer = new HostRenderer({ poolGb: 5, json: ctx.flags.json });
+  const pulse = new ThinkingPulse({
+    enabled: Boolean(process.stderr.isTTY) && !ctx.flags.json && process.env["AETHER_NO_ANIM"] !== "1",
+    write: (s) => process.stderr.write(errTheme.dim(s)),
+    onPaint: deps.onPulsePaint,
+  });
   const approveTool = async (name: string, args: Record<string, unknown>): Promise<boolean> => {
     const outcome = decideGate(name, ctx.cfg.permissionMode, ctx.cfg.autoApply, {
       yes: ctx.flags.yes,
@@ -747,12 +837,16 @@ export async function runLocalTurn(
   else signal?.addEventListener("abort", forwardAbort, { once: true });
   controller.signal.addEventListener("abort", onAbort, { once: true });
   const progress = new LocalBrainProgressTracker();
+  const modelOutput = new ModelOutputBudget(deps.modelOutputLimitBytes);
+  const deadlineMs = chatTurnDeadlineMs();
+  const deadlineAt = deps.deadlineAt ?? Date.now() + deadlineMs;
   let lastMeaningfulAt = Date.now();
   let iterator: AsyncIterator<BrainEvent> | null = null;
   const timeout = (error: MeaningfulProgressTimeoutError): void => {
     if (!controller.signal.aborted) controller.abort(error);
   };
   try {
+    pulse.start();
     iterator = brain.run(task)[Symbol.asyncIterator]();
     for (;;) {
       const next = await boundedLocalOperation(
@@ -764,6 +858,9 @@ export async function runLocalTurn(
       );
       if (next.done) break;
       const ev = next.value;
+      if (Date.now() >= deadlineAt) throw new TurnDeadlineError(deadlineMs);
+      if (ev.type === "monologue") modelOutput.add(ev.text);
+      pulse.stop();
       if (progress.meaningful(ev)) lastMeaningfulAt = Date.now();
       if (ev.type === "done") {
         renderer.event(ev);
@@ -825,7 +922,9 @@ export async function runLocalTurn(
           brain.sendToolResult(ev.id, result);
         }
         lastMeaningfulAt = Date.now();
+        modelOutput.reset();
         noteStreamingActivity(lifecycle);
+        pulse.start();
         continue;
       }
       noteStreamingActivity(lifecycle);
@@ -837,6 +936,7 @@ export async function runLocalTurn(
     if (isAbortError(err) && signal?.aborted) return outcome;
     throw err;
   } finally {
+    pulse.stop();
     signal?.removeEventListener("abort", forwardAbort);
     controller.signal.removeEventListener("abort", onAbort);
     closeBrain();
@@ -1050,8 +1150,8 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
   // input line share the same tty row, so every pulse frame must be
   // followed by re-drawing whatever the user has typed ahead, or their
   // in-progress keystrokes get stomped by the pulse's next `\r\x1b[2K`.
-  const redrawInput = (): void => {
-    process.stdout.write(repaintString(prompt, buf.value, buf.pos, process.stdout.columns ?? 80));
+  const redrawInput = (frame: string): void => {
+    process.stdout.write(repaintString(`${frame} ${prompt}`, buf.value, buf.pos, process.stdout.columns ?? 80));
   };
   process.stdin.setRawMode(true);
   process.stdin.resume();

@@ -27,7 +27,7 @@ test("TLS trust failures get a secure CA repair rather than a network hint", () 
   });
   const hint = hintFor(tls) ?? "";
   assert.match(hint, /TLS certificate trust failed/);
-  assert.match(hint, process.platform === "win32" ? /NODE_USE_SYSTEM_CA=1/ : /NODE_EXTRA_CA_CERTS/);
+  assert.match(hint, process.platform === "win32" ? /NODE_OPTIONS=--use-system-ca/ : /NODE_EXTRA_CA_CERTS/);
   assert.doesNotMatch(hint, /TLS_REJECT_UNAUTHORIZED/);
 });
 
