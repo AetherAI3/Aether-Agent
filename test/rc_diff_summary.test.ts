@@ -29,11 +29,11 @@ test("RC publishes measured changed, clean, and binary checkout snapshots", asyn
   git("commit", "-q", "-m", "first");
 
   const clean = await checkoutDiffSummary(dir);
-  assert.deepEqual(clean?.payload, { files_changed: 0, insertions: 0, deletions: 0, files: [] });
+  assert.deepEqual(clean?.payload, { projection_version: "1", files_changed: 0, insertions: 0, deletions: 0, files: [] });
 
   writeFileSync(join(dir, "a.txt"), "one\ntwo\n");
   const changed = await checkoutDiffSummary(dir);
-  assert.deepEqual(changed?.payload, { files_changed: 1, insertions: 1, deletions: 0, files: ["a.txt"] });
+  assert.deepEqual(changed?.payload, { projection_version: "1", files_changed: 1, insertions: 1, deletions: 0, files: ["a.txt"] });
 
   writeFileSync(join(dir, "image.bin"), Buffer.from([0, 1, 9]));
   const binary = await checkoutDiffSummary(dir);
@@ -65,5 +65,5 @@ test("a failed numstat read never becomes a measured zero", async () => {
     ? { status: 0, stdout: `${root}\n`, stderr: "" }
     : { status: 0, stdout: "? new.txt\0", stderr: "" };
   const event = await checkoutDiffSummary(root, run, async () => ({ status: 1, stdout: "", stderr: "unavailable" }));
-  assert.deepEqual(event?.payload, { files_changed: 1, files: ["new.txt"] });
+  assert.deepEqual(event?.payload, { projection_version: "1", files_changed: 1, files: ["new.txt"] });
 });

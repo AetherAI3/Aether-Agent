@@ -75,17 +75,6 @@ export function rcOutboxPath(projectRef: string): string {
   return join(configDir(), "device-runtime", "rc", `${projectRef}.json`);
 }
 
-/** Best-effort refresh after a code run has established its final checkout. */
-export async function publishRcCheckoutDiff(api: AppContext["api"], projectRoot: string): Promise<void> {
-  const outboxPath = rcOutboxPath(projectRefFor(projectRoot));
-  const record = loadOutbox(outboxPath, projectRoot);
-  if (!record.session_id || record.revoke_pending) return;
-  const event = await checkoutDiffSummary(projectRoot);
-  if (!event || !enqueueEvent(record, event.event_type, event.payload)) return;
-  saveOutbox(outboxPath, record);
-  await flushOutbox({ api, outboxPath, projectRoot }, record);
-}
-
 // ── repo summary (identifiers only) ─────────────────────────────────────────
 
 function git(cwd: string, args: readonly string[]): string | null {

@@ -36,7 +36,8 @@
 // against a dead session or a host that gives up on a broker that was busy.
 
 import type { ApiClient } from "../transport.js";
-import { commitReceipts, saveOutbox, takeBatch, type OutboxRecord } from "./outbox.js";
+import { existsSync } from "node:fs";
+import { commitReceipts, loadOutbox, saveOutbox, takeBatch, type OutboxRecord } from "./outbox.js";
 import { describeRejection, type AppendResponse } from "./receipts.js";
 
 /** Stable envelope name for anything this module surfaces to a caller. */
@@ -287,6 +288,10 @@ export async function heartbeatHost(
 export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promise<FlushOutcome> {
   const batch = takeBatch(record);
   if (batch.length === 0) return { ok: true, sent: 0, cursor: record.cursor };
+  const before = existsSync(deps.outboxPath) ? loadOutbox(deps.outboxPath, deps.projectRoot) : null;
+  if (before?.revoke_pending) {
+    return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session was revoked" };
+  }
 
   let response: AppendResponse;
   try {
@@ -308,6 +313,18 @@ export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promi
     );
   } catch (error) {
     return { ok: false, ...classifyRcError(error) };
+  }
+
+  // `rc off` writes its tombstone before contacting the broker. An in-flight
+  // append must not save an older active record over that local decision.
+  if (before) {
+    if (!existsSync(deps.outboxPath)) {
+      return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session disappeared during append" };
+    }
+    const current = loadOutbox(deps.outboxPath, deps.projectRoot);
+    if (current.session_id !== before.session_id || current.revoke_pending) {
+      return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session changed during append" };
+    }
   }
 
   const outcome = commitReceipts(record, batch, response);

@@ -65,6 +65,7 @@ import {
 } from "../core/errors.js";
 import { sanitizeServerText } from "../core/transport.js";
 import { turnOutcomeJson } from "./chat.js";
+import { openRcCodingObserver } from "./rc_observation.js";
 
 export { prepareWorkspace } from "./code_support.js";
 
@@ -812,6 +813,12 @@ export async function cmdCode(
     if (written) touched.add(written);
   };
 
+  // One optional subscription for both local and hosted brains, regardless of
+  // which terminal renderer is active. The observer owns its best-effort upload.
+  // RC was explicitly enabled for the launch project. An agent may execute in
+  // a generated worktree, but that does not change which project was shared.
+  const rcObserver = openRcCodingObserver(ctx.flags.cwd, ctx.api);
+
   let onEvent: (ev: BrainEvent) => void | Promise<void>;
   let teardown = (): void => {};
 
@@ -844,6 +851,7 @@ export async function cmdCode(
     onEvent = async (ev: BrainEvent): Promise<void> => {
       const observation = turn.observe(ev);
       if (!observation.accepted) return;
+      rcObserver?.feed(ev);
       if (ev.type === "memory") {
         log?.event(ev, nowIso());
         sr.memoryEvent(ev);
@@ -899,6 +907,7 @@ export async function cmdCode(
     onEvent = async (ev: BrainEvent): Promise<void> => {
       const observation = turn.observe(ev);
       if (!observation.accepted) return;
+      rcObserver?.feed(ev);
       applyToLedger(ledger, ev);
       trackWrites(ev);
       // Same diff interception for the non-animated path (pipes / NO_ANIM /
@@ -1014,8 +1023,7 @@ export async function cmdCode(
   // A viewer sees only Git's measured checkout snapshot after the run settles.
   // RC is optional; an unavailable broker must not change the code result.
   try {
-    const { publishRcCheckoutDiff } = await import("./rc.js");
-    await publishRcCheckoutDiff(ctx.api, cwd);
+    if (!repoSpec) await rcObserver?.publishDiff(cwd);
   } catch {
     // The coding verdict remains authoritative if observation fails.
   }

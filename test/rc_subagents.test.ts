@@ -64,6 +64,7 @@ test("delegate, tree and gather publish one bounded worker lifecycle across reco
     await gatherSlash(ctx, out, "all");
     await treeSlash(ctx, out);
     assert.deepEqual(sent.map((event) => event.payload["status"]), ["running", "running", "done"]);
+    assert.ok(sent.every((event) => event.payload["projection_version"] === "1"));
     assert.deepEqual(sent.map((event) => event.payload["summary"]), ["Delegated", "Testing", undefined]);
     const publicId = sent[0]?.payload["subagent_id"];
     assert.match(String(publicId), /^worker-[0-9a-f]{24}$/);

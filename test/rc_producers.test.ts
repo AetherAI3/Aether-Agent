@@ -11,6 +11,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { BrainEvent } from "../src/core/brain_protocol.js";
 import {
@@ -30,6 +34,7 @@ import {
   testsEvent,
 } from "../src/core/rc/producers.js";
 import { createOutbox, enqueueEvent } from "../src/core/rc/outbox.js";
+import { rcDisplayPayloadKeys } from "../src/core/rc/redaction.js";
 import { VIEWER_EVENT_TYPES } from "../src/core/rc/viewer_profile.js";
 
 // ── 1. The refusals ─────────────────────────────────────────────────────────
@@ -102,7 +107,7 @@ test("no refused text can be smuggled through by way of the outbox", () => {
 
 test("a stage becomes a plan step", () => {
   const out = mapBrainEventToRc({ type: "stage", name: "build", face: ":)" });
-  assert.deepEqual(out, { event_type: "plan", payload: { title: "build", status: "running" } });
+  assert.deepEqual(out, { event_type: "plan", payload: { projection_version: "1", title: "Implementing", status: "running" } });
 });
 
 test("a tool call becomes tool activity naming the tool, not its arguments", () => {
@@ -118,13 +123,19 @@ test("a tool call becomes tool activity naming the tool, not its arguments", () 
   assert.doesNotMatch(JSON.stringify(out), /SECRET-BODY-DO-NOT-SHIP/);
 });
 
-test("a tool call with nothing worth naming still reports the tool", () => {
-  const out = mapBrainEventToRc({ type: "tool_call", id: "1", name: "list", args: {} });
+test("a tool call with nothing worth naming still reports a known tool", () => {
+  const out = mapBrainEventToRc({ type: "tool_call", id: "1", name: "read_file", args: {} });
   assert.equal(out?.payload["target"], undefined);
-  assert.equal(out?.payload["tool"], "list");
+  assert.equal(out?.payload["tool"], "read_file");
 });
 
-test("done carries pass or fail, not a bare truthy flag", () => {
+test("an unknown tool name cannot carry private text", () => {
+  const out = mapBrainEventToRc({ type: "tool_call", id: "1", name: "private prompt", args: {} });
+  assert.equal(out?.payload["tool"], "other");
+  assert.doesNotMatch(JSON.stringify(out), /private prompt/);
+});
+
+test("done reports the brain turn without claiming host verification", () => {
   const ok = mapBrainEventToRc({
     type: "done",
     ok: true,
@@ -139,13 +150,30 @@ test("done carries pass or fail, not a bare truthy flag", () => {
     remaining: 1,
     reason: "unverified",
   });
-  assert.equal(ok?.payload["status"], "passed");
+  assert.equal(ok?.payload["status"], "completed");
   assert.equal(bad?.payload["status"], "failed");
+  assert.equal(ok?.payload["summary"], "Agent turn completed");
+  assert.equal(bad?.payload["summary"], "Agent turn failed");
 });
 
 test("an error maps to the error type with a code a viewer can group on", () => {
   const out = mapBrainEventToRc({ type: "error", msg: "boom" });
-  assert.deepEqual(out, { event_type: "error", payload: { code: "agent_error", message: "boom" } });
+  assert.deepEqual(out, { event_type: "error", payload: { projection_version: "1", code: "agent_error", message: "Agent reported an error" } });
+});
+
+test("free-text model output and verification commands never enter viewer frames", () => {
+  const privateText = "private prompt with operator command --password=hunter2";
+  const events = [
+    mapBrainEventToRc({ type: "stage", name: privateText, face: "" })!,
+    mapBrainEventToRc({ type: "done", ok: false, result: privateText, remaining: 1, reason: privateText })!,
+    mapBrainEventToRc({ type: "error", msg: privateText })!,
+    testsEvent({ status: "failed", reason: privateText, record: null }),
+  ];
+  for (const event of events) {
+    const payload = persisted(event);
+    assert.ok(payload);
+    assert.doesNotMatch(JSON.stringify(payload), /private prompt|hunter2/);
+  }
 });
 
 test("session and presence describe the run without naming a controller", () => {
@@ -315,6 +343,7 @@ test("tests reports the verifier's own status, inventing no counts", () => {
   );
   assert.ok(payload);
   assert.equal(payload["status"], "unknown");
+  assert.equal(payload["summary"], "Verification unavailable");
   assert.equal(payload["passed"], undefined, "a count nobody measured must not appear");
   assert.equal(payload["failed"], undefined);
 });
@@ -350,6 +379,18 @@ test("ci comes from a CI action receipt and carries only the run identity", () =
   assert.equal(payload["status"], "reconciled");
 });
 
+test("a malformed CI provider ID cannot become viewer text", () => {
+  const event = ciEvent({
+    ...RECEIPT,
+    action_type: "aether.github.ci.rerun_failed",
+    provider_object_ids: { run_id: "private prompt --token=hunter2" },
+  });
+  assert.ok(event);
+  const payload = persisted(event);
+  assert.equal(payload?.["run_id"], undefined);
+  assert.equal(payload?.["status"], "reconciled");
+});
+
 test("a non-CI receipt does not become a ci event", () => {
   assert.equal(ciEvent({ ...RECEIPT, action_type: "aether.github.pr.create" }), null);
 });
@@ -380,6 +421,22 @@ test("a repository that is not a plain owner/name yields no URL", () => {
   const payload = persisted(event);
   assert.equal(payload?.["url"], undefined);
   assert.equal(payload?.["repo"], undefined);
+  const dotted = prStatusEvent({ ...RECEIPT, repository: "../name",
+    action_type: "aether.github.pr.create", provider_object_ids: { number: 1 } });
+  assert.equal(persisted(dotted!)?.["url"], undefined);
+});
+
+test("a nonnumeric PR receipt cannot create a URL or block the broker batch", () => {
+  const event = prStatusEvent({
+    ...RECEIPT,
+    action_type: "aether.github.pr.create",
+    provider_object_ids: { number: "149abc" },
+  });
+  assert.ok(event);
+  const payload = persisted(event);
+  assert.equal(payload?.["number"], undefined);
+  assert.equal(payload?.["url"], undefined);
+  assert.equal(payload?.["state"], "reconciled");
 });
 
 test("a non-PR receipt does not become a pr_status event", () => {
@@ -436,6 +493,22 @@ test("preview publishes a public URL but never a loopback one", () => {
     previewEvent({ ...PREVIEW, url: "https://preview.example/app" }, () => false),
   );
   assert.equal(remote?.["url"], "https://preview.example/app");
+  assert.equal(persisted(previewEvent({ ...PREVIEW, url: "http://preview.example/app" }, () => false))?.["url"], undefined);
+  assert.equal(persisted(previewEvent({ ...PREVIEW, url: "https://preview.example/app?token=private" }, () => false))?.["url"], undefined);
+});
+
+test("unsafe diff paths are refused and URL targets are reduced to safe identifiers", () => {
+  const diff = persisted(diffSummaryEvent({ additions: 1, deletions: 0, uncounted: [] }, ["../private.txt"]));
+  assert.equal(diff, null);
+  const unnamed = persisted(diffSummaryEvent({ additions: 0, deletions: 0, uncounted: [] }, [""]));
+  assert.equal(unnamed, null);
+  const tool = mapBrainEventToRc({ type: "tool_call", id: "1", name: "fetch", args: {
+    target: "https://user:password@example.test/path?token=private",
+  } });
+  assert.equal(tool?.payload["target"], undefined);
+  const forced = persisted({ event_type: "tool_activity", payload: { projection_version: "1",
+    tool: "fetch", status: "started", target: "https://user:password@example.test/path?token=private" } });
+  assert.equal(forced?.["target"], "[external-target]");
 });
 
 test("preview never publishes pids, ports or the child's error text", () => {
@@ -452,4 +525,36 @@ test("preview never publishes pids, ports or the child's error text", () => {
   assert.doesNotMatch(text, /someone/);
   assert.equal(payload["controlPort"], undefined);
   assert.equal(payload["supervisorPid"], undefined);
+});
+
+test("every Agent display projection matches the Cloud and browser golden frames", () => {
+  const path = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "fixtures", "rc-display-v1.json");
+  const raw = readFileSync(path);
+  assert.equal(createHash("sha256").update(raw).digest("hex"),
+    "eb24adf8b48aa439285f1bf1eab2a1e05e08fe56068550fdc4a30dee7eeda4f9");
+  const fixture = JSON.parse(raw.toString("utf8")) as {
+    schema: string;
+    payload_keys: Record<string, string[]>;
+    events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  };
+  assert.equal(fixture.schema, "aether.rc.display/1");
+  assert.deepEqual(rcDisplayPayloadKeys(), fixture.payload_keys);
+  const produced = [
+    sessionOpenedEvent({ session_name: "journey", repo: "AetherAI3/aether-agent", branch: "main",
+      base_commit: "0".repeat(40), dirty_file_count: 0, protocol_version: "1" }),
+    hostPresenceEvent("dev-journey", "live"),
+    mapBrainEventToRc({ type: "stage", name: "build", face: "" })!,
+    subagentEvent({ id: "w-1", model: "model", step: "writing tests", tokens: 0, uvt: 0 }),
+    mapBrainEventToRc({ type: "tool_call", id: "1", name: "write_file", args: { path: "src/index.ts" } })!,
+    diffSummaryEvent({ additions: 12, deletions: 3, uncounted: [] }, ["src/a.ts", "img.png"]),
+    testsEvent({ status: "verified", reason: "tests passed", record: null }),
+    ciEvent({ ...RECEIPT, action_type: "aether.github.ci.rerun_failed", provider_object_ids: { run_id: 42 } })!,
+    prStatusEvent({ ...RECEIPT, action_type: "aether.github.pr.create", provider_object_ids: { number: 149 } })!,
+    artifactEvent(MEDIA),
+    previewEvent({ ...PREVIEW, url: "https://preview.example/app" }, () => false),
+    mapBrainEventToRc({ type: "error", msg: "host reported failure" })!,
+    mapBrainEventToRc({ type: "done", ok: false, result: "host reported failure", remaining: 1, reason: "failure" })!,
+  ];
+  assert.deepEqual(produced.map((event) => ({ event_type: event.event_type, payload: persisted(event) })),
+    fixture.events);
 });

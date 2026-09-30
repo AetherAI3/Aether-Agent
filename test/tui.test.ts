@@ -271,13 +271,17 @@ test("bindEventSource ignores alternating stage replays and non-monotonic token 
   handler({ type: "stage", stage: "prepare" });
   handler({ type: "token", used: 1, cap: 10 });
   let alternate = false;
-  const cosmetic = setInterval(() => {
+  const cosmeticTick = (): void => {
     alternate = !alternate;
     handler({ type: "heartbeat" });
     handler({ type: "stage", stage: alternate ? "prepare" : "execute" });
     handler({ type: "token", used: 1, cap: alternate ? 10 : 11 });
     handler({ type: "token", used: 0, cap: 11 });
-  }, 2);
+  };
+  // Exercise both variants before the short watchdog can fire on a busy host.
+  cosmeticTick();
+  cosmeticTick();
+  const cosmetic = setInterval(cosmeticTick, 2);
   let guard: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
