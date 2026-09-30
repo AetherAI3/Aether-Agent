@@ -43,6 +43,7 @@ import { resumeHint } from "./resume.js";
 import { createWorktree, mergeHint, type Worktree } from "../core/worktree.js";
 import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js";
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
+import { ModelTextProgress } from "../core/model_text_progress.js";
 import { decideGate } from "../core/autonomy.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SessionContext } from "../core/session_resume.js";
@@ -160,6 +161,7 @@ export function applyEventToStatus(
 /** Bounded de-duplication for the coding host's progress deadline. */
 class CodeProgressTracker {
   private readonly seen = new Set<string>();
+  private readonly modelText = new ModelTextProgress();
   private highestTokens = 0;
   private static readonly MAX_KEYS = 256;
   private static readonly MAX_KEY_LENGTH = 512;
@@ -174,7 +176,7 @@ class CodeProgressTracker {
         return next.length > 0 && this.once(`stage:${next}`);
       }
       case "monologue":
-        return this.nonEmptyOnce(`monologue:${ev.depth}:`, ev.text);
+        return this.modelText.meaningful(ev.text);
       case "skill":
         return this.once(`skill:${ev.name}:${ev.reason}`);
       case "turn": {
@@ -809,6 +811,10 @@ export async function cmdCode(
       onFrame: (_stage, art) => sr.setAnim(art),
       onProgress: (used, c) => sr.setProgress(used, c),
     });
+    // A hosted session can wait for dev-session creation before its first
+    // stage event. Paint the idle sequence now so that wait is visibly live.
+    sr.setVerb(brainKind === "local" ? "Waiting for local model" : "Connecting to model", "");
+    anim.setStage("idle");
     const hb = new HeartbeatIndicator({
       onFrame: (g, beats) => {
         sr.setHeartbeat(g);

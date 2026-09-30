@@ -4,6 +4,7 @@
 // immutable snapshot suitable for a recoverable browser/Electron remount.
 
 import { StatusRenderer } from "./status_renderer.js";
+import { HeartbeatIndicator } from "./heartbeat.js";
 import type { RenderSink } from "./sink.js";
 import {
   bindEventSource,
@@ -168,6 +169,7 @@ export function createTerminalSession(opts: TerminalSessionOptions): TerminalSes
     (restored == null || resumeMode === "atomic");
   let sequenceFailed = false;
   const voice = opts.voice ? new VoiceSessionController(opts.voice) : null;
+  let currentStage = "Working";
 
   const renderer = new StatusRenderer({
     sink: opts.sink,
@@ -189,17 +191,36 @@ export function createTerminalSession(opts: TerminalSessionOptions): TerminalSes
     transcript.push(safe);
     renderer.log(safe);
   };
+  // The source binder forwards real heartbeat events to this indicator. Keep
+  // its animation under this mount's rendering guard so a late frame cannot
+  // paint into an xterm instance after refresh or disposal.
+  const heartbeat = new HeartbeatIndicator({
+    onFrame: (glyph, beats): void => {
+      if (!canWrite()) return;
+      renderer.setHeartbeat(glyph);
+      renderer.setBeats(beats);
+    },
+  });
   const endRenderer = (): void => {
     if (disposed || renderingEnded) return;
     renderingEnded = true;
+    heartbeat.stop();
     renderer.end();
   };
 
   const anim: AnimSink = {
-    setStage: (stage: string): void => { if (canWrite()) renderer.setVerb(stage, ""); },
+    setStage: (stage: string): void => {
+      if (!canWrite()) return;
+      currentStage = stage;
+      renderer.setVerb(stage, "");
+    },
     setProgress: (used: number, cap: number): void => { if (canWrite()) renderer.setProgress(used, cap); },
-    markStalled: (): void => { if (canWrite()) renderer.setHeartbeat("○"); },
-    resume: (): void => { if (canWrite()) renderer.setHeartbeat("◉"); },
+    markStalled: (): void => { if (canWrite()) renderer.setVerb("Waiting for response", ""); },
+    resume: (): void => {
+      if (!canWrite()) return;
+      renderer.setHeartbeat("◉");
+      renderer.setVerb(currentStage, "");
+    },
     stop: (): void => {},
   };
 
@@ -323,6 +344,7 @@ export function createTerminalSession(opts: TerminalSessionOptions): TerminalSes
         meaningfulProgressTimeoutMs,
         initialMeaningfulProgressRemainingMs,
         ownsSource: opts.ownsSource,
+        hb: heartbeat,
         onMeaningfulEvent: advanceForEvent,
         onTerminal,
         renderTerminalOutput: false,
@@ -364,6 +386,7 @@ export function createTerminalSession(opts: TerminalSessionOptions): TerminalSes
       unbind();
       if (!renderingEnded) {
         renderingEnded = true;
+        heartbeat.stop();
         renderer.end();
       }
     },

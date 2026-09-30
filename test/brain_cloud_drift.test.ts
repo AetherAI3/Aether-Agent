@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CloudBrain, refusalReason, routingDrift } from "../src/core/brain_cloud.js";
+import { HttpError } from "../src/core/errors.js";
 import { ApiClient } from "../src/core/transport.js";
 import { HostRenderer, routingDriftLines } from "../src/ui/host_render.js";
 import { cmdCode, EXIT_ROUTING_REFUSED } from "../src/commands/code.js";
@@ -379,6 +380,63 @@ test("JSON `aether agent` appends one parseable failed turn outcome after fatal 
   } finally {
     process.stderr.write = origErr;
     process.stdout.write = origOut;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("TTY agent status animates while cloud session creation has not answered", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aether-initial-status-"));
+  let releaseCreate = (): void => {};
+  let signalStarted = (): void => {};
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const pendingCreate = new Promise<never>((_resolve, reject) => {
+    releaseCreate = () => reject(new HttpError(403, "dev sessions disabled"));
+  });
+  const ctx = {
+    cfg: { backend: "cloud", permissionMode: "ask" },
+    api: {
+      postJson: (): Promise<never> => {
+        signalStarted();
+        return pendingCreate;
+      },
+    },
+    tokens,
+    confirm: async () => false,
+    flags: { json: false, audit: false, yes: false, cwd: dir, model: "kimi_k3" },
+  } as unknown as AppContext;
+  const priorTty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const originalOut = process.stdout.write;
+  const originalErr = process.stderr.write;
+  let output = "";
+  let run: Promise<number> | undefined;
+  let startGuard: ReturnType<typeof setTimeout> | undefined;
+  Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+  process.stdout.write = ((chunk: unknown) => ((output += String(chunk)), true)) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: unknown) => ((output += String(chunk)), true)) as typeof process.stderr.write;
+  try {
+    run = cmdCode(ctx, "reply with DONE", { local: false, pool: 5, quiet: false, noLog: true });
+    await Promise.race([
+      started,
+      new Promise<never>((_resolve, reject) => {
+        startGuard = setTimeout(() => reject(new Error("cloud create never started")), 2_000);
+      }),
+    ]);
+    if (startGuard) clearTimeout(startGuard);
+    assert.match(output, /Connecting to model/, "the first status appears before the model responds");
+    const firstPaint = output;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.notEqual(output, firstPaint, "the idle sequence continues to paint during silence");
+    assert.match(output, /··/, "a later idle animation frame reached the terminal");
+    releaseCreate();
+    assert.equal(await run, EXIT_ROUTING_REFUSED);
+  } finally {
+    if (startGuard) clearTimeout(startGuard);
+    releaseCreate();
+    if (run) await run.catch(() => {});
+    process.stdout.write = originalOut;
+    process.stderr.write = originalErr;
+    if (priorTty) Object.defineProperty(process.stdout, "isTTY", priorTty);
+    else Reflect.deleteProperty(process.stdout, "isTTY");
     rmSync(dir, { recursive: true, force: true });
   }
 });

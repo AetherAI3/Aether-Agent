@@ -288,6 +288,110 @@ test("alternating cosmetic progress and regressing usage cannot evade the watchd
   }
 });
 
+test("a sustained repeated text loop cannot keep a cloud turn alive", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_STREAM_TIMEOUT_MS"];
+  process.env["AETHER_STREAM_TIMEOUT_MS"] = "20";
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: (async function* (): AsyncIterable<Uint8Array> {
+      for (;;) {
+        yield new TextEncoder().encode('data: {"type":"delta","text":"again"}\n\n');
+        await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      }
+    })(),
+  }) as unknown as Response) as typeof globalThis.fetch;
+  try {
+    await assert.rejects(() => runTurn(ctxWith(), "bounded repeated answer"), MeaningfulProgressTimeoutError);
+  } finally {
+    globalThis.fetch = real;
+    if (previous === undefined) delete process.env["AETHER_STREAM_TIMEOUT_MS"];
+    else process.env["AETHER_STREAM_TIMEOUT_MS"] = previous;
+  }
+});
+
+test("a TTY cloud turn reports silence after partial text and clears the timer on completion", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_STREAM_SILENCE_NOTICE_MS"];
+  const origOut = process.stdout.write.bind(process.stdout);
+  const origErr = process.stderr.write.bind(process.stderr);
+  const origTTY = process.stderr.isTTY;
+  process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] = "12";
+  (process.stderr as unknown as { isTTY: boolean }).isTTY = true;
+  let stdout = "";
+  let stderr = "";
+  process.stdout.write = ((chunk: unknown) => ((stdout += String(chunk)), true)) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: unknown) => ((stderr += String(chunk)), true)) as typeof process.stderr.write;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: (async function* (): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode('data: {"type":"delta","text":"partial"}\n\n');
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      yield new TextEncoder().encode('data: {"type":"done","uvt":1,"cents":0}\n\n');
+    })(),
+  }) as unknown as Response) as typeof globalThis.fetch;
+  try {
+    const ctx = ctxWith();
+    ctx.flags.json = false;
+    await runTurn(ctx, "answer slowly");
+    assert.match(stderr, /Still waiting for the model/);
+    assert.match(stdout, /partial/);
+    const count = (stderr.match(/Still waiting for the model/g) ?? []).length;
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    assert.equal((stderr.match(/Still waiting for the model/g) ?? []).length, count);
+  } finally {
+    globalThis.fetch = real;
+    process.stdout.write = origOut;
+    process.stderr.write = origErr;
+    (process.stderr as unknown as { isTTY: boolean | undefined }).isTTY = origTTY;
+    if (previous === undefined) delete process.env["AETHER_STREAM_SILENCE_NOTICE_MS"];
+    else process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] = previous;
+  }
+});
+
+test("aborting after partial cloud text clears the pending silence notice", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_STREAM_SILENCE_NOTICE_MS"];
+  const origOut = process.stdout.write.bind(process.stdout);
+  const origErr = process.stderr.write.bind(process.stderr);
+  const origTTY = process.stderr.isTTY;
+  process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] = "25";
+  (process.stderr as unknown as { isTTY: boolean }).isTTY = true;
+  let stderr = "";
+  process.stdout.write = (() => true) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: unknown) => ((stderr += String(chunk)), true)) as typeof process.stderr.write;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: (async function* (): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode('data: {"type":"delta","text":"partial"}\n\n');
+      await new Promise<void>(() => {});
+    })(),
+  }) as unknown as Response) as typeof globalThis.fetch;
+  try {
+    const controller = new AbortController();
+    const ctx = ctxWith();
+    ctx.flags.json = false;
+    const pending = runTurn(ctx, "abort a stalled answer", controller.signal);
+    setTimeout(() => controller.abort(), 5);
+    await assert.rejects(pending, (error: unknown) => (error as Error).name === "AbortError");
+    await new Promise<void>((resolve) => setTimeout(resolve, 40));
+    assert.doesNotMatch(stderr, /Still waiting for the model/);
+  } finally {
+    globalThis.fetch = real;
+    process.stdout.write = origOut;
+    process.stderr.write = origErr;
+    (process.stderr as unknown as { isTTY: boolean | undefined }).isTTY = origTTY;
+    if (previous === undefined) delete process.env["AETHER_STREAM_SILENCE_NOTICE_MS"];
+    else process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] = previous;
+  }
+});
+
 test("legacy fallback sanitizes TTY output and reports unknown usage truthfully", async () => {
   const realFetch = globalThis.fetch;
   const realOut = process.stdout.write.bind(process.stdout);

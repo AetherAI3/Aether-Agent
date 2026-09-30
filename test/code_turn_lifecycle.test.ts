@@ -111,6 +111,46 @@ test("coding progress timeout config is finite and malformed values cannot disab
   );
 });
 
+test("a long stream of novel model text keeps advancing after 256 frames", () => {
+  const turn = new CodeTurnLifecycle("long answer");
+  for (let i = 0; i < 400; i += 1) {
+    assert.equal(
+      turn.observe({ type: "monologue", text: `unique section ${i}: ${i * 7919}`, depth: 0 }).meaningful,
+      true,
+      `frame ${i} should still advance the progress clock`,
+    );
+  }
+});
+
+test("long model chunks with a shared prefix still advance when their suffix changes", () => {
+  const turn = new CodeTurnLifecycle("long chunks");
+  const sharedPrefix = "A".repeat(300);
+  for (let i = 0; i < 30; i += 1) {
+    assert.equal(
+      turn.observe({ type: "monologue", text: `${sharedPrefix}\x1b[31mnew-${i}\x1b[0m`, depth: 0 }).meaningful,
+      true,
+      `chunk ${i} has new visible text beyond the shared prefix`,
+    );
+  }
+});
+
+test("sustained repeated model text stops advancing while ordinary repeated words do not", () => {
+  const turn = new CodeTurnLifecycle("repeated answer");
+  for (let i = 0; i < 20; i += 1) {
+    assert.equal(turn.observe({ type: "monologue", text: "the", depth: 0 }).meaningful, true);
+  }
+  let stalled = false;
+  for (let i = 0; i < 250; i += 1) {
+    if (!turn.observe({ type: "monologue", text: "the", depth: 0 }).meaningful) stalled = true;
+  }
+  assert.equal(stalled, true, "a sustained repeated passage is no longer model progress");
+  assert.equal(
+    turn.observe({ type: "monologue", text: "novel answer content", depth: 0 }).meaningful,
+    true,
+    "new content must recover the progress clock",
+  );
+});
+
 class CosmeticForeverBrain implements Brain {
   closed = 0;
   private stopped = false;

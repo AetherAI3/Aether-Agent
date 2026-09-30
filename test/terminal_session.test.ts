@@ -98,6 +98,51 @@ test("dispose() is idempotent and stops further rendering", () => {
   assert.equal(sink.buffer.length, lenAfterDispose, "no rendering after dispose");
 });
 
+test("embedded heartbeat events animate the status and stop painting on dispose", async () => {
+  const sink = new StringSink({ isTTY: true });
+  const source = new FakeSource();
+  const session = createTerminalSession({
+    source,
+    sink,
+    heartbeatTimeoutMs: 500,
+    meaningfulProgressTimeoutMs: 1_000,
+  });
+
+  source.push({ type: "heartbeat", seq: 1 });
+  assert.match(sink.buffer, /♥1/, "a source heartbeat advances the visible beat count");
+  await delay(50);
+  assert.match(sink.buffer, /•/, "a source heartbeat paints the animated pulse envelope");
+
+  session.dispose();
+  const afterDispose = sink.buffer.length;
+  await delay(250);
+  assert.equal(sink.buffer.length, afterDispose, "pending pulse frames do not paint after disposal");
+});
+
+test("embedded silence shows a waiting state and meaningful progress restores its stage", async () => {
+  const sink = new StringSink({ isTTY: true });
+  const source = new FakeSource();
+  const session = createTerminalSession({
+    source,
+    sink,
+    heartbeatTimeoutMs: 15,
+    meaningfulProgressTimeoutMs: 500,
+  });
+
+  source.push({ type: "stage", stage: "Executing", seq: 1 });
+  await delay(40);
+  assert.match(sink.buffer, /○.*Waiting for response/, "soft stall is visible to the operator");
+
+  source.push({ type: "heartbeat", seq: 2 });
+  assert.match(sink.buffer, /♥1/, "connection recovery resumes the heartbeat animation");
+  source.push({ type: "stage", stage: "Finishing", seq: 3 });
+  const latestStatus = sink.buffer.slice(sink.buffer.lastIndexOf("\r\x1b[2K"));
+  assert.match(latestStatus, /Finishing/, "meaningful progress restores the current stage");
+  assert.doesNotMatch(latestStatus, /Waiting for response/);
+
+  session.dispose();
+});
+
 test("an embed can inject Voice ports without capture starting implicitly", () => {
   const sink = new StringSink({ isTTY: true, colorEnabled: true });
   const source = new FakeSource();

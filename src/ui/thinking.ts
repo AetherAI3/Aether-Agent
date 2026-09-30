@@ -32,7 +32,7 @@ export interface ThinkingPulseOptions {
   /** Called after every paint. In the REPL this re-syncs the caller's own
    *  input-line redraw (same tty row), since a keystroke typed ahead during
    *  the pulse window otherwise gets stomped by the next `\r`-repaint. */
-  onPaint?: () => void;
+  onPaint?: (frame: string) => void;
 }
 
 export class ThinkingPulse {
@@ -40,7 +40,7 @@ export class ThinkingPulse {
   private readonly enabled: boolean;
   private readonly intervalMs: number;
   private readonly stallAfterMs: number;
-  private readonly onPaint?: () => void;
+  private readonly onPaint?: (frame: string) => void;
   private timer: ReturnType<typeof setInterval> | null = null;
   private tick = 0;
   private shown = false;
@@ -76,8 +76,9 @@ export class ThinkingPulse {
 
   private paint(): void {
     const stalled = Date.now() - this.startedAt >= this.stallAfterMs;
-    this.write(CLR + thinkingFrame(this.tick++, stalled));
+    const frame = thinkingFrame(this.tick++, stalled);
+    this.write(CLR + frame);
     this.shown = true;
-    this.onPaint?.();
+    this.onPaint?.(frame);
   }
 }
