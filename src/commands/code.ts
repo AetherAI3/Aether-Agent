@@ -18,7 +18,7 @@ import { resolveHostedModel, resolveLocalModelSelection } from "../core/local_ol
 import { CloudBrain } from "../core/brain_cloud.js";
 import { ToolExecutor } from "../core/tool_executor.js";
 import { stdioPrompt } from "../ui/interact.js";
-import { defaultRunner } from "../core/worktree.js";
+import { defaultRunner, type Runner } from "../core/worktree.js";
 import { isCurrentWorkspace } from "../core/workspace_scope.js";
 import { HostRenderer, routingDriftLines } from "../ui/host_render.js";
 import { SessionLog } from "../core/session_log.js";
@@ -450,7 +450,12 @@ export function emitCodeTurnOutcome(
   if (json) write(turnOutcomeJson(outcome) + "\n");
 }
 
-export async function cmdCode(ctx: AppContext, task: string, opts: CodeOpts): Promise<number> {
+export async function cmdCode(
+  ctx: AppContext,
+  task: string,
+  opts: CodeOpts,
+  workspaceRun: Runner = defaultRunner(),
+): Promise<number> {
   // --resume carries the prior session's context forward, so it is also a task
   // of its own: with no new instruction the run continues the ORIGINAL task.
   // Resolved ONCE — the handoff the brain reads and the lines the human sees
@@ -560,8 +565,8 @@ export async function cmdCode(ctx: AppContext, task: string, opts: CodeOpts): Pr
     }
     cwd = worktree.dir;
   } else {
-    const ws = await prepareWorkspace(ctx, label, io, defaultRunner());
-    if (!ws.proceed) return 0;
+    const ws = await prepareWorkspace(ctx, label, io, workspaceRun);
+    if (!ws.proceed) return ws.error ? 1 : 0;
     cwd = ws.cwd;
   }
 

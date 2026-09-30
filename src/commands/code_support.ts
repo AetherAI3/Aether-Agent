@@ -108,15 +108,16 @@ export async function answerAgentQuestionIfPresent(brain: Brain, io: PromptIO, t
 
 /**
  * 2.0 repo gate + gh-gated worktree. Confirms the target repo before any brain
- * starts. With an authenticated `gh`, a git repo runs in an isolated worktree;
- * otherwise this degrades to confirm-only and runs in place.
+ * starts. With an authenticated `gh`, a git repo runs in an isolated worktree.
+ * An attempted but failed worktree creation aborts; without `gh` authentication,
+ * the gate is confirm-only and runs in place.
  */
 export async function prepareWorkspace(
   ctx: AppContext,
   task: string,
   io: PromptIO,
   run: Runner,
-): Promise<{ cwd: string; proceed: boolean }> {
+): Promise<{ cwd: string; proceed: boolean; error?: string }> {
   const autoYes = ctx.flags.yes;
   let cwd = resolve(ctx.flags.cwd || ".");
 
@@ -151,7 +152,9 @@ export async function prepareWorkspace(
         io.note(`⟢ ${wt.branch} ready  ·  ${wt.path}`);
         return { cwd: wt.path, proceed: true };
       }
-      io.note(`(couldn't create a worktree: ${wt.error ?? "unknown"} — working in place)`);
+      const error = `couldn't create an isolated worktree: ${wt.error ?? "unknown error"}`;
+      io.note(`✗ ${error}. Coding task not started.`);
+      return { cwd: root, proceed: false, error };
     }
   } else {
     io.note("Heads up: gh isn't authenticated, so I'll work in place. Run `gh auth login` for an isolated worktree.");
