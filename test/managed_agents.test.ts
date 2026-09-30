@@ -260,6 +260,12 @@ test("readiness classifies entitlement, credential, contract and outage without 
   }
 });
 
+test("a cancelled readiness probe stays cancelled", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(probeManagedReadiness(api(), controller.signal));
+});
+
 test("list and chat use fresh readiness after account switch and avoid unavailable operations", async () => {
   let owner = "first";
   const calls: string[] = [];

@@ -74,6 +74,7 @@ export async function probeManagedReadiness(api: ApiClient, signal?: AbortSignal
     return { schema_version: TERMINAL_READINESS_CONTRACT, required_contract: String(raw["required_contract"]),
       registry: gates.registry!, dm: gates.dm!, model_uvt: gates.model_uvt! };
   } catch (error) {
+    if (signal?.aborted) throw error;
     if (error instanceof HttpError) {
       const body = error.body && typeof error.body === "object" ? error.body as Record<string, unknown> : {};
       const detail = body["detail"] && typeof body["detail"] === "object" ? body["detail"] as Record<string, unknown> : {};
