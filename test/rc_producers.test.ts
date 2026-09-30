@@ -11,6 +11,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { BrainEvent } from "../src/core/brain_protocol.js";
 import {
@@ -30,6 +34,7 @@ import {
   testsEvent,
 } from "../src/core/rc/producers.js";
 import { createOutbox, enqueueEvent } from "../src/core/rc/outbox.js";
+import { rcDisplayPayloadKeys } from "../src/core/rc/redaction.js";
 import { VIEWER_EVENT_TYPES } from "../src/core/rc/viewer_profile.js";
 
 // ── 1. The refusals ─────────────────────────────────────────────────────────
@@ -102,7 +107,7 @@ test("no refused text can be smuggled through by way of the outbox", () => {
 
 test("a stage becomes a plan step", () => {
   const out = mapBrainEventToRc({ type: "stage", name: "build", face: ":)" });
-  assert.deepEqual(out, { event_type: "plan", payload: { title: "build", status: "running" } });
+  assert.deepEqual(out, { event_type: "plan", payload: { projection_version: "1", title: "build", status: "running" } });
 });
 
 test("a tool call becomes tool activity naming the tool, not its arguments", () => {
@@ -145,7 +150,7 @@ test("done carries pass or fail, not a bare truthy flag", () => {
 
 test("an error maps to the error type with a code a viewer can group on", () => {
   const out = mapBrainEventToRc({ type: "error", msg: "boom" });
-  assert.deepEqual(out, { event_type: "error", payload: { code: "agent_error", message: "boom" } });
+  assert.deepEqual(out, { event_type: "error", payload: { projection_version: "1", code: "agent_error", message: "boom" } });
 });
 
 test("session and presence describe the run without naming a controller", () => {
@@ -380,6 +385,22 @@ test("a repository that is not a plain owner/name yields no URL", () => {
   const payload = persisted(event);
   assert.equal(payload?.["url"], undefined);
   assert.equal(payload?.["repo"], undefined);
+  const dotted = prStatusEvent({ ...RECEIPT, repository: "../name",
+    action_type: "aether.github.pr.create", provider_object_ids: { number: 1 } });
+  assert.equal(persisted(dotted!)?.["url"], undefined);
+});
+
+test("a nonnumeric PR receipt cannot create a URL or block the broker batch", () => {
+  const event = prStatusEvent({
+    ...RECEIPT,
+    action_type: "aether.github.pr.create",
+    provider_object_ids: { number: "149abc" },
+  });
+  assert.ok(event);
+  const payload = persisted(event);
+  assert.equal(payload?.["number"], undefined);
+  assert.equal(payload?.["url"], undefined);
+  assert.equal(payload?.["state"], "reconciled");
 });
 
 test("a non-PR receipt does not become a pr_status event", () => {
@@ -436,6 +457,19 @@ test("preview publishes a public URL but never a loopback one", () => {
     previewEvent({ ...PREVIEW, url: "https://preview.example/app" }, () => false),
   );
   assert.equal(remote?.["url"], "https://preview.example/app");
+  assert.equal(persisted(previewEvent({ ...PREVIEW, url: "http://preview.example/app" }, () => false))?.["url"], undefined);
+  assert.equal(persisted(previewEvent({ ...PREVIEW, url: "https://preview.example/app?token=private" }, () => false))?.["url"], undefined);
+});
+
+test("path traversal and URL targets are reduced to safe identifiers", () => {
+  const diff = persisted(diffSummaryEvent({ additions: 1, deletions: 0, uncounted: [] }, ["../private.txt"]));
+  assert.deepEqual(diff?.["files"], ["[external-path]"]);
+  const unnamed = persisted(diffSummaryEvent({ additions: 0, deletions: 0, uncounted: [] }, [""]));
+  assert.deepEqual(unnamed?.["files"], ["[unnamed-file]"]);
+  const tool = mapBrainEventToRc({ type: "tool_call", id: "1", name: "fetch", args: {
+    target: "https://user:password@example.test/path?token=private",
+  } });
+  assert.equal(persisted(tool!)?.["target"], "[external-target]");
 });
 
 test("preview never publishes pids, ports or the child's error text", () => {
@@ -452,4 +486,36 @@ test("preview never publishes pids, ports or the child's error text", () => {
   assert.doesNotMatch(text, /someone/);
   assert.equal(payload["controlPort"], undefined);
   assert.equal(payload["supervisorPid"], undefined);
+});
+
+test("every Agent display projection matches the Cloud and browser golden frames", () => {
+  const path = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "fixtures", "rc-display-v1.json");
+  const raw = readFileSync(path);
+  assert.equal(createHash("sha256").update(raw).digest("hex"),
+    "0e47b647f2bf792606e25ecca263c6f3d921fcd417fc3cc2ccb85596e3ca10a5");
+  const fixture = JSON.parse(raw.toString("utf8")) as {
+    schema: string;
+    payload_keys: Record<string, string[]>;
+    events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  };
+  assert.equal(fixture.schema, "aether.rc.display/1");
+  assert.deepEqual(rcDisplayPayloadKeys(), fixture.payload_keys);
+  const produced = [
+    sessionOpenedEvent({ session_name: "journey", repo: "AetherAI3/aether-agent", branch: "main",
+      base_commit: "0".repeat(40), dirty_file_count: 0, protocol_version: "1" }),
+    hostPresenceEvent("dev-journey", "live"),
+    mapBrainEventToRc({ type: "stage", name: "build", face: "" })!,
+    subagentEvent({ id: "w-1", model: "model", step: "writing tests", tokens: 0, uvt: 0 }),
+    mapBrainEventToRc({ type: "tool_call", id: "1", name: "write_file", args: { path: "src/index.ts" } })!,
+    diffSummaryEvent({ additions: 12, deletions: 3, uncounted: [] }, ["src/a.ts", "img.png"]),
+    testsEvent({ status: "verified", reason: "tests passed", record: null }),
+    ciEvent({ ...RECEIPT, action_type: "aether.github.ci.rerun_failed", provider_object_ids: { run_id: 42 } })!,
+    prStatusEvent({ ...RECEIPT, action_type: "aether.github.pr.create", provider_object_ids: { number: 149 } })!,
+    artifactEvent(MEDIA),
+    previewEvent({ ...PREVIEW, url: "https://preview.example/app" }, () => false),
+    mapBrainEventToRc({ type: "error", msg: "host reported failure" })!,
+    mapBrainEventToRc({ type: "done", ok: false, result: "host reported failure", remaining: 1, reason: "failure" })!,
+  ];
+  assert.deepEqual(produced.map((event) => ({ event_type: event.event_type, payload: persisted(event) })),
+    fixture.events);
 });

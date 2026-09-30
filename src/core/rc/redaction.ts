@@ -56,17 +56,17 @@ const RC_ALLOWED_KEYS: Readonly<Record<ViewerEventType, readonly string[]>> = {
     "dirty_file_count", "execution", "protocol_version",
   ],
   presence: ["protocol_version", "role", "device_id", "liveness"],
-  plan: ["step", "total_steps", "title", "status"],
-  subagent: ["subagent_id", "name", "status", "summary"],
-  tool_activity: ["tool", "target", "status", "summary"],
-  diff_summary: ["files_changed", "insertions", "deletions", "files"],
-  tests: ["framework", "status", "passed", "failed", "skipped", "summary"],
-  ci: ["provider", "status", "run_id", "url"],
-  pr_status: ["repo", "number", "state", "title", "url", "checks_summary"],
-  artifact: ["artifact_id", "kind", "title", "summary"],
-  preview: ["phase", "url", "instance_id"],
-  done: ["status", "summary"],
-  error: ["code", "message"],
+  plan: ["projection_version", "step", "total_steps", "title", "status"],
+  subagent: ["projection_version", "subagent_id", "name", "status", "summary"],
+  tool_activity: ["projection_version", "tool", "target", "status", "summary"],
+  diff_summary: ["projection_version", "files_changed", "insertions", "deletions", "files"],
+  tests: ["projection_version", "framework", "status", "passed", "failed", "skipped", "summary"],
+  ci: ["projection_version", "provider", "status", "run_id", "url"],
+  pr_status: ["projection_version", "repo", "number", "state", "title", "url", "checks_summary"],
+  artifact: ["projection_version", "artifact_id", "kind", "title", "summary"],
+  preview: ["projection_version", "phase", "url", "instance_id"],
+  done: ["projection_version", "status", "summary"],
+  error: ["projection_version", "code", "message"],
 };
 
 /** Broker frame bound: payload canonical JSON <= 32 KiB. */
@@ -119,6 +119,12 @@ function sanitizeString(value: string, projectRoot: string, env: NodeJS.ProcessE
   return out.slice(0, MAX_STRING_LENGTH);
 }
 
+function sanitizePathIdentifier(value: string, projectRoot: string, env: NodeJS.ProcessEnv): string {
+  if (!value) return "[unnamed-file]";
+  if (value.replaceAll("\\", "/").split("/").includes("..")) return "[external-path]";
+  return sanitizeString(value, projectRoot, env);
+}
+
 export interface SanitizeOptions {
   projectRoot: string;
   env?: NodeJS.ProcessEnv;
@@ -152,12 +158,16 @@ export function sanitizeRemotePayload(
 
     if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
     else if (typeof value === "boolean") out[key] = value;
-    else if (typeof value === "string") out[key] = sanitizeString(value, options.projectRoot, env);
+    else if (typeof value === "string") out[key] = key === "target"
+      ? (value.includes("://") ? "[external-target]" : sanitizePathIdentifier(value, options.projectRoot, env))
+      : sanitizeString(value, options.projectRoot, env);
     else if (Array.isArray(value)) {
       const items = value
         .filter((item): item is string => typeof item === "string")
         .slice(0, MAX_LIST_ITEMS)
-        .map((item) => sanitizeString(item, options.projectRoot, env));
+        .map((item) => key === "files"
+          ? sanitizePathIdentifier(item, options.projectRoot, env)
+          : sanitizeString(item, options.projectRoot, env));
       if (items.length) out[key] = items;
     }
     // Nested objects are refused: the wire shapes are flat by construction, and
@@ -173,4 +183,12 @@ export function sanitizeRemotePayload(
  *  construction — these keys ARE the profile's list. */
 export function sanitizableEventTypes(): readonly string[] {
   return VIEWER_EVENT_TYPES;
+}
+
+/** Exact display/1 allowlist manifest pinned against the Cloud broker fixture. */
+export function rcDisplayPayloadKeys(): Record<string, string[]> {
+  return Object.fromEntries(
+    VIEWER_EVENT_TYPES.filter((type) => type !== "session" && type !== "presence")
+      .map((type) => [type, [...RC_ALLOWED_KEYS[type]].sort()]),
+  );
 }

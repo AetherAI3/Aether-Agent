@@ -50,6 +50,13 @@ export interface RcProducedEvent {
   payload: Record<string, unknown>;
 }
 
+/** Flat, bounded display projection shared with the broker and browser. */
+export const RC_DISPLAY_PROJECTION_VERSION = "1" as const;
+
+function displayEvent(event_type: ViewerEventType, payload: Record<string, unknown>): RcProducedEvent {
+  return { event_type, payload: { projection_version: RC_DISPLAY_PROJECTION_VERSION, ...payload } };
+}
+
 /** Event classes this adapter can currently emit. */
 export const RC_PRODUCED_EVENT_TYPES = [
   "session",
@@ -90,7 +97,7 @@ export function producerCoverage(): { produced: string[]; unproduced: string[]; 
 
 /** A short hint at what a tool acted on. Never the arguments themselves. */
 function targetHint(args: Record<string, unknown>): string | undefined {
-  for (const key of ["path", "file", "target", "url", "name"]) {
+  for (const key of ["path", "file", "target", "name"]) {
     const value = args[key];
     // This only picks WHICH value is worth showing. Relativizing, scrubbing and
     // capping happen in sanitizeRemotePayload; anything not a plain string is
@@ -110,27 +117,22 @@ function targetHint(args: Record<string, unknown>): string | undefined {
 export function mapBrainEventToRc(event: BrainEvent): RcProducedEvent | null {
   switch (event.type) {
     case "stage":
-      return { event_type: "plan", payload: { title: event.name, status: "running" } };
+      return event.name ? displayEvent("plan", { title: event.name, status: "running" }) : null;
 
     case "tool_call": {
+      if (!event.name) return null;
       const target = targetHint(event.args);
-      return {
-        event_type: "tool_activity",
-        payload: { tool: event.name, status: "started", ...(target ? { target } : {}) },
-      };
+      return displayEvent("tool_activity", { tool: event.name, status: "started", ...(target ? { target } : {}) });
     }
 
     case "done":
-      return {
-        event_type: "done",
-        payload: { status: event.ok ? "passed" : "failed", summary: event.result },
-      };
+      return displayEvent("done", { status: event.ok ? "passed" : "failed", summary: event.result });
 
     case "error":
       // `msg` can carry tool or model output. It reaches the allowlisted
       // `message` key and is scrubbed and capped by sanitizeRemotePayload on
       // the way into the outbox; nothing is published from here directly.
-      return { event_type: "error", payload: { code: "agent_error", message: event.msg } };
+      return event.msg ? displayEvent("error", { code: "agent_error", message: event.msg }) : null;
 
     // Refused on purpose — see the header. Listed rather than folded into the
     // default so a new BrainEvent variant shows up here as a decision to make,
@@ -211,25 +213,22 @@ export function subagentEvent(worker: TreeWorker): RcProducedEvent {
     /\b(plan|design)\b/.test(step) ? "Planning" :
     /\b(write|edit|implement|build|code)\b/.test(step) ? "Implementing" :
     step ? "Working" : "Waiting";
-  return {
-    event_type: "subagent",
-    payload: {
-      subagent_id: worker.id,
-      status: step ? "running" : "idle",
-      summary,
-    },
-  };
+  return displayEvent("subagent", {
+    subagent_id: worker.id,
+    status: step ? "running" : "idle",
+    summary,
+  });
 }
 
 /** A successful delegate response proves an identified worker was accepted. */
 export function subagentStartedEvent(workerId: string, status: string): RcProducedEvent {
   const safeStatus = status === "running" || status === "queued" ? status : "queued";
-  return { event_type: "subagent", payload: { subagent_id: workerId, status: safeStatus, summary: "Delegated" } };
+  return displayEvent("subagent", { subagent_id: workerId, status: safeStatus, summary: "Delegated" });
 }
 
 /** subagent — the terminal fact, from a delegate/gather result. */
 export function subagentFinishedEvent(workerId: string, status: string): RcProducedEvent {
-  return { event_type: "subagent", payload: { subagent_id: workerId, status } };
+  return displayEvent("subagent", { subagent_id: workerId, status });
 }
 
 /**
@@ -242,15 +241,12 @@ export function subagentFinishedEvent(workerId: string, status: string): RcProdu
  * of omission.
  */
 export function diffSummaryEvent(total: CountTotal, paths: readonly string[]): RcProducedEvent {
-  return {
-    event_type: "diff_summary",
-    payload: {
+  return displayEvent("diff_summary", {
       files_changed: paths.length,
       insertions: total.additions,
       deletions: total.deletions,
       files: [...paths],
-    },
-  };
+  });
 }
 
 /**
@@ -264,14 +260,16 @@ export function diffSummaryEvent(total: CountTotal, paths: readonly string[]): R
  * that nothing failed.
  */
 export function testsEvent(reading: VerificationReading): RcProducedEvent {
-  return {
-    event_type: "tests",
-    payload: { status: reading.status, summary: reading.reason },
-  };
+  return displayEvent("tests", { status: reading.status, summary: reading.reason });
 }
 
 /** Strict `owner/name`, so nothing else can be spliced into a URL. */
 const REPO_SLUG = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+function safeRepoSlug(value: string): boolean {
+  if (!REPO_SLUG.test(value)) return false;
+  return value.split("/").every((segment) => segment !== "." && segment !== "..");
+}
 
 /** The first provider id that looks like a run or PR number, as a string. */
 function providerId(receipt: ActionReceipt, keys: readonly string[]): string | undefined {
@@ -293,14 +291,11 @@ function providerId(receipt: ActionReceipt, keys: readonly string[]): string | u
 export function ciEvent(receipt: ActionReceipt): RcProducedEvent | null {
   if (!receipt.action_type.startsWith("aether.github.ci.")) return null;
   const runId = providerId(receipt, ["run_id", "check_run_id", "workflow_run_id"]);
-  return {
-    event_type: "ci",
-    payload: {
+  return displayEvent("ci", {
       provider: "github",
       status: receipt.reconciled ? "reconciled" : "issued",
       ...(runId ? { run_id: runId } : {}),
-    },
-  };
+  });
 }
 
 /**
@@ -316,17 +311,16 @@ export function ciEvent(receipt: ActionReceipt): RcProducedEvent | null {
 export function prStatusEvent(receipt: ActionReceipt, repo?: RailRepo | null): RcProducedEvent | null {
   if (!receipt.action_type.startsWith("aether.github.pr.")) return null;
   const repository = repo?.repository ?? receipt.repository;
-  const number = providerId(receipt, ["pull_request_number", "number", "pr_number"]);
-  const safeRepo = REPO_SLUG.test(repository) ? repository : undefined;
-  return {
-    event_type: "pr_status",
-    payload: {
+  const rawNumber = providerId(receipt, ["pull_request_number", "number", "pr_number"]);
+  const number = rawNumber && /^[1-9][0-9]*$/.test(rawNumber) && Number.isSafeInteger(Number(rawNumber))
+    ? Number(rawNumber) : undefined;
+  const safeRepo = safeRepoSlug(repository) ? repository : undefined;
+  return displayEvent("pr_status", {
       ...(safeRepo ? { repo: safeRepo } : {}),
-      ...(number ? { number: Number(number) } : {}),
+      ...(number ? { number } : {}),
       state: receipt.reconciled ? "reconciled" : "issued",
       ...(safeRepo && number ? { url: `https://github.com/${safeRepo}/pull/${number}` } : {}),
-    },
-  };
+  });
 }
 
 /**
@@ -339,15 +333,12 @@ export function prStatusEvent(receipt: ActionReceipt, repo?: RailRepo | null): R
  * some kind exists and what it is called.
  */
 export function artifactEvent(entry: MediaEntry): RcProducedEvent {
-  return {
-    event_type: "artifact",
-    payload: {
+  return displayEvent("artifact", {
       artifact_id: entry.artifactId,
       kind: entry.kind,
       title: entry.displayName,
       summary: `${entry.kind} · ${entry.sizeBytes} bytes`,
-    },
-  };
+  });
 }
 
 /**
@@ -359,13 +350,19 @@ export function artifactEvent(entry: MediaEntry): RcProducedEvent {
  * free text from a child process, and the phase already says "failed".
  */
 export function previewEvent(state: PreviewState, isLoopback: (url: string) => boolean): RcProducedEvent {
-  const url = state.url && !isLoopback(state.url) ? state.url : undefined;
-  return {
-    event_type: "preview",
-    payload: {
+  let url: string | undefined;
+  if (state.url && !isLoopback(state.url)) {
+    try {
+      const parsed = new URL(state.url);
+      if (parsed.protocol === "https:" && parsed.host && !parsed.username && !parsed.password
+          && !parsed.search && !parsed.hash) url = state.url;
+    } catch {
+      // A malformed URL is not a usable viewer link.
+    }
+  }
+  return displayEvent("preview", {
       phase: state.phase,
       instance_id: state.instanceId,
       ...(url ? { url } : {}),
-    },
-  };
+  });
 }

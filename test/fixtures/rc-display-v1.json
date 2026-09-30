@@ -1,0 +1,31 @@
+{
+  "schema": "aether.rc.display/1",
+  "payload_keys": {
+    "plan": ["projection_version", "status", "step", "title", "total_steps"],
+    "subagent": ["name", "projection_version", "status", "subagent_id", "summary"],
+    "tool_activity": ["projection_version", "status", "summary", "target", "tool"],
+    "diff_summary": ["deletions", "files", "files_changed", "insertions", "projection_version"],
+    "tests": ["failed", "framework", "passed", "projection_version", "skipped", "status", "summary"],
+    "ci": ["projection_version", "provider", "run_id", "status", "url"],
+    "pr_status": ["checks_summary", "number", "projection_version", "repo", "state", "title", "url"],
+    "artifact": ["artifact_id", "kind", "projection_version", "summary", "title"],
+    "preview": ["instance_id", "phase", "projection_version", "url"],
+    "done": ["projection_version", "status", "summary"],
+    "error": ["code", "message", "projection_version"]
+  },
+  "events": [
+    { "event_type": "session", "payload": { "protocol_version": "1", "state": "live", "session_name": "journey", "repo": "AetherAI3/aether-agent", "branch": "main", "base_commit": "0000000000000000000000000000000000000000", "dirty_file_count": 0 } },
+    { "event_type": "presence", "payload": { "protocol_version": "1", "role": "host", "device_id": "dev-journey", "liveness": "live" } },
+    { "event_type": "plan", "payload": { "projection_version": "1", "title": "build", "status": "running" } },
+    { "event_type": "subagent", "payload": { "projection_version": "1", "subagent_id": "w-1", "status": "running", "summary": "Testing" } },
+    { "event_type": "tool_activity", "payload": { "projection_version": "1", "tool": "write_file", "status": "started", "target": "src/index.ts" } },
+    { "event_type": "diff_summary", "payload": { "projection_version": "1", "files_changed": 2, "insertions": 12, "deletions": 3, "files": ["src/a.ts", "img.png"] } },
+    { "event_type": "tests", "payload": { "projection_version": "1", "status": "verified", "summary": "tests passed" } },
+    { "event_type": "ci", "payload": { "projection_version": "1", "provider": "github", "status": "reconciled", "run_id": "42" } },
+    { "event_type": "pr_status", "payload": { "projection_version": "1", "repo": "AetherAI3/aether-agent", "number": 149, "state": "reconciled", "url": "https://github.com/AetherAI3/aether-agent/pull/149" } },
+    { "event_type": "artifact", "payload": { "projection_version": "1", "artifact_id": "art_1", "kind": "image", "title": "diagram.png", "summary": "image · 1024 bytes" } },
+    { "event_type": "preview", "payload": { "projection_version": "1", "phase": "ready", "instance_id": "11111111-1111-4111-8111-111111111111", "url": "https://preview.example/app" } },
+    { "event_type": "error", "payload": { "projection_version": "1", "code": "agent_error", "message": "host reported failure" } },
+    { "event_type": "done", "payload": { "projection_version": "1", "status": "failed", "summary": "host reported failure" } }
+  ]
+}
