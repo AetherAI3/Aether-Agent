@@ -13,6 +13,10 @@ as prerelease evidence while the registry and tag remain authoritative.
 
 ## Index
 
+- [2026-09-30](2026-09-30.md) — **v0.4.0 response incident qualification
+  update**: Windows CLI trust and installed-command diagnosis, one completed
+  hosted source chat turn, and remaining packaged and release gates. This is
+  candidate evidence, not a publication.
 - [2026-09-27](2026-09-27.md) — **v0.4.0 interactive chat qualification
   update** after an installed-package home-directory stall. This is a
   candidate incident record, not a publication. The
