@@ -1,0 +1,36 @@
+{
+  "schema": "aether.ats.execution-parity-manifest/1",
+  "atsv2_sha": "58236878d1ac7978362b25350d78e44ca34e35c0",
+  "fixtures": [
+    {
+      "name": "execution-foundation",
+      "agent": "test/fixtures/ats_contracts_golden.json",
+      "atsv2": "ats-mcp/tests/fixtures/ats_contracts_golden.json",
+      "sha256": "baed2ed715d697c3040ffdf5318734d20fa39b835719ac3b79896d9ba6bd7f15"
+    },
+    {
+      "name": "model-proposal",
+      "agent": "test/fixtures/ats_model_proposal_golden.json",
+      "atsv2": "ats-mcp/tests/fixtures/ats_model_proposal_golden.json",
+      "sha256": "f6d07b91a5036729a7eb1d5acf241de1a6ea70ec60bd807629b959c16d84b5e1"
+    },
+    {
+      "name": "browser-order",
+      "agent": "test/fixtures/ats_browser_order_golden.json",
+      "atsv2": "ats-mcp/tests/fixtures/ats_browser_order_golden.json",
+      "sha256": "c71d623885c6253725c674a0f1c85a51a729bcd41992ef9b8ac41227431a492c"
+    },
+    {
+      "name": "execution-v2",
+      "agent": "test/fixtures/ats_contracts_v2_golden.json",
+      "atsv2": "ats-mcp/tests/fixtures/ats_contracts_v2_golden.json",
+      "sha256": "05cc87082c641a4c14714bdcf66e1b227b105fac3920dff2542f3e37784eea21"
+    },
+    {
+      "name": "runtime-activation",
+      "agent": "test/fixtures/ats_spec2_golden.json",
+      "atsv2": "ats-mcp/tests/fixtures/ats_spec2_golden.json",
+      "sha256": "6d9d0ec98ed3a3119a00c4b7b9a841a62292b8158702c99137de32e5161567f3"
+    }
+  ]
+}

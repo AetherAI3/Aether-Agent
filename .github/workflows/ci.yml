@@ -81,6 +81,30 @@ jobs:
       - name: Verify independent Python managed tool host contract
         run: python test/fixtures/managed_tool_host_verify.py
 
+      - name: Check out pinned ATSv2 execution wire
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AetherAI3/ATSv2
+          ref: 58236878d1ac7978362b25350d78e44ca34e35c0
+          path: _atsv2
+          persist-credentials: false
+
+      - name: Install ATSv2 parity test runner
+        run: python -m pip install --disable-pip-version-check pytest==8.3.5
+
+      - name: Verify exact Agent and ATSv2 execution wire
+        env:
+          AETHER_EXPECTED_AGENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/verify-ats-execution-parity.mjs --atsv2 _atsv2 --report ats-execution-parity.json
+
+      - name: Upload ATS execution parity evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aether-ats-execution-parity-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ats-execution-parity.json
+          if-no-files-found: error
+          retention-days: 90
+
       # Emit the compact, machine-readable package summary on both release
       # platforms. The release-coherence suite binds the packet's named host
       # measurement to this same npm pack result, so a value from one runner
