@@ -1,12 +1,7 @@
 // Every flag the review/ship layer reads must ARRIVE.
 //
-// main.ts parses with `parseArgs({ strict: false })`. An undeclared flag is not
-// an error there and it is not passed through either: it is swallowed into
-// `values` under whatever shape parseArgs guesses and stripped out of the
-// positionals the command receives. So a command reading an undeclared
-// `--files a,b` sees no flag AND no argument — it runs on an empty selection
-// and reports success having done nothing. That is not hypothetical: the same
-// mechanism is why `aether doctor --live` silently ran the fast report.
+// main.ts rejects undeclared flags. These tests pin the declarations and value
+// types for the review/ship flags so valid invocations reach their handlers.
 //
 // These tests assert the PARSED ARGV — what parseArgs produces from the very
 // options object main.ts hands it — not any rendered output. A test that
@@ -88,7 +83,7 @@ test("each declared review flag survives parseArgs with its value intact", () =>
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    strict: false,
+    strict: true,
     options: CLI_PARSE_OPTIONS,
   });
 
@@ -110,7 +105,7 @@ test("each declared ship flag survives parseArgs with its value intact", () => {
   const { values, positionals } = parseArgs({
     args: ["ship", "--title", "feat: the rail", "--body", body, "--base", "main", "--approve", "publish"],
     allowPositionals: true,
-    strict: false,
+    strict: true,
     options: CLI_PARSE_OPTIONS,
   });
   assert.equal(values["title"], "feat: the rail");
@@ -124,7 +119,7 @@ test("-m is the short form of --message and carries its value", () => {
   const { values } = parseArgs({
     args: ["review", "commit", "-m", "fix: short form"],
     allowPositionals: true,
-    strict: false,
+    strict: true,
     options: CLI_PARSE_OPTIONS,
   });
   assert.equal(values["message"], "fix: short form");
@@ -139,7 +134,7 @@ test("the parsed values reach the command through its own flags accessor", () =>
   const { values } = parseArgs({
     args: ["review", "stage", "--files", "src/a.ts", "--message", "fix: a thing"],
     allowPositionals: true,
-    strict: false,
+    strict: true,
     options: CLI_PARSE_OPTIONS,
   });
   const flags = commandFlags(review, values as Record<string, unknown>);
@@ -150,23 +145,18 @@ test("the parsed values reach the command through its own flags accessor", () =>
   assert.throws(() => flags.str("test-cmd"), /did not declare flag --test-cmd/);
 });
 
-test("the trap itself: an UNDECLARED flag loses its value and its position", () => {
-  // The proof that the declarations above are load-bearing rather than
-  // decorative. Remove `files` from the options and the same argv silently
-  // stops carrying a selection.
+test("an undeclared flag is rejected before review can run", () => {
+  // The declarations above are load-bearing. A missing one now fails closed.
   const options = { ...CLI_PARSE_OPTIONS };
   delete (options as Record<string, unknown>)["files"];
-  const { values, positionals } = parseArgs({
-    args: ["review", "stage", "--files", "src/a.ts"],
-    allowPositionals: true,
-    strict: false,
-    options,
-  });
-  assert.notEqual(values["files"], "src/a.ts", "an undeclared string flag does not arrive as its value");
-  assert.equal(
-    positionals.includes("src/a.ts"),
-    true,
-    "its value falls into the positionals, where the subcommand parser will not look for it",
+  assert.throws(
+    () => parseArgs({
+      args: ["review", "stage", "--files", "src/a.ts"],
+      allowPositionals: true,
+      strict: true,
+      options,
+    }),
+    /Unknown option '--files'/,
   );
 });
 
