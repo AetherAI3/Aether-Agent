@@ -36,7 +36,7 @@
 // between the lists, and adding an event type without one fails the build.
 
 import type { ActionReceipt, RailRepo } from "../action_rail.js";
-import type { BrainEvent } from "../brain_protocol.js";
+import { TOOLS, type BrainEvent } from "../brain_protocol.js";
 import type { CountTotal } from "../diff_counts.js";
 import type { MediaEntry } from "../media_history.js";
 import type { TreeWorker } from "../orchestrator.js";
@@ -133,7 +133,8 @@ export function mapBrainEventToRc(event: BrainEvent): RcProducedEvent | null {
     case "tool_call": {
       if (!event.name) return null;
       const target = targetHint(event.args);
-      return displayEvent("tool_activity", { tool: event.name, status: "started", ...(target ? { target } : {}) });
+      const tool = TOOLS.includes(event.name as (typeof TOOLS)[number]) ? event.name : "other";
+      return displayEvent("tool_activity", { tool, status: "started", ...(target ? { target } : {}) });
     }
 
     case "done":

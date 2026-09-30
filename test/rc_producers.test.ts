@@ -123,10 +123,16 @@ test("a tool call becomes tool activity naming the tool, not its arguments", () 
   assert.doesNotMatch(JSON.stringify(out), /SECRET-BODY-DO-NOT-SHIP/);
 });
 
-test("a tool call with nothing worth naming still reports the tool", () => {
-  const out = mapBrainEventToRc({ type: "tool_call", id: "1", name: "list", args: {} });
+test("a tool call with nothing worth naming still reports a known tool", () => {
+  const out = mapBrainEventToRc({ type: "tool_call", id: "1", name: "read_file", args: {} });
   assert.equal(out?.payload["target"], undefined);
-  assert.equal(out?.payload["tool"], "list");
+  assert.equal(out?.payload["tool"], "read_file");
+});
+
+test("an unknown tool name cannot carry private text", () => {
+  const out = mapBrainEventToRc({ type: "tool_call", id: "1", name: "private prompt", args: {} });
+  assert.equal(out?.payload["tool"], "other");
+  assert.doesNotMatch(JSON.stringify(out), /private prompt/);
 });
 
 test("done reports the brain turn without claiming host verification", () => {
