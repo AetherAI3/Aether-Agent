@@ -53,7 +53,8 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prepack": "npm run build",
     "demo:handoff": "npm run build && node dist/scripts/handoff-demo.js",
-    "ats:check": "node scripts/sync-ats-skills.mjs --check"
+    "ats:check": "node scripts/sync-ats-skills.mjs --check",
+    "ats:execution-parity": "node scripts/verify-ats-execution-parity.mjs"
   },
   "keywords": [
     "coding-agent",
