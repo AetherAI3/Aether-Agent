@@ -37,6 +37,7 @@ import {
   saveOutbox,
   type OutboxRecord,
 } from "../src/core/rc/outbox.js";
+import { payloadDigest } from "../src/core/rc/receipts.js";
 
 const SESSION = "rs_" + "b".repeat(32);
 const DEVICE = "dev-1";
@@ -105,9 +106,10 @@ function seeded(n = 2): OutboxRecord {
 function echoReceipts(from = 0) {
   return (_path: string, body: unknown): unknown => ({
     session_id: SESSION,
-    receipts: (body as { events: Array<{ host_event_id: string }> }).events.map((e, i) => ({
+    receipts: (body as { events: Array<{ host_event_id: string; payload: Record<string, unknown> }> }).events.map((e, i) => ({
       host_event_id: e.host_event_id,
       seq: from + i + 1,
+      payload_digest: payloadDigest(e.payload),
     })),
   });
 }
@@ -273,9 +275,9 @@ test("a successful flush advances the cursor and persists it", async () => {
 test("a partial receipt list preserves the batch and reports it unproven", async () => {
   const record = seeded(3);
   const api = fakeApi((_p, body) => ({
-    receipts: (body as { events: Array<{ host_event_id: string }> }).events
+    receipts: (body as { events: Array<{ host_event_id: string; payload: Record<string, unknown> }> }).events
       .slice(0, 2)
-      .map((e, i) => ({ host_event_id: e.host_event_id, seq: i + 1 })),
+      .map((e, i) => ({ host_event_id: e.host_event_id, seq: i + 1, payload_digest: payloadDigest(e.payload) })),
   }));
   const outcome = await flushOutbox(deps(api, sandbox()), record);
   assert.equal(outcome.ok, false);

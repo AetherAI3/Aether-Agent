@@ -54,6 +54,10 @@ function event(id: string, payload: Record<string, unknown> = { status: "ok" }):
   return { host_event_id: id, event_type: "tool_activity", payload };
 }
 
+function accepted(id: string, seq: unknown, payload: Record<string, unknown> = { status: "ok" }) {
+  return { host_event_id: id, seq, payload_digest: payloadDigest(payload) };
+}
+
 // ── 1. RC never touches a device secret ──────────────────────────────────────
 
 test("no RC module references a device secret or the full-record accessor", () => {
@@ -104,7 +108,7 @@ test("identity.ts projects field-by-field rather than spreading", () => {
 test("a complete, ordered, above-cursor batch advances the cursor", () => {
   const batch = [event("he_1"), event("he_2")];
   const outcome = validateReceipts(
-    { receipts: [{ host_event_id: "he_1", seq: 41 }, { host_event_id: "he_2", seq: 42 }] },
+    { receipts: [accepted("he_1", 41), accepted("he_2", 42)] },
     batch,
     40,
   );
@@ -125,7 +129,7 @@ for (const [name, response, cursor] of [
 
 test("a partial receipt list preserves the batch", () => {
   const outcome = validateReceipts(
-    { receipts: [{ host_event_id: "he_1", seq: 1 }] },
+    { receipts: [accepted("he_1", 1)] },
     [event("he_1"), event("he_2")],
     0,
   );
@@ -135,7 +139,7 @@ test("a partial receipt list preserves the batch", () => {
 
 test("a duplicate receipt preserves the batch", () => {
   const outcome = validateReceipts(
-    { receipts: [{ host_event_id: "he_1", seq: 1 }, { host_event_id: "he_1", seq: 2 }] },
+    { receipts: [accepted("he_1", 1), accepted("he_1", 2)] },
     [event("he_1"), event("he_2")],
     0,
   );
@@ -144,7 +148,7 @@ test("a duplicate receipt preserves the batch", () => {
 
 test("a receipt for an event we never sent preserves the batch", () => {
   const outcome = validateReceipts(
-    { receipts: [{ host_event_id: "he_99", seq: 1 }] },
+    { receipts: [accepted("he_99", 1)] },
     [event("he_1")],
     0,
   );
@@ -163,7 +167,7 @@ test("a non-boolean rejected value still counts as a rejection", () => {
 
 test("decreasing sequences within a batch preserve the batch", () => {
   const outcome = validateReceipts(
-    { receipts: [{ host_event_id: "he_1", seq: 9 }, { host_event_id: "he_2", seq: 8 }] },
+    { receipts: [accepted("he_1", 9), accepted("he_2", 8)] },
     [event("he_1"), event("he_2")],
     0,
   );
@@ -175,7 +179,7 @@ test("a sequence at or below the durable cursor preserves the batch", () => {
   // sequence numbers to make the host drop events it never really stored.
   for (const seq of [40, 39, 1]) {
     const outcome = validateReceipts(
-      { receipts: [{ host_event_id: "he_1", seq }] },
+      { receipts: [accepted("he_1", seq)] },
       [event("he_1")],
       40,
     );
@@ -190,7 +194,7 @@ test("a sequence at or below the durable cursor preserves the batch", () => {
 for (const seq of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 2, "3" as unknown as number]) {
   test(`an invalid sequence preserves the batch (${String(seq)})`, () => {
     const outcome = validateReceipts(
-      { receipts: [{ host_event_id: "he_1", seq }] },
+      { receipts: [accepted("he_1", seq)] },
       [event("he_1")],
       0,
     );
@@ -224,16 +228,16 @@ test("a matching digest is accepted", () => {
   assert.equal(outcome.ok, true);
 });
 
-test("an omitted digest does not stall an older broker", () => {
+test("an omitted digest preserves the batch", () => {
   const outcome = validateReceipts({ receipts: [{ host_event_id: "he_1", seq: 1 }] }, [event("he_1")], 0);
-  assert.equal(outcome.ok, true);
+  assert.equal(outcome.ok === false && outcome.reason, "missing_digest");
 });
 
 test("every rejection reason has operator-facing text that names no payload", () => {
   const reasons = [
     "malformed_response", "count_mismatch", "unknown_event_id", "duplicate_receipt",
     "explicitly_rejected", "invalid_sequence", "sequence_not_increasing",
-    "sequence_not_above_cursor", "digest_mismatch",
+    "sequence_not_above_cursor", "missing_digest", "digest_mismatch",
   ] as const;
   for (const reason of reasons) {
     const text = describeRejection(reason);

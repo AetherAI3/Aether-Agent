@@ -37,7 +37,7 @@ test("REPL TLS trust failure gives the same CA repair", () => {
   });
   const hint = errorHint(tls, BASE) ?? "";
   assert.match(hint, /TLS certificate trust failed/);
-  assert.match(hint, process.platform === "win32" ? /NODE_USE_SYSTEM_CA=1/ : /NODE_EXTRA_CA_CERTS/);
+  assert.match(hint, process.platform === "win32" ? /NODE_OPTIONS=--use-system-ca/ : /NODE_EXTRA_CA_CERTS/);
 });
 
 test("stream timeouts get a retry/doctor hint, matching error_hints.hintFor (LOOP-06 round 2)", () => {

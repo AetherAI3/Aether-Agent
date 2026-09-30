@@ -38,6 +38,7 @@ import {
 import { commandFlags } from "./core/command_dispatch.js";
 import { cmdManagedAgents, cmdManagedAgentChat, MANAGED_AGENT_VERBS } from "./commands/managed_agents.js";
 import { createAtsHooks } from "./commands/ats_agent.js";
+import { trustWindowsSystemCAs } from "./core/system_ca.js";
 
 /** Coerce a parsed flag value to string | undefined. */
 const sf = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
@@ -349,6 +350,7 @@ export function isMainInvocation(
 }
 
 if (isMainInvocation(process.argv[1])) {
+  trustWindowsSystemCAs();
   main(process.argv.slice(2))
     .then(finish)
     .catch((err) => {

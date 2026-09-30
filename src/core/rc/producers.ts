@@ -149,21 +149,29 @@ export function mapBrainEventToRc(event: BrainEvent): RcProducedEvent | null {
   }
 }
 
-/** The session-open event: identifiers describing what is being observed. */
+/** Pinned opening-event payload contract shared with the Cloud broker. */
+export const RC_OPENING_PROTOCOL_VERSION = "1" as const;
+
+/** The session-open event: identifiers describing what is being observed.
+ * `live` is the broker's state after a successful host attach. */
 export function sessionOpenedEvent(fields: {
   session_name: string;
   repo: string;
   branch: string;
   base_commit: string;
   dirty_file_count: number;
-  protocol_version: string;
+  protocol_version: typeof RC_OPENING_PROTOCOL_VERSION;
 }): RcProducedEvent {
-  return { event_type: "session", payload: { state: "active", ...fields } };
+  return { event_type: "session", payload: { state: "live", ...fields } };
 }
 
-/** Host presence. `role` is always "host" — a producer is never a controller. */
-export function hostPresenceEvent(deviceId: string, state: "online" | "offline"): RcProducedEvent {
-  return { event_type: "presence", payload: { role: "host", device_id: deviceId, state } };
+/** Host presence. `role` is always "host" — a producer is never a controller.
+ * This is an event snapshot; the broker's heartbeat remains liveness authority. */
+export function hostPresenceEvent(deviceId: string, liveness: "live" | "offline"): RcProducedEvent {
+  return {
+    event_type: "presence",
+    payload: { protocol_version: RC_OPENING_PROTOCOL_VERSION, role: "host", device_id: deviceId, liveness },
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

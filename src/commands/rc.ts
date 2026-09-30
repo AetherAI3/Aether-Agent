@@ -48,6 +48,7 @@ import {
   type OutboxRecord,
 } from "../core/rc/outbox.js";
 import {
+  RC_OPENING_PROTOCOL_VERSION,
   hostPresenceEvent,
   producerCoverage,
   sessionOpenedEvent,
@@ -323,10 +324,10 @@ async function start(
       branch: repo.branch,
       base_commit: repo.base_commit,
       dirty_file_count: repo.dirty_file_count,
-      protocol_version: "1",
+      protocol_version: RC_OPENING_PROTOCOL_VERSION,
     });
     enqueueEvent(record, opened.event_type, opened.payload);
-    const presence = hostPresenceEvent(enrolled.device_id, "online");
+    const presence = hostPresenceEvent(enrolled.device_id, "live");
     enqueueEvent(record, presence.event_type, presence.payload);
     saveOutbox(hostDeps.outboxPath, record);
     await flushOutbox(hostDeps, record);

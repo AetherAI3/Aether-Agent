@@ -55,7 +55,7 @@ const RC_ALLOWED_KEYS: Readonly<Record<ViewerEventType, readonly string[]>> = {
     "state", "session_name", "repo", "branch", "base_commit",
     "dirty_file_count", "execution", "protocol_version",
   ],
-  presence: ["role", "device_id", "state"],
+  presence: ["protocol_version", "role", "device_id", "liveness"],
   plan: ["step", "total_steps", "title", "status"],
   subagent: ["subagent_id", "name", "status", "summary"],
   tool_activity: ["tool", "target", "status", "summary"],

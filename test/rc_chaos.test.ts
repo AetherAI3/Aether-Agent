@@ -32,6 +32,7 @@ import {
   type OutboxRecord,
 } from "../src/core/rc/outbox.js";
 import { sanitizeRemotePayload } from "../src/core/rc/redaction.js";
+import { payloadDigest } from "../src/core/rc/receipts.js";
 import {
   FORBIDDEN_VIEWER_TERMS,
   VIEWER_CAPABILITIES,
@@ -130,18 +131,18 @@ class FakeBroker {
     const receipts: Array<Record<string, unknown>> = [];
     for (const event of payload.events ?? []) {
       const eventId = String(event["host_event_id"]);
-      const digest = JSON.stringify(event["payload"]);
+      const digest = payloadDigest(event["payload"] as Record<string, unknown>);
       const previous = session.seen.get(eventId);
       if (previous !== undefined && previous !== digest) {
         throw httpError(409, { error: "event_conflict", host_event_id: eventId });
       }
       if (previous !== undefined) {
-        receipts.push({ host_event_id: eventId, seq: session.seq, duplicate: true });
+        receipts.push({ host_event_id: eventId, seq: session.seq, payload_digest: digest, duplicate: true });
         continue;
       }
       session.seq += 1;
       session.seen.set(eventId, digest);
-      receipts.push({ host_event_id: eventId, seq: session.seq });
+      receipts.push({ host_event_id: eventId, seq: session.seq, payload_digest: digest });
     }
     return { session_id: id, receipts };
   }
@@ -593,9 +594,8 @@ test("every receipt fault preserves the batch", async () => {
   }
 });
 
-test("an omitted optional digest does not stall a host, per the real Cloud contract", async () => {
-  // The Cloud append route returns {host_event_id, seq, duplicate} with no
-  // digest. Treating its absence as a fault would stall every real host.
+test("digest-bearing Cloud receipts let the host advance its durable cursor", async () => {
+  // The in-process broker binds each receipt to the exact payload it stored.
   const broker = new FakeBroker();
   broker.create(SESSION_A, "user-a", "dev-a");
   const out = record(SESSION_A, "dev-a", 2);

@@ -21,9 +21,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   browserHint,
@@ -43,12 +44,42 @@ import {
 } from "../src/core/rc/host.js";
 import { createOutbox, enqueueEvent, loadOutbox, saveOutbox } from "../src/core/rc/outbox.js";
 import { hostPresenceEvent, sessionOpenedEvent } from "../src/core/rc/producers.js";
+import { payloadDigest } from "../src/core/rc/receipts.js";
 
 const PROJECT_ROOT = "/repo";
 const SESSION = "rs_" + "1".repeat(32);
 const DEVICE = "dev-journey";
 const T0 = "2026-09-07T00:00:00.000000+00:00";
 const T1 = "2026-09-07T00:05:00.000000+00:00";
+const OPENING_FIXTURE = JSON.parse(readFileSync(join(
+  dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "fixtures", "rc-opening-v1.json",
+), "utf8")) as {
+  schema: string;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+};
+// Shared with AETHER-CLOUD's RC opening contract test. Changing either fixture
+// requires an explicit protocol update in both repositories.
+const OPENING_FIXTURE_DIGEST = "sha256:037798a6dc004c988c2b338ac5b56d8f9ed2783d3078fb7225e8dde9f20343c1";
+
+/** The Cloud contract test consumes this same fixture. The local mock checks
+ * every opening field rather than accepting arbitrary event payloads. */
+function cloudV1OpeningReceipts(events: Array<{
+  host_event_id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+}>): { session_id: string; receipts: Array<{ host_event_id: string; seq: number; payload_digest: string }> } {
+  assert.equal(OPENING_FIXTURE.schema, "aether.rc.opening/1");
+  assert.equal(payloadDigest(OPENING_FIXTURE), OPENING_FIXTURE_DIGEST);
+  assert.deepEqual(events.map(({ event_type, payload }) => ({ event_type, payload })), OPENING_FIXTURE.events);
+  return {
+    session_id: SESSION,
+    receipts: events.map((event, i) => ({
+      host_event_id: event.host_event_id,
+      seq: i + 1,
+      payload_digest: payloadDigest(event.payload),
+    })),
+  };
+}
 
 function sandbox(): string {
   return join(mkdtempSync(join(tmpdir(), "aether-rc-journey-")), "outbox.json");
@@ -133,11 +164,10 @@ test("the full journey: browser, connector proof, RC host, restart, off", async 
     async postJson(p: string, body: unknown) {
       calls.push(p);
       if (p.endsWith("/host/events")) {
-        const events = (body as { events: Array<{ host_event_id: string }> }).events;
-        return {
-          session_id: SESSION,
-          receipts: events.map((e, i) => ({ host_event_id: e.host_event_id, seq: i + 1 })),
-        };
+        const events = (body as { events: Array<{
+          host_event_id: string; event_type: string; payload: Record<string, unknown>;
+        }> }).events;
+        return cloudV1OpeningReceipts(events);
       }
       if (p.endsWith("/host/heartbeat")) return { session_id: SESSION, state: "active" };
       return { session_id: SESSION, state: "active", device_id: DEVICE };
@@ -179,7 +209,7 @@ test("the full journey: browser, connector proof, RC host, restart, off", async 
     protocol_version: "1",
   });
   enqueueEvent(record, opening.event_type, opening.payload);
-  const presence = hostPresenceEvent(DEVICE, "online");
+  const presence = hostPresenceEvent(DEVICE, "live");
   enqueueEvent(record, presence.event_type, presence.payload);
   saveOutbox(path, record);
 
@@ -343,8 +373,12 @@ test("RC adds no listener and leaves no process behind", async () => {
   enqueueEvent(record, "plan", { title: "t", status: "running" });
   const api = {
     async postJson(_p: string, body: unknown) {
-      const events = (body as { events: Array<{ host_event_id: string }> }).events;
-      return { receipts: events.map((e, i) => ({ host_event_id: e.host_event_id, seq: i + 1 })) };
+      const events = (body as { events: Array<{
+        host_event_id: string; payload: Record<string, unknown>;
+      }> }).events;
+      return { receipts: events.map((e, i) => ({
+        host_event_id: e.host_event_id, seq: i + 1, payload_digest: payloadDigest(e.payload),
+      })) };
     },
     async getJson() {
       return [];

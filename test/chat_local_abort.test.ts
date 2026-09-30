@@ -13,7 +13,7 @@ import type { AppContext } from "../src/core/context.js";
 import type { Brain, TaskCommand } from "../src/core/brain.js";
 import type { BrainEvent } from "../src/core/brain_protocol.js";
 import type { ToolResult } from "../src/core/tool_executor.js";
-import { MeaningfulProgressTimeoutError } from "../src/core/errors.js";
+import { MeaningfulProgressTimeoutError, ModelOutputLimitError, TurnDeadlineError } from "../src/core/errors.js";
 
 /**
  * A brain that emits one tool_call and then parks forever, exactly like the
@@ -156,4 +156,58 @@ test("a local tool that ignores abort cannot strand the turn", async () => {
     MeaningfulProgressTimeoutError,
   );
   assert.equal(toolSignal?.aborted, true, "tool receives the same timed-out signal");
+});
+
+test("repeated local monologue with rising telemetry cannot extend progress", async () => {
+  let closed = 0;
+  const brain: Brain = {
+    run: () => (async function* (): AsyncGenerator<BrainEvent> {
+      for (let i = 0; i < 100; i += 1) {
+        yield { type: "monologue", text: "repeated paragraph ".repeat(20), depth: 0 };
+        yield { type: "telemetry", tokens: i, tps: 2, ctxUsed: i, ctxCap: 4096, vram: 1 };
+        await new Promise<void>((resolve) => setTimeout(resolve, 2));
+      }
+      yield { type: "done", ok: true, result: "done", remaining: 0, reason: "" };
+    })(),
+    sendToolResult() {}, control() {}, close() { closed++; },
+  };
+  await assert.rejects(
+    () => runLocalTurn(ctx(), "stop local loop", undefined, { brain, exec: noExec, meaningfulProgressTimeoutMs: 25 }),
+    MeaningfulProgressTimeoutError,
+  );
+  assert.ok(closed >= 1);
+});
+
+test("a buffered local model cannot evade its absolute deadline", async () => {
+  const brain: Brain = {
+    run: () => (async function* (): AsyncGenerator<BrainEvent> {
+      for (let i = 0; i < 20_000; i += 1) {
+        yield { type: "monologue", text: `novel ${i}`, depth: 0 };
+      }
+      yield { type: "done", ok: true, result: "done", remaining: 0, reason: "" };
+    })(),
+    sendToolResult() {}, control() {}, close() {},
+  };
+  await assert.rejects(
+    () => runLocalTurn(ctx(), "finite local turn", undefined, {
+      brain, exec: noExec, meaningfulProgressTimeoutMs: 1000, deadlineAt: Date.now() + 1,
+    }),
+    TurnDeadlineError,
+  );
+});
+
+test("local model output cap applies per segment", async () => {
+  const brain: Brain = {
+    run: () => (async function* (): AsyncGenerator<BrainEvent> {
+      for (let i = 0; i < 20; i += 1) yield { type: "monologue", text: `unique section ${i}`, depth: 0 };
+      yield { type: "done", ok: true, result: "done", remaining: 0, reason: "" };
+    })(),
+    sendToolResult() {}, control() {}, close() {},
+  };
+  await assert.rejects(
+    () => runLocalTurn(ctx(), "bounded local output", undefined, {
+      brain, exec: noExec, modelOutputLimitBytes: 60,
+    }),
+    ModelOutputLimitError,
+  );
 });
