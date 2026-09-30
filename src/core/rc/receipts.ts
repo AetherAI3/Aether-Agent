@@ -66,6 +66,7 @@ export type ReceiptRejection =
   | "invalid_sequence"
   | "sequence_not_increasing"
   | "sequence_not_above_cursor"
+  | "missing_digest"
   | "digest_mismatch";
 
 export type ReceiptOutcome =
@@ -132,16 +133,13 @@ export function validateReceipts(
     if (seq <= cursor) return { ok: false, reason: "sequence_not_above_cursor" };
     if (seq <= previousSeq) return { ok: false, reason: "sequence_not_increasing" };
 
-    // The event-id/payload binding. Checked only when the broker supplies a
-    // digest: older brokers omit it, and refusing every batch from one would
-    // stall observation over a field that used not to exist. When it IS
-    // supplied it must match, because that is the entire point of sending it.
+    // The event-id/payload binding is mandatory for the RC opening contract.
+    // An older or partial broker response is unproven, so preserve the batch.
     const digest = raw.payload_digest;
-    if (digest !== undefined) {
-      if (typeof digest !== "string") return { ok: false, reason: "digest_mismatch" };
-      if (digest !== payloadDigest(expected.get(id)!.payload)) {
-        return { ok: false, reason: "digest_mismatch" };
-      }
+    if (digest === undefined) return { ok: false, reason: "missing_digest" };
+    if (typeof digest !== "string") return { ok: false, reason: "digest_mismatch" };
+    if (digest !== payloadDigest(expected.get(id)!.payload)) {
+      return { ok: false, reason: "digest_mismatch" };
     }
 
     seen.add(id);
@@ -177,6 +175,8 @@ export function describeRejection(reason: ReceiptRejection): string {
       return "the broker returned out-of-order sequence numbers";
     case "sequence_not_above_cursor":
       return "the broker returned a sequence at or below the durable cursor";
+    case "missing_digest":
+      return "the broker omitted proof of the payload it stored";
     case "digest_mismatch":
       return "a receipt did not match the payload this host sent";
   }

@@ -1,0 +1,26 @@
+{
+  "schema": "aether.rc.opening/1",
+  "events": [
+    {
+      "event_type": "session",
+      "payload": {
+        "state": "live",
+        "session_name": "journey",
+        "repo": "AetherAI3/aether-agent",
+        "branch": "main",
+        "base_commit": "0000000000000000000000000000000000000000",
+        "dirty_file_count": 0,
+        "protocol_version": "1"
+      }
+    },
+    {
+      "event_type": "presence",
+      "payload": {
+        "protocol_version": "1",
+        "role": "host",
+        "device_id": "dev-journey",
+        "liveness": "live"
+      }
+    }
+  ]
+}
