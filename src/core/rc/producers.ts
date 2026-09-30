@@ -294,6 +294,12 @@ function providerId(receipt: ActionReceipt, keys: readonly string[]): string | u
   return undefined;
 }
 
+function numericProviderId(receipt: ActionReceipt, keys: readonly string[]): string | undefined {
+  const value = providerId(receipt, keys);
+  return value && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value))
+    ? value : undefined;
+}
+
 /**
  * ci — from an Action Rail receipt for a CI action.
  *
@@ -303,7 +309,7 @@ function providerId(receipt: ActionReceipt, keys: readonly string[]): string | u
  */
 export function ciEvent(receipt: ActionReceipt): RcProducedEvent | null {
   if (!receipt.action_type.startsWith("aether.github.ci.")) return null;
-  const runId = providerId(receipt, ["run_id", "check_run_id", "workflow_run_id"]);
+  const runId = numericProviderId(receipt, ["run_id", "check_run_id", "workflow_run_id"]);
   return displayEvent("ci", {
       provider: "github",
       status: receipt.reconciled ? "reconciled" : "issued",
@@ -324,9 +330,8 @@ export function ciEvent(receipt: ActionReceipt): RcProducedEvent | null {
 export function prStatusEvent(receipt: ActionReceipt, repo?: RailRepo | null): RcProducedEvent | null {
   if (!receipt.action_type.startsWith("aether.github.pr.")) return null;
   const repository = repo?.repository ?? receipt.repository;
-  const rawNumber = providerId(receipt, ["pull_request_number", "number", "pr_number"]);
-  const number = rawNumber && /^[1-9][0-9]*$/.test(rawNumber) && Number.isSafeInteger(Number(rawNumber))
-    ? Number(rawNumber) : undefined;
+  const rawNumber = numericProviderId(receipt, ["pull_request_number", "number", "pr_number"]);
+  const number = rawNumber ? Number(rawNumber) : undefined;
   const safeRepo = safeRepoSlug(repository) ? repository : undefined;
   return displayEvent("pr_status", {
       ...(safeRepo ? { repo: safeRepo } : {}),

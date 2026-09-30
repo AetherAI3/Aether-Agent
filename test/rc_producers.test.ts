@@ -373,6 +373,18 @@ test("ci comes from a CI action receipt and carries only the run identity", () =
   assert.equal(payload["status"], "reconciled");
 });
 
+test("a malformed CI provider ID cannot become viewer text", () => {
+  const event = ciEvent({
+    ...RECEIPT,
+    action_type: "aether.github.ci.rerun_failed",
+    provider_object_ids: { run_id: "private prompt --token=hunter2" },
+  });
+  assert.ok(event);
+  const payload = persisted(event);
+  assert.equal(payload?.["run_id"], undefined);
+  assert.equal(payload?.["status"], "reconciled");
+});
+
 test("a non-CI receipt does not become a ci event", () => {
   assert.equal(ciEvent({ ...RECEIPT, action_type: "aether.github.pr.create" }), null);
 });
