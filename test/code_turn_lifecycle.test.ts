@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import type { Brain, TaskCommand } from "../src/core/brain.js";
 import type { BrainEvent } from "../src/core/brain_protocol.js";
-import { MeaningfulProgressTimeoutError } from "../src/core/errors.js";
+import { MeaningfulProgressTimeoutError, ModelOutputLimitError, TurnDeadlineError } from "../src/core/errors.js";
 import type { ToolExecutor } from "../src/core/tool_executor.js";
 import type { ToolResult } from "../src/core/tool_executor.js";
 import {
@@ -134,6 +134,28 @@ test("long model chunks with a shared prefix still advance when their suffix cha
   }
 });
 
+test("novel prefixes remain progress even when long chunks share a repeated suffix", () => {
+  const turn = new CodeTurnLifecycle("novel prefixes");
+  const repeatedSuffix = "x".repeat(1_500);
+  for (let i = 0; i < 30; i += 1) {
+    assert.equal(
+      turn.observe({ type: "monologue", text: `new section ${i}: ${repeatedSuffix}`, depth: 0 }).meaningful,
+      true,
+    );
+  }
+});
+
+test("a repeated paragraph longer than 256 characters stops advancing progress", () => {
+  const turn = new CodeTurnLifecycle("repeated paragraph");
+  const paragraph = ("The agent should finish the response before repeating it. ").repeat(6).slice(0, 300);
+  let stalled = false;
+  for (let i = 0; i < 40; i += 1) {
+    if (!turn.observe({ type: "monologue", text: paragraph, depth: 0 }).meaningful) stalled = true;
+    assert.equal(turn.observe({ type: "telemetry", tokens: i + 1, ctxUsed: i + 1, ctxCap: 10_000, tps: 1, vram: 0 }).meaningful, false);
+  }
+  assert.equal(stalled, true);
+});
+
 test("sustained repeated model text stops advancing while ordinary repeated words do not", () => {
   const turn = new CodeTurnLifecycle("repeated answer");
   for (let i = 0; i < 20; i += 1) {
@@ -189,6 +211,48 @@ test("host loop times out duplicate cosmetic traffic, closes once, and delivers 
   const atSettlement = seen.length;
   await new Promise<void>((resolve) => setTimeout(resolve, 15));
   assert.equal(seen.length, atSettlement, "a timed-out iterator cannot write after cleanup");
+});
+
+test("an endlessly novel coding segment hits its absolute deadline", async () => {
+  let closed = 0;
+  const brain = {
+    run: () => (async function* (): AsyncGenerator<BrainEvent> {
+      for (let i = 0; i < 200; i += 1) {
+        yield { type: "monologue", text: `novel coding step ${i}`, depth: 0 };
+        await new Promise<void>((resolve) => setTimeout(resolve, 2));
+      }
+      yield { type: "done", ok: true, result: "done", remaining: 0, reason: "" };
+    })(),
+    sendToolResult: () => {},
+    control: () => {},
+    close: () => { closed += 1; },
+  } as Brain;
+  await assert.rejects(
+    () => hostLoop(brain, noExec, () => {}, task, undefined, undefined, undefined, {
+      meaningfulProgressTimeoutMs: 200,
+      modelSegmentTimeoutMs: 30,
+    }),
+    TurnDeadlineError,
+  );
+  assert.equal(closed, 1);
+});
+
+test("a coding model segment stops at its output cap before terminal done", async () => {
+  let closed = 0;
+  const brain = {
+    run: () => (async function* (): AsyncGenerator<BrainEvent> {
+      for (let i = 0; i < 20; i += 1) yield { type: "monologue", text: `novel coding section ${i}`, depth: 0 };
+      yield { type: "done", ok: true, result: "done", remaining: 0, reason: "" };
+    })(),
+    sendToolResult: () => {}, control: () => {}, close: () => { closed++; },
+  } as Brain;
+  await assert.rejects(
+    () => hostLoop(brain, noExec, () => {}, task, undefined, undefined, undefined, {
+      modelOutputLimitBytes: 80,
+    }),
+    ModelOutputLimitError,
+  );
+  assert.equal(closed, 1);
 });
 
 class DoneThenLateToolBrain implements Brain {

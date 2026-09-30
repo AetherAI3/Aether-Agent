@@ -44,6 +44,7 @@ import { createWorktree, mergeHint, type Worktree } from "../core/worktree.js";
 import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js";
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
+import { ModelOutputBudget } from "../core/model_output_budget.js";
 import { decideGate } from "../core/autonomy.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SessionContext } from "../core/session_resume.js";
@@ -56,6 +57,9 @@ import {
 } from "../core/turn_lifecycle.js";
 import {
   MeaningfulProgressTimeoutError,
+  ModelOutputLimitError,
+  StreamTimeoutError,
+  TurnDeadlineError,
   errorMessage,
   isAbortError,
 } from "../core/errors.js";
@@ -86,6 +90,18 @@ export const EXIT_ROUTING_REFUSED = 3;
  */
 export const DEFAULT_CODE_MEANINGFUL_PROGRESS_TIMEOUT_MS = 120_000;
 export const CODE_MEANINGFUL_PROGRESS_TIMEOUT_ENV = "AETHER_AGENT_PROGRESS_TIMEOUT_MS";
+export const DEFAULT_CODE_MODEL_SEGMENT_TIMEOUT_MS = 30 * 60_000;
+export const CODE_MODEL_SEGMENT_TIMEOUT_ENV = "AETHER_AGENT_SEGMENT_TIMEOUT_MS";
+
+/** Bound one model segment even if it emits endlessly novel text. */
+export function codeModelSegmentTimeoutMs(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  const parsed = Number(env[CODE_MODEL_SEGMENT_TIMEOUT_ENV]);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(1, Math.trunc(parsed))
+    : DEFAULT_CODE_MODEL_SEGMENT_TIMEOUT_MS;
+}
 
 /** Parse the coding-turn progress deadline without allowing a malformed or
  * negative environment value to disable the production bound accidentally.
@@ -162,7 +178,6 @@ export function applyEventToStatus(
 class CodeProgressTracker {
   private readonly seen = new Set<string>();
   private readonly modelText = new ModelTextProgress();
-  private highestTokens = 0;
   private static readonly MAX_KEYS = 256;
   private static readonly MAX_KEY_LENGTH = 512;
 
@@ -185,11 +200,8 @@ class CodeProgressTracker {
       }
       case "tool_call":
         return this.once(`tool:${ev.id}`);
-      case "telemetry": {
-        if (!Number.isFinite(ev.tokens) || ev.tokens <= this.highestTokens) return false;
-        this.highestTokens = ev.tokens;
-        return true;
-      }
+      case "telemetry":
+        return false; // tokens can rise while the answer repeats
       case "status": {
         // Pool/cap oscillation is presentation telemetry. Only a previously
         // unseen, non-empty phase can establish semantic progress.
@@ -344,7 +356,7 @@ export class CodeTurnLifecycle {
     if (settled) return settled;
     this.toCompleting();
 
-    if (this.thrown instanceof MeaningfulProgressTimeoutError) {
+    if (this.thrown instanceof StreamTimeoutError) {
       return this.lifecycle.finalize("timed_out", {
         message: sanitizeServerText(this.thrown.message),
         hint: "retry the prompt or run `aether doctor` to inspect connectivity",
@@ -950,7 +962,7 @@ export async function cmdCode(
   // red result with its breaker reason and can never upgrade a red run to "ok".
   let verification: VerifyOutcome | null = null;
   const loopWasInterrupted =
-    commandAbort.signal.aborted || loopError instanceof MeaningfulProgressTimeoutError || isAbortError(loopError);
+    commandAbort.signal.aborted || loopError instanceof StreamTimeoutError || loopError instanceof ModelOutputLimitError || isAbortError(loopError);
   if (!loopWasInterrupted) {
     try {
       verification = await finalVerify(
@@ -1082,7 +1094,6 @@ export function contextDrift(
 }
 
 /**
- * The host loop — the bridge seam, extracted so it is unit-testable with a fake/**
  * The host loop — the bridge seam, extracted so it is unit-testable with a fake
  * brain. The brain decides (emits events); the host renders each event and
  * executes each tool_call locally, replying with the result. Returns the process
@@ -1098,6 +1109,10 @@ export function contextDrift(
 export interface HostLoopOptions {
   /** 0 disables the bound for a deliberate library embed; the CLI never does. */
   meaningfulProgressTimeoutMs?: number;
+  /** Absolute bound on one model segment; resets after a tool result. */
+  modelSegmentTimeoutMs?: number;
+  /** Per-model-segment output cap for embedders and focused tests. */
+  modelOutputLimitBytes?: number;
   /** Command-owned cancellation authority, shared with host verification. */
   signal?: AbortSignal;
 }
@@ -1115,9 +1130,12 @@ export async function hostLoop(
   let code = 0;
   let iterator: AsyncIterator<BrainEvent> | null = null;
   const progress = new CodeProgressTracker();
+  const modelOutput = new ModelOutputBudget(options.modelOutputLimitBytes);
   const timeoutMs = options.meaningfulProgressTimeoutMs ?? DEFAULT_CODE_MEANINGFUL_PROGRESS_TIMEOUT_MS;
+  const segmentTimeoutMs = options.modelSegmentTimeoutMs ?? codeModelSegmentTimeoutMs();
   const signal = options.signal;
   let lastMeaningfulAt = Date.now();
+  let modelSegmentStartedAt = lastMeaningfulAt;
   let brainClosed = false;
   const closeBrain = (): void => {
     if (brainClosed) return;
@@ -1135,10 +1153,13 @@ export async function hostLoop(
         timeoutMs,
         lastMeaningfulAt,
         signal,
+        segmentTimeoutMs,
+        modelSegmentStartedAt,
       );
       if (next.done) break;
       const ev = next.value;
-      await boundedCodeOperation(() => onEvent(ev), timeoutMs, lastMeaningfulAt, signal);
+      if (ev.type === "monologue") modelOutput.add(ev.text);
+      await boundedCodeOperation(() => onEvent(ev), timeoutMs, lastMeaningfulAt, signal, segmentTimeoutMs, modelSegmentStartedAt);
       if (progress.meaningful(ev)) lastMeaningfulAt = Date.now();
       let terminal = false;
       switch (ev.type) {
@@ -1161,6 +1182,8 @@ export async function hostLoop(
             onToolResult?.(ev.id, denied);
             brain.sendToolResult(ev.id, denied);
             lastMeaningfulAt = Date.now();
+            modelSegmentStartedAt = lastMeaningfulAt;
+            modelOutput.reset();
             break;
           }
           const approved = gate
@@ -1169,6 +1192,8 @@ export async function hostLoop(
                 timeoutMs,
                 lastMeaningfulAt,
                 signal,
+                segmentTimeoutMs,
+                modelSegmentStartedAt,
               )
             : true;
           const remaining = remainingCodeProgressMs(timeoutMs, lastMeaningfulAt);
@@ -1182,12 +1207,16 @@ export async function hostLoop(
                 timeoutMs,
                 lastMeaningfulAt,
                 signal,
+                segmentTimeoutMs,
+                modelSegmentStartedAt,
               )
             : { output: `[denied: ${ev.name} not approved by user]`, exitCode: 1 };
           if (signal?.aborted) throw codeSignalReason(signal);
           onToolResult?.(ev.id, result);
           brain.sendToolResult(ev.id, result);
           lastMeaningfulAt = Date.now();
+          modelSegmentStartedAt = lastMeaningfulAt;
+          modelOutput.reset();
           break;
         }
         case "done":
@@ -1247,11 +1276,16 @@ function boundedCodeOperation<T>(
   timeoutMs: number,
   lastMeaningfulAt: number,
   signal?: AbortSignal,
+  segmentTimeoutMs = DEFAULT_CODE_MODEL_SEGMENT_TIMEOUT_MS,
+  modelSegmentStartedAt = Date.now(),
 ): Promise<T> {
   if (signal?.aborted) return Promise.reject(codeSignalReason(signal));
-  if (timeoutMs <= 0 && !signal) return Promise.resolve().then(work);
-  const remaining = remainingCodeProgressMs(timeoutMs, lastMeaningfulAt);
-  if (remaining <= 0) return Promise.reject(new MeaningfulProgressTimeoutError(timeoutMs));
+  const progressRemaining = timeoutMs > 0 ? remainingCodeProgressMs(timeoutMs, lastMeaningfulAt) : Infinity;
+  const segmentRemaining = segmentTimeoutMs - (Date.now() - modelSegmentStartedAt);
+  if (segmentRemaining <= 0) return Promise.reject(new TurnDeadlineError(segmentTimeoutMs));
+  if (progressRemaining <= 0) return Promise.reject(new MeaningfulProgressTimeoutError(timeoutMs));
+  const segmentFirst = segmentRemaining <= progressRemaining;
+  const remaining = Math.min(progressRemaining, segmentRemaining);
 
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -1267,9 +1301,10 @@ function boundedCodeOperation<T>(
     };
     const onAbort = (): void => fail(codeSignalReason(signal!));
     signal?.addEventListener("abort", onAbort, { once: true });
-    const timer = timeoutMs > 0
-      ? setTimeout(() => fail(new MeaningfulProgressTimeoutError(timeoutMs)), Math.max(1, remaining))
-      : null;
+    const timer = setTimeout(
+      () => fail(segmentFirst ? new TurnDeadlineError(segmentTimeoutMs) : new MeaningfulProgressTimeoutError(timeoutMs)),
+      Math.max(1, remaining),
+    );
     timer?.unref?.();
     Promise.resolve().then(work).then(
       (value) => {

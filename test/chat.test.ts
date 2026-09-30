@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { runTurn, cmdChat, ChatTurnError, applyRestart, buildPromptContext, repaintString } from "../src/commands/chat.js";
 import { handleSlash } from "../src/commands/slash.js";
 import { ApiClient } from "../src/core/transport.js";
-import { MeaningfulProgressTimeoutError, StreamIncompleteError } from "../src/core/errors.js";
+import { MeaningfulProgressTimeoutError, ModelOutputLimitError, StreamIncompleteError, TurnDeadlineError } from "../src/core/errors.js";
 import type { GlobalFlags, AppContext } from "../src/core/context.js";
 import type { TokenStore } from "../src/core/auth.js";
 
@@ -297,14 +297,105 @@ test("a sustained repeated text loop cannot keep a cloud turn alive", async () =
     status: 200,
     headers: new Headers({ "content-type": "text/event-stream" }),
     body: (async function* (): AsyncIterable<Uint8Array> {
-      for (;;) {
+      for (let i = 0; i < 500; i += 1) {
         yield new TextEncoder().encode('data: {"type":"delta","text":"again"}\n\n');
+        yield new TextEncoder().encode(`data: ${JSON.stringify({ type: "usage", uvt: i, cents: i })}\n\n`);
         await new Promise<void>((resolve) => setTimeout(resolve, 1));
       }
+      yield new TextEncoder().encode('data: {"type":"done","uvt":500,"cents":500}\n\n');
     })(),
   }) as unknown as Response) as typeof globalThis.fetch;
   try {
     await assert.rejects(() => runTurn(ctxWith(), "bounded repeated answer"), MeaningfulProgressTimeoutError);
+  } finally {
+    globalThis.fetch = real;
+    if (previous === undefined) delete process.env["AETHER_STREAM_TIMEOUT_MS"];
+    else process.env["AETHER_STREAM_TIMEOUT_MS"] = previous;
+  }
+});
+
+test("novel text cannot extend a cloud turn past its absolute deadline", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_CHAT_TURN_DEADLINE_MS"];
+  process.env["AETHER_CHAT_TURN_DEADLINE_MS"] = "35";
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: (async function* (): AsyncIterable<Uint8Array> {
+      for (let i = 0; i < 200; i += 1) {
+        yield new TextEncoder().encode(`data: ${JSON.stringify({ type: "delta", text: `novel-${i}` })}\n\n`);
+        await new Promise<void>((resolve) => setTimeout(resolve, 2));
+      }
+      yield new TextEncoder().encode('data: {"type":"done","uvt":1,"cents":0}\n\n');
+    })(),
+  }) as unknown as Response) as typeof globalThis.fetch;
+  try {
+    await assert.rejects(() => runTurn(ctxWith(), "finite turn"), TurnDeadlineError);
+  } finally {
+    globalThis.fetch = real;
+    if (previous === undefined) delete process.env["AETHER_CHAT_TURN_DEADLINE_MS"];
+    else process.env["AETHER_CHAT_TURN_DEADLINE_MS"] = previous;
+  }
+});
+
+test("buffered novel SSE frames cannot starve the absolute chat deadline timer", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_CHAT_TURN_DEADLINE_MS"];
+  process.env["AETHER_CHAT_TURN_DEADLINE_MS"] = "1";
+  globalThis.fetch = sseFetch([
+    ...Array.from({ length: 20_000 }, (_, i) => JSON.stringify({ type: "delta", text: `novel ${i}` })),
+    JSON.stringify({ type: "done", uvt: 1, cents: 0 }),
+  ]);
+  try {
+    await assert.rejects(() => runTurn(ctxWith(), "finite buffered turn"), TurnDeadlineError);
+  } finally {
+    globalThis.fetch = real;
+    if (previous === undefined) delete process.env["AETHER_CHAT_TURN_DEADLINE_MS"];
+    else process.env["AETHER_CHAT_TURN_DEADLINE_MS"] = previous;
+  }
+});
+
+test("cloud output cap counts task progress and duplicate acknowledgments cannot reset it", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_MODEL_OUTPUT_LIMIT_BYTES"];
+  process.env["AETHER_MODEL_OUTPUT_LIMIT_BYTES"] = "90";
+  globalThis.fetch = sseFetch([
+    JSON.stringify({ type: "task_progress", task_id: "t", delta: "A".repeat(40) }),
+    JSON.stringify({ type: "tool_call", tool_call_id: "one", name: "read_file", args: {} }),
+    JSON.stringify({ type: "tool_result_ack", tool_call_id: "one" }),
+    JSON.stringify({ type: "task_progress", task_id: "t", delta: "B".repeat(40) }),
+    JSON.stringify({ type: "tool_result_ack", tool_call_id: "one" }),
+    JSON.stringify({ type: "task_progress", task_id: "t", delta: "C".repeat(60) }),
+    JSON.stringify({ type: "done", uvt: 1, cents: 0 }),
+  ]);
+  try {
+    await assert.rejects(() => runTurn(ctxWith(), "bounded task output"), ModelOutputLimitError);
+  } finally {
+    globalThis.fetch = real;
+    if (previous === undefined) delete process.env["AETHER_MODEL_OUTPUT_LIMIT_BYTES"];
+    else process.env["AETHER_MODEL_OUTPUT_LIMIT_BYTES"] = previous;
+  }
+});
+
+test("long task progress frames sharing a display prefix still advance on novel suffixes", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_STREAM_TIMEOUT_MS"];
+  process.env["AETHER_STREAM_TIMEOUT_MS"] = "18";
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: (async function* (): AsyncIterable<Uint8Array> {
+      for (let i = 0; i < 12; i += 1) {
+        yield new TextEncoder().encode(`data: ${JSON.stringify({ type: "task_progress", task_id: "t", delta: "shared ".repeat(110) + ` novel ${i}` })}\n\n`);
+        await new Promise<void>((resolve) => setTimeout(resolve, 3));
+      }
+      yield new TextEncoder().encode('data: {"type":"done","uvt":1,"cents":0}\n\n');
+    })(),
+  }) as unknown as Response) as typeof globalThis.fetch;
+  try {
+    await runTurn(ctxWith(), "track full task text");
   } finally {
     globalThis.fetch = real;
     if (previous === undefined) delete process.env["AETHER_STREAM_TIMEOUT_MS"];
@@ -389,6 +480,88 @@ test("aborting after partial cloud text clears the pending silence notice", asyn
     (process.stderr as unknown as { isTTY: boolean | undefined }).isTTY = origTTY;
     if (previous === undefined) delete process.env["AETHER_STREAM_SILENCE_NOTICE_MS"];
     else process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] = previous;
+  }
+});
+
+test("whitespace, ANSI and zero-width frames leave the TTY pulse running", async () => {
+  const real = globalThis.fetch;
+  const origErr = process.stderr.write.bind(process.stderr);
+  const origTTY = process.stderr.isTTY;
+  (process.stderr as unknown as { isTTY: boolean }).isTTY = true;
+  let pulsePaints = 0;
+  process.stderr.write = (() => true) as typeof process.stderr.write;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: (async function* (): AsyncIterable<Uint8Array> {
+      for (const text of ["   ", "\x1b[31m\x1b[0m", "\u200b", "\u0301"]) {
+        yield new TextEncoder().encode(`data: ${JSON.stringify({ type: "delta", text })}\n\n`);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 520));
+      yield new TextEncoder().encode('data: {"type":"done","uvt":1,"cents":0}\n\n');
+    })(),
+  }) as unknown as Response) as typeof globalThis.fetch;
+  try {
+    const ctx = ctxWith();
+    ctx.flags.json = false;
+    await runTurn(ctx, "keep the pulse alive", undefined, undefined, () => pulsePaints++);
+    assert.ok(pulsePaints >= 3, `expected continuing pulse after blank frames, got ${pulsePaints} paints`);
+  } finally {
+    globalThis.fetch = real;
+    process.stderr.write = origErr;
+    (process.stderr as unknown as { isTTY: boolean | undefined }).isTTY = origTTY;
+  }
+});
+
+test("new visible text re-arms the silence notice after an earlier pause", async () => {
+  const real = globalThis.fetch;
+  const previous = process.env["AETHER_STREAM_SILENCE_NOTICE_MS"];
+  const origErr = process.stderr.write.bind(process.stderr);
+  const origTTY = process.stderr.isTTY;
+  process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] = "12";
+  (process.stderr as unknown as { isTTY: boolean }).isTTY = true;
+  let stderr = "";
+  process.stderr.write = ((chunk: unknown) => ((stderr += String(chunk)), true)) as typeof process.stderr.write;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "text/event-stream" }),
+    body: (async function* (): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode('data: {"type":"delta","text":"first"}\n\n');
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      yield new TextEncoder().encode('data: {"type":"delta","text":"second"}\n\n');
+      await new Promise<void>((resolve) => setTimeout(resolve, 45));
+      yield new TextEncoder().encode('data: {"type":"done","uvt":1,"cents":0}\n\n');
+    })(),
+  }) as unknown as Response) as typeof globalThis.fetch;
+  try {
+    const ctx = ctxWith();
+    ctx.flags.json = false;
+    await runTurn(ctx, "show both pauses");
+    assert.equal((stderr.match(/Still waiting for the model/g) ?? []).length, 2);
+  } finally {
+    globalThis.fetch = real;
+    process.stderr.write = origErr;
+    (process.stderr as unknown as { isTTY: boolean | undefined }).isTTY = origTTY;
+    if (previous === undefined) delete process.env["AETHER_STREAM_SILENCE_NOTICE_MS"];
+    else process.env["AETHER_STREAM_SILENCE_NOTICE_MS"] = previous;
+  }
+});
+
+test("whitespace bytes before an error remain partial output in the turn outcome", async () => {
+  const real = globalThis.fetch;
+  globalThis.fetch = sseFetch([
+    JSON.stringify({ type: "delta", text: " \n" }),
+    JSON.stringify({ type: "error", msg: "failed after whitespace" }),
+  ]);
+  try {
+    await assert.rejects(
+      () => runTurn(ctxWith(), "preserve partial output"),
+      (error: unknown) => error instanceof ChatTurnError && error.outcome?.partialOutput === true,
+    );
+  } finally {
+    globalThis.fetch = real;
   }
 });
 

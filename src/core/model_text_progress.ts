@@ -1,40 +1,47 @@
-import { sanitizeTerm } from "../ui/text.js";
+import { sanitizeTerm, visibleWidth } from "../ui/text.js";
 
 /**
- * Detect a model that keeps emitting the same short passage. A repeated token
- * can be ordinary prose, so only a sustained, chunk-independent cycle stops
- * advancing the turn's meaningful-progress clock.
+ * A bounded record of recent output fragments. Individual words and short
+ * repetitions remain progress; a sustained passage made entirely of text
+ * already seen stops extending the idle deadline. Chunk boundaries do not
+ * affect the result, and every character in a long frame is inspected.
  */
 export class ModelTextProgress {
-  private tail = "";
-  private static readonly TAIL_CHARS = 1_024;
-  private static readonly MIN_REPEAT_CHARS = 512;
-  private static readonly MAX_PERIOD_CHARS = 256;
+  private static readonly FRAGMENT_CHARS = 32;
+  private static readonly MAX_FRAGMENTS = 16_384;
+  private static readonly REPEAT_GRACE_CHARS = 512;
+
+  private fragment = "";
+  private readonly seen = new Set<string>();
+  private readonly order: string[] = [];
+  private nextEviction = 0;
+  private repeatedChars = 0;
 
   meaningful(raw: string): boolean {
-    // Server error messages are capped at 200 characters by
-    // sanitizeServerText. Model output needs its trailing content considered:
-    // two long chunks may share that prefix but have different answers after
-    // it. Retain only the fixed-size suffix after stripping terminal controls.
     const text = sanitizeTerm(raw);
-    if (!text.trim()) return false;
-    this.tail = (this.tail + text.slice(-ModelTextProgress.TAIL_CHARS)).slice(-ModelTextProgress.TAIL_CHARS);
-    return !this.repeatingSuffix();
-  }
-
-  private repeatingSuffix(): boolean {
-    for (let period = 1; period <= ModelTextProgress.MAX_PERIOD_CHARS; period += 1) {
-      const length = Math.max(ModelTextProgress.MIN_REPEAT_CHARS, period * 3);
-      if (this.tail.length < length) continue;
-      let repeated = true;
-      for (let i = this.tail.length - length + period; i < this.tail.length; i += 1) {
-        if (this.tail[i] !== this.tail[i - period]) {
-          repeated = false;
-          break;
-        }
+    if (visibleWidth(text.trim()) === 0) return false;
+    let sawNovel = false;
+    for (let i = 0; i < text.length; i += 1) {
+      this.fragment = (this.fragment + text[i]).slice(-ModelTextProgress.FRAGMENT_CHARS);
+      if (this.fragment.length < ModelTextProgress.FRAGMENT_CHARS) {
+        sawNovel = true;
+        continue;
       }
-      if (repeated) return true;
+      if (this.seen.has(this.fragment)) {
+        this.repeatedChars += 1;
+        continue;
+      }
+      sawNovel = true;
+      this.repeatedChars = 0;
+      this.seen.add(this.fragment);
+      if (this.order.length < ModelTextProgress.MAX_FRAGMENTS) {
+        this.order.push(this.fragment);
+      } else {
+        this.seen.delete(this.order[this.nextEviction]!);
+        this.order[this.nextEviction] = this.fragment;
+        this.nextEviction = (this.nextEviction + 1) % ModelTextProgress.MAX_FRAGMENTS;
+      }
     }
-    return false;
+    return sawNovel || this.repeatedChars < ModelTextProgress.REPEAT_GRACE_CHARS;
   }
 }
