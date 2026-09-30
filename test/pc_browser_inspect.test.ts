@@ -189,19 +189,28 @@ test("controlled Edge refuses a replaced composer before text insertion", {
   try {
     const port = (server.address() as AddressInfo).port;
     let action: { dispatched: boolean; verified: boolean } | null = null;
-    const result = await inspectControlledPage(`http://127.0.0.1:${port}/`, {
-      allowHttpLoopback: true, headless: true, timeoutMs: 45_000,
-    }, async (composer) => {
-      assert.equal(await composer.observe(), composer.identity);
-      const triggered = await fetch(`http://127.0.0.1:${port}/replace`, { method: "POST" });
-      assert.equal(triggered.status, 204);
-      for (let attempt = 0; attempt < 30 && await composer.observe() !== "stale"; attempt++) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 50));
-      }
-      assert.equal(await composer.observe(), "stale");
-      action = await composer.insert("MUST-NOT-INSERT");
-    });
-    assert.deepEqual(action, { dispatched: false, verified: false });
+    let result!: Awaited<ReturnType<typeof inspectControlledPage>>;
+    // Edge can fail to launch a fresh profile under a busy Windows test host.
+    // Retry only a cleaned startup failure; a rendered page with no composer or
+    // a failed cleanup remains a real regression.
+    for (let launch = 0; launch < 3; launch++) {
+      replace = false;
+      action = null;
+      result = await inspectControlledPage(`http://127.0.0.1:${port}/`, {
+        allowHttpLoopback: true, headless: true, timeoutMs: 45_000,
+      }, async (composer) => {
+        assert.equal(await composer.observe(), composer.identity);
+        const triggered = await fetch(`http://127.0.0.1:${port}/replace`, { method: "POST" });
+        assert.equal(triggered.status, 204);
+        for (let attempt = 0; attempt < 30 && await composer.observe() !== "stale"; attempt++) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        }
+        assert.equal(await composer.observe(), "stale");
+        action = await composer.insert("MUST-NOT-INSERT");
+      });
+      if (action !== null || result.state !== "failed" || !result.profileCleaned) break;
+    }
+    assert.deepEqual(action, { dispatched: false, verified: false }, JSON.stringify(result));
     assert.equal(result.profileCleaned, true);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -381,7 +381,9 @@ test("cloud output cap counts task progress and duplicate acknowledgments cannot
 test("long task progress frames sharing a display prefix still advance on novel suffixes", async () => {
   const real = globalThis.fetch;
   const previous = process.env["AETHER_STREAM_TIMEOUT_MS"];
-  process.env["AETHER_STREAM_TIMEOUT_MS"] = "18";
+  // Leave room for Windows timer scheduling while keeping the whole sequence
+  // longer than the deadline unless each novel suffix refreshes progress.
+  process.env["AETHER_STREAM_TIMEOUT_MS"] = "100";
   globalThis.fetch = (async () => ({
     ok: true,
     status: 200,
@@ -389,7 +391,7 @@ test("long task progress frames sharing a display prefix still advance on novel 
     body: (async function* (): AsyncIterable<Uint8Array> {
       for (let i = 0; i < 12; i += 1) {
         yield new TextEncoder().encode(`data: ${JSON.stringify({ type: "task_progress", task_id: "t", delta: "shared ".repeat(110) + ` novel ${i}` })}\n\n`);
-        await new Promise<void>((resolve) => setTimeout(resolve, 3));
+        await new Promise<void>((resolve) => setTimeout(resolve, 15));
       }
       yield new TextEncoder().encode('data: {"type":"done","uvt":1,"cents":0}\n\n');
     })(),
