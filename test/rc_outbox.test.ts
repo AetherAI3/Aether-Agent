@@ -28,6 +28,7 @@ import {
   takeBatch,
   type OutboxRecord,
 } from "../src/core/rc/outbox.js";
+import { payloadDigest } from "../src/core/rc/receipts.js";
 
 const SESSION = "rs_" + "a".repeat(32);
 const DEVICE = "dev-1";
@@ -66,12 +67,16 @@ function fill(record: OutboxRecord, n: number): void {
 /** The receipt shape the Cloud append route actually returns. */
 function receiptsFor(
   record: OutboxRecord,
-  batch: readonly { host_event_id: string }[],
+  batch: readonly { host_event_id: string; payload: Record<string, unknown> }[],
   from: number,
 ): { session_id: string; receipts: Array<Record<string, unknown>> } {
   return {
     session_id: record.session_id,
-    receipts: batch.map((event, i) => ({ host_event_id: event.host_event_id, seq: from + i + 1 })),
+    receipts: batch.map((event, i) => ({
+      host_event_id: event.host_event_id,
+      seq: from + i + 1,
+      payload_digest: payloadDigest(event.payload),
+    })),
   };
 }
 
@@ -167,6 +172,23 @@ test("a partial receipt list preserves the whole batch and moves nothing", () =>
   assert.equal(record.cursor, 0);
   assert.equal(record.events.length, 3, "an unacknowledged event must not be dropped");
 });
+
+for (const [name, mutate, reason] of [
+  ["missing", (receipt: Record<string, unknown>) => { delete receipt["payload_digest"]; }, "missing_digest"],
+  ["mismatched", (receipt: Record<string, unknown>) => { receipt["payload_digest"] = payloadDigest({ other: true }); }, "digest_mismatch"],
+] as const) {
+  test(`a ${name} digest on the second receipt preserves the whole batch`, () => {
+    const { record } = fresh();
+    fill(record, 2);
+    const batch = takeBatch(record);
+    const response = receiptsFor(record, batch, 0);
+    mutate(response.receipts[1]!);
+    const outcome = commitReceipts(record, batch, response);
+    assert.equal(outcome.ok === false && outcome.reason, reason);
+    assert.equal(record.cursor, 0);
+    assert.deepEqual(record.events, batch);
+  });
+}
 
 test("a stale sequence at or below the cursor preserves the batch", () => {
   const { record } = fresh();

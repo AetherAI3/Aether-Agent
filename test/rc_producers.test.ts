@@ -158,10 +158,12 @@ test("session and presence describe the run without naming a controller", () => 
     protocol_version: "1",
   });
   assert.equal(session.event_type, "session");
-  assert.equal(session.payload["state"], "active");
+  assert.equal(session.payload["state"], "live");
 
-  const presence = hostPresenceEvent("dev-1", "online");
+  const presence = hostPresenceEvent("dev-1", "live");
   assert.equal(presence.payload["role"], "host");
+  assert.equal(presence.payload["liveness"], "live");
+  assert.equal(presence.payload["state"], undefined);
   assert.notEqual(presence.payload["role"], "controller");
 });
 
@@ -180,7 +182,7 @@ test("every produced payload survives the sanitizer for its own type", () => {
     mapBrainEventToRc({ type: "tool_call", id: "1", name: "t", args: { path: "a.ts" } })!,
     mapBrainEventToRc({ type: "done", ok: true, result: "fine", remaining: 0, reason: "" })!,
     mapBrainEventToRc({ type: "error", msg: "boom" })!,
-    hostPresenceEvent("dev-1", "online"),
+    hostPresenceEvent("dev-1", "live"),
     sessionOpenedEvent({
       session_name: "s",
       repo: "r",
