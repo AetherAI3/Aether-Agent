@@ -515,8 +515,8 @@ function setEffort(ctx: AppContext, out: Writable, arg: string): void {
     out.write(`no such effort tier: ${arg}  (${EFFORT_TIERS.join(", ")})\n`);
     return;
   }
+  saveConfig({ ...ctx.cfg, defaultEffort: tier });
   ctx.cfg.defaultEffort = tier;
-  saveConfig(ctx.cfg);
   if (tier === "CODEPRO") for (const l of renderCodeProArt()) out.write(l + "\n");
   for (const l of renderEffortSlider(tier)) out.write(l + "\n");
   out.write(`effort → ${tier}  (saved — drives your aether code runs)\n`);

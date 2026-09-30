@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -100,6 +100,28 @@ test("/effort <tier> persists to the shared Aether config", async () => {
     await handleSlash(ctx, "/effort codepro", out2);
     assert.match(stripAnsi(out2.text()), /CODEPRO engaged/);
     assert.equal(ctx.cfg.defaultEffort, "CODEPRO");
+  } finally {
+    if (prev === undefined) delete process.env["AETHER_CONFIG_DIR"];
+    else process.env["AETHER_CONFIG_DIR"] = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("/effort keeps the prior in-memory tier when config save fails", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aether-effort-corrupt-"));
+  const prev = process.env["AETHER_CONFIG_DIR"];
+  process.env["AETHER_CONFIG_DIR"] = dir;
+  const path = join(dir, "config.json");
+  const original = Buffer.from("{ invalid json\r\n", "utf8");
+
+  try {
+    writeFileSync(path, original);
+    const ctx = { cfg: { ...DEFAULT_CONFIG, defaultEffort: "LOW" } } as unknown as AppContext;
+    const out = new Capture();
+    await assert.rejects(handleSlash(ctx, "/effort max", out), /config\.json.*repair/i);
+    assert.equal(ctx.cfg.defaultEffort, "LOW");
+    assert.deepEqual(readFileSync(path), original);
+    assert.doesNotMatch(stripAnsi(out.text()), /effort → MAX|saved/);
   } finally {
     if (prev === undefined) delete process.env["AETHER_CONFIG_DIR"];
     else process.env["AETHER_CONFIG_DIR"] = prev;
