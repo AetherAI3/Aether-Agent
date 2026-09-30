@@ -250,9 +250,13 @@ export class ManagedAgentsClient {
 /** Stable, actionable errors without printing response bodies that may contain secrets. */
 export function managedAgentError(error: unknown): string {
   if (error instanceof HttpError) {
+    const body = error.body && typeof error.body === "object" ? error.body as Record<string, unknown> : {};
+    const detail = body["detail"] && typeof body["detail"] === "object" ? body["detail"] as Record<string, unknown> : {};
+    if (detail["code"] === "WRONG_CREDENTIAL_CLASS") return "This credential cannot access terminal agents. Sign in with `aether auth login`.";
     if (error.status === 401) return "Sign in again with `aether auth login`, then retry.";
-    if (error.status === 403) return "Managed agents or agent DMs are not enabled for this account, or this token is not a CLI token. Check the Agents page and `aether auth login`.";
-    if (error.status === 404) return "Agent not found or this server has not deployed terminal agents yet. Refresh `aether agent list`.";
+    if (error.status === 403 && detail["code"] === "FEATURE_DISABLED") return "Managed agents or agent DMs are not enabled for this account. Check the Agents page.";
+    if (error.status === 403) return "Cloud refused this agent request (HTTP 403). Run `aether doctor --live` for current account readiness.";
+    if (error.status === 404) return "Agent not found in this account. Refresh `aether agent list`.";
     if (error.status === 409) return "This agent changed elsewhere. Refresh it and reapply your edit; no automatic overwrite was attempted.";
     if (error.status === 503) return "The agent service is unavailable. Check the account before retrying a change.";
     return `Cloud refused the request (HTTP ${error.status}). Check the agent settings on the web.`;

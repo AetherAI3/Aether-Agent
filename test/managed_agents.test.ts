@@ -198,8 +198,11 @@ test("untrusted labels are sanitized and runtime unavailable stays visible", () 
   const rows = renderManagedAgents([{ ...agent, config: { identity: { display_name: "bad\x1b]52;c;secret\x07name" } } }]);
   assert.equal(rows.includes("\x1b]52"), false);
   assert.match(rows, /unavailable/);
-  assert.match(managedAgentError(new HttpError(403, "aek_secret", { token: "aek_secret" })), /not enabled/);
+  assert.match(managedAgentError(new HttpError(403, "aek_secret", { token: "aek_secret" })), /Cloud refused/);
   assert.equal(managedAgentError(new HttpError(403, "aek_secret")).includes("aek_secret"), false);
+  assert.match(managedAgentError(new HttpError(403, "ignored", { detail: { code: "WRONG_CREDENTIAL_CLASS" } })), /credential cannot access/);
+  assert.match(managedAgentError(new HttpError(403, "ignored", { detail: { code: "FEATURE_DISABLED" } })), /not enabled for this account/);
+  assert.match(managedAgentError(new HttpError(404, "ignored")), /not found in this account/);
 });
 
 for (const columns of [40, 60, 80, 120]) {
