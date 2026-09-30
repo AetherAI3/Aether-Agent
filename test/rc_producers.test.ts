@@ -275,7 +275,7 @@ test("subagent comes from the orchestrator's worker tree, without the model", ()
   );
   assert.ok(payload, "subagent payload was filtered to nothing");
   assert.equal(payload["subagent_id"], "w-1");
-  assert.equal(payload["summary"], "writing tests");
+  assert.equal(payload["summary"], "Testing");
   assert.doesNotMatch(JSON.stringify(payload), /claude-opus-5/);
   assert.equal(payload["tokens"], undefined);
   assert.equal(payload["uvt"], undefined);

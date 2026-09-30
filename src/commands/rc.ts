@@ -23,7 +23,7 @@
 // type has no field that could hold one, so the renderers cannot print one.
 
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { configDir } from "../core/config.js";
 import type { CommandFlags } from "../core/command_dispatch.js";
@@ -317,6 +317,7 @@ async function start(
     record.project_ref = projectRef;
     record.device_id = enrolled.device_id;
     record.epoch = 1;
+    record.observed_workers = Object.create(null) as typeof record.observed_workers;
 
     const opened = sessionOpenedEvent({
       session_name: sessionName,
@@ -356,7 +357,7 @@ export async function cmdRc(
   overrides: Partial<RcCommandDeps> = {},
 ): Promise<number> {
   const deps: RcCommandDeps = {
-    cwd: overrides.cwd ?? process.cwd(),
+    cwd: resolve(overrides.cwd ?? ctx.flags.cwd),
     // Detection is local and cheap (one registry read on win32, one stat
     // elsewhere) and never launches anything, so status can report it honestly
     // without side effects.

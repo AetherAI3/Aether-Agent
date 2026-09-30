@@ -385,6 +385,7 @@ export async function revokeHost(deps: RcHostDeps, record: OutboxRecord): Promis
   record.next_seq = 1;
   record.dropped = 0;
   record.quarantined = 0;
+  record.observed_workers = Object.create(null) as typeof record.observed_workers;
   record.revoke_pending = false;
   saveOutbox(deps.outboxPath, record);
   return { ok: true };
