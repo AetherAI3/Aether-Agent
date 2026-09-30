@@ -197,8 +197,8 @@ export interface WorktreeResult {
 /**
  * Create a real isolated worktree for `root` on a fresh `aether/<slug>` branch,
  * for the gh-gated repo-confirm flow (code_support.ts's prepareWorkspace()).
- * Never throws — unlike flow 1's createWorktree(), a failure here degrades to
- * "run in place" rather than aborting the command. The worktree lives under
+ * Never throws — unlike flow 1's createWorktree(), a failure is returned to
+ * the caller, which aborts the coding command. The worktree lives under
  * worktreeBase(). On a branch/path collision it retries with a numeric suffix.
  */
 export function createGatedWorktree(

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { prepareWorkspace } from "../src/commands/code.js";
+import { cmdCode, prepareWorkspace } from "../src/commands/code.js";
 import type { AppContext } from "../src/core/context.js";
 import type { PromptIO } from "../src/ui/interact.js";
 import type { Runner, RunResult } from "../src/core/worktree.js";
@@ -99,6 +99,74 @@ test("repo gate: --yes auto-confirms without prompting (gh authed)", async () =>
     assert.equal(res.proceed, true);
     assert.equal(asked, 0, "--yes never prompts");
     assert.ok(res.cwd.includes("proj-ship-it"));
+  } finally {
+    if (prev === undefined) delete process.env["AETHER_CONFIG_DIR"];
+    else process.env["AETHER_CONFIG_DIR"] = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("repo gate: failed automatic worktree aborts under non-TTY --yes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aether-gate-"));
+  const prev = process.env["AETHER_CONFIG_DIR"];
+  process.env["AETHER_CONFIG_DIR"] = dir;
+  try {
+    let asked = 0;
+    let worktreeAttempts = 0;
+    const run: Runner = (_c, args) => {
+      if (args.includes("--show-toplevel")) return okR("/home/u/proj\n");
+      if (args.includes("--is-inside-work-tree")) return okR("true\n");
+      if (args.includes("auth")) return okR("Logged in to github.com");
+      if (args.includes("worktree")) {
+        worktreeAttempts += 1;
+        return { status: 1, stdout: "", stderr: "permission denied" };
+      }
+      return failR();
+    };
+    const prompts: PromptIO & { notes: string[] } = {
+      tty: false,
+      notes: [],
+      note(line): void { this.notes.push(line); },
+      question: (): Promise<string> => ((asked += 1), Promise.resolve("")),
+    };
+    const res = await prepareWorkspace(ctxWith("/home/u/proj", true), "fix the bug", prompts, run);
+    assert.equal(worktreeAttempts, 5);
+    assert.equal(asked, 0, "--yes must not turn failed isolation into in-place consent");
+    assert.equal(res.proceed, false, "the coding brain must not start on the original checkout");
+    assert.match(res.error ?? "", /permission denied/);
+    assert.ok(prompts.notes.some((n) => /permission denied/.test(n)), "show the Git failure");
+    assert.ok(!prompts.notes.some((n) => /working in place/.test(n)), "do not announce an unsafe fallback");
+  } finally {
+    if (prev === undefined) delete process.env["AETHER_CONFIG_DIR"];
+    else process.env["AETHER_CONFIG_DIR"] = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("code command: failed automatic worktree exits nonzero before the coding task", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aether-gate-"));
+  const prev = process.env["AETHER_CONFIG_DIR"];
+  process.env["AETHER_CONFIG_DIR"] = dir;
+  try {
+    let worktreeAttempts = 0;
+    const run: Runner = (_c, args) => {
+      if (args.includes("--show-toplevel")) return okR("/home/u/proj\n");
+      if (args.includes("--is-inside-work-tree")) return okR("true\n");
+      if (args.includes("auth")) return okR("Logged in to github.com");
+      if (args.includes("worktree")) {
+        worktreeAttempts += 1;
+        return { status: 1, stdout: "", stderr: "permission denied" };
+      }
+      return failR();
+    };
+    const exit = await cmdCode(
+      ctxWith("/home/u/proj", true),
+      "fix the bug",
+      { local: true, pool: 5, quiet: true, noLog: true },
+      run,
+    );
+    assert.equal(worktreeAttempts, 5);
+    assert.equal(exit, 1, "a failed isolation attempt must report a failed command");
   } finally {
     if (prev === undefined) delete process.env["AETHER_CONFIG_DIR"];
     else process.env["AETHER_CONFIG_DIR"] = prev;
