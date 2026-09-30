@@ -160,12 +160,9 @@ export const SHELL_RUNTIME_HANDLERS: Array<Pick<DispatchedCommand, "name" | "loa
   },
   {
     name: "doctor",
-    // doctor parses its own argv (parseDoctorArgs). It never saw these flags:
-    // main.ts's parse is strict:false, so an undeclared `--live` was captured
-    // into `values` and stripped from the positionals doctor was handed — the
-    // live end-to-end proof silently ran as the fast configured-only report,
-    // and `--only <id>` arrived as a bare positional and failed as unknown.
-    // Declaring them here is what makes them reach the command at all.
+    // Doctor's flags are declared here so the strict top-level parser accepts
+    // them and forwards their parsed values to the handler. Its own argv parser
+    // handles any remaining positionals.
     load: async () => {
       const { cmdDoctor } = await import("./doctor.js");
       // Parsed values are handed over as data. Nothing is re-rendered into an
@@ -225,13 +222,9 @@ export const SHELL_RUNTIME_HANDLERS: Array<Pick<DispatchedCommand, "name" | "loa
   },
   // `aether review` / `aether ship`.
   //
-  // These flags MUST be declared. main.ts parses with `strict: false`, which
-  // swallows any undeclared flag into `values` and strips it from the
-  // positionals a command receives — so an undeclared `--files a,b` does not
-  // reach the command as an argument and does not reach it as a flag either.
-  // It simply vanishes, and the command reports success having done nothing.
-  // Every flag the review/ship layer reads is declared below for that reason,
-  // and test/review_flags.test.ts proves each one arrives.
+  // These flags MUST be declared in the shared parser table. main.ts rejects
+  // unknown options before dispatch, and test/review_flags.test.ts proves each
+  // declared flag reaches the review/ship layer.
   //
   // `--test-cmd`, `--all`, `--yes` and `--json` are globals, so they are NOT
   // redeclared here (a command that shadows a global is a registry load error)

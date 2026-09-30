@@ -55,18 +55,17 @@ test("the lazy loader actually resolves to a callable handler", async () => {
   assert.equal(handler.length, 3);
 });
 
-test("the device entry declares every owned flag, so none is swallowed", () => {
+test("the device entry declares every owned flag", () => {
   const entry = COMMAND_MANIFEST_SOURCE.find((e) => e.key === "shell:device");
   assert.ok(entry);
   // Subcommands are positionals, and the only non-global the group reads is
   // --base-url (enroll has to be told which Cloud to enroll against). An
-  // UNDECLARED owned flag is silently swallowed by the strict:false parser, so
-  // the declaration has to be exact — not merely non-empty.
+  // An undeclared owned flag is rejected by the strict parser, so the
+  // declaration has to be exact — not merely non-empty.
   assert.deepEqual(Object.keys(entry.ownedFlags ?? {}).sort(), ["base-url"]);
   assert.equal((entry.ownedFlags ?? {})["base-url"]?.type, "string");
   // Being declared is what puts it in the merged parse table; without that the
-  // strict:false parser would drop `--base-url https://...` on the floor and
-  // enroll would silently target the wrong Cloud.
+  // parser would reject `--base-url https://...` before enroll.
   assert.ok(Object.hasOwn(CLI_PARSE_OPTIONS, "base-url"));
   // It is owned, not borrowed: claiming it as a global too would change how
   // that global parses for every other command.

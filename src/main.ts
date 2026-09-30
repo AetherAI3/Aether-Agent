@@ -87,14 +87,23 @@ export async function main(argv: string[]): Promise<number> {
     process.stdout.write(argv.includes("--json") ? JSON.stringify({ schema_version: 1, state: "not committed", code: "project_memory_invalid_action_flags" }) + "\n" : "Project memory: choose one action.\n");
     return 2;
   }
-  const { values, positionals } = parseArgs({
-    args: normalized,
-    allowPositionals: true,
-    strict: false,
-    // Globals plus every dispatch-table command's flags — one flat namespace,
-    // validated for collisions at registry load (cli_registry.ts).
-    options: COMMAND_PARSE_OPTIONS,
-  });
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      args: normalized,
+      allowPositionals: true,
+      strict: true,
+      // Globals plus every dispatch-table command's flags — one flat namespace,
+      // validated for collisions at registry load (cli_registry.ts).
+      options: COMMAND_PARSE_OPTIONS,
+    });
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) ||
+        !String(error.code).startsWith("ERR_PARSE_ARGS_")) throw error;
+    process.stderr.write(`${errTheme.red("✗")} ${error.message}\n`);
+    return 2;
+  }
+  const { values, positionals } = parsed;
 
   if (values["version"]) {
     process.stdout.write(VERSION + "\n");
