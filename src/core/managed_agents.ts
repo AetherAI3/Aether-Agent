@@ -80,7 +80,7 @@ export async function probeManagedReadiness(api: ApiClient, signal?: AbortSignal
       const detail = body["detail"] && typeof body["detail"] === "object" ? body["detail"] as Record<string, unknown> : {};
       if (detail["code"] === "WRONG_CREDENTIAL_CLASS") return unavailable("WRONG_CREDENTIAL_CLASS", "This credential cannot access terminal agents.", "Sign in with `aether auth login`.");
       if (error.status === 401) return unavailable("AUTH_REQUIRED", "The CLI account credential is invalid or expired.", "Sign in with `aether auth login`.");
-      if (error.status === 403) return unavailable("ACCOUNT_DISABLED", "Terminal agents are disabled for this account.", "Ask the account administrator to enable managed agents.");
+      if (error.status === 403) return unavailable("READINESS_REFUSED", "Cloud refused account readiness.", "Check account sign-in and retry, or contact the account administrator.");
       if (error.status === 404) return unavailable("INCOMPATIBLE_CONTRACT", "Cloud has not deployed the terminal readiness contract.", "Update the terminal and Cloud adapter.");
     }
     return unavailable("TEMPORARILY_UNAVAILABLE", "Terminal agent readiness could not be checked.", "Retry when Cloud is available.");

@@ -250,6 +250,7 @@ test("readiness classifies entitlement, credential, contract and outage without 
     [json(readiness("disabled")), "ACCOUNT_DISABLED"],
     [json(readiness("enabled", "disabled")), "DM_DISABLED"],
     [json({ detail: { code: "WRONG_CREDENTIAL_CLASS", secret: "aek_private" } }, 403), "WRONG_CREDENTIAL_CLASS"],
+    [json({ detail: "aek_private" }, 403), "READINESS_REFUSED"],
     [json({ detail: "not deployed" }, 404), "INCOMPATIBLE_CONTRACT"],
     [json({ ...readiness(), required_contract: "aether.managed-agents/9" }), "INCOMPATIBLE_CONTRACT"],
     [json({ detail: "aek_private" }, 503), "TEMPORARILY_UNAVAILABLE"],
