@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -83,4 +83,73 @@ test("saveConfig writes via rename (no leftover .tmp, no truncate-in-place)", as
   assert.equal(loadConfig().defaultModel, "c");
   const leftovers = readdirSync(dir).filter((f) => f.endsWith(".tmp"));
   assert.deepEqual(leftovers, [], `stray tmp files: ${leftovers.join(", ")}`);
+});
+
+test("loadConfig can still use defaults without changing malformed config bytes", async () => {
+  const { loadConfig, DEFAULT_CONFIG } = await import("../src/core/config.js");
+  const path = join(dir, "config.json");
+  const original = Buffer.from("{ invalid json\r\n", "utf8");
+  writeFileSync(path, original);
+
+  const cfg = loadConfig();
+  assert.equal(cfg.defaultEffort, DEFAULT_CONFIG.defaultEffort);
+  assert.equal(cfg.permissionMode, DEFAULT_CONFIG.permissionMode);
+  assert.deepEqual(readFileSync(path), original);
+});
+
+test("saveConfig preserves malformed config bytes with AETHER_BASE_URL set", async () => {
+  const { saveConfig, DEFAULT_CONFIG } = await import("../src/core/config.js");
+  const path = join(dir, "config.json");
+  const original = Buffer.from("{ invalid json\r\n", "utf8");
+  writeFileSync(path, original);
+
+  const prev = process.env["AETHER_BASE_URL"];
+  process.env["AETHER_BASE_URL"] = "http://127.0.0.1:9";
+  try {
+    assert.throws(
+      () => saveConfig({ ...DEFAULT_CONFIG, baseUrl: process.env["AETHER_BASE_URL"]!, defaultEffort: "HIGH" }),
+      /config\.json.*(repair|restore|fix|recover)|(repair|restore|fix|recover).*config\.json/i,
+    );
+    assert.deepEqual(readFileSync(path), original, "the original malformed config bytes changed");
+    assert.deepEqual(
+      readdirSync(dir).filter((f) => f.endsWith(".tmp")),
+      [],
+      "a failed save left a temporary config file",
+    );
+  } finally {
+    if (prev === undefined) delete process.env["AETHER_BASE_URL"];
+    else process.env["AETHER_BASE_URL"] = prev;
+  }
+});
+
+test("saveConfig refuses an existing config.json that cannot be read as a file", async () => {
+  const { loadConfig, saveConfig, DEFAULT_CONFIG } = await import("../src/core/config.js");
+  const path = join(dir, "config.json");
+  rmSync(path, { force: true });
+  mkdirSync(path);
+
+  assert.equal(loadConfig().defaultEffort, DEFAULT_CONFIG.defaultEffort);
+  assert.throws(
+    () => saveConfig({ ...DEFAULT_CONFIG, defaultEffort: "HIGH" }),
+    /config\.json.*(repair|restore|fix|recover|move)/i,
+  );
+  assert.equal(statSync(path).isDirectory(), true, "the config path was replaced");
+});
+
+test("saveConfig preserves config bytes that are invalid UTF-8", async () => {
+  const { saveConfig, DEFAULT_CONFIG } = await import("../src/core/config.js");
+  const path = join(dir, "config.json");
+  if (existsSync(path)) {
+    if (statSync(path).isDirectory()) rmdirSync(path);
+    else rmSync(path, { force: true });
+  }
+  // {"x":" followed by a broken two-byte sequence, then ("}.
+  const original = Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d]);
+  writeFileSync(path, original);
+
+  assert.throws(
+    () => saveConfig({ ...DEFAULT_CONFIG, defaultEffort: "HIGH" }),
+    /config\.json.*(repair|restore|fix|recover|move)/i,
+  );
+  assert.deepEqual(readFileSync(path), original, "invalid UTF-8 bytes were rewritten");
 });

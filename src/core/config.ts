@@ -2,8 +2,9 @@
 // Override the directory with AETHER_CONFIG_DIR (used by tests).
 
 import { homedir } from "node:os";
+import { isUtf8 } from "node:buffer";
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import type { AetherConfig } from "../types.js";
 import { isLocalModelId } from "./local_ollama.js";
 
@@ -51,12 +52,34 @@ export function loadConfig(): AetherConfig {
   return cfg;
 }
 
-function loadConfigFile(): AetherConfig {
+function readConfigFile(): AetherConfig | undefined {
   const path = configPath();
-  if (!existsSync(path)) return { ...DEFAULT_CONFIG };
+  let contents: Buffer;
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<AetherConfig>;
-    return { ...DEFAULT_CONFIG, ...raw };
+    contents = readFileSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // A missing file is normal on first use. A dangling symlink is an
+      // existing config entry, however, and must not be replaced by rename().
+      try {
+        lstatSync(path);
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      }
+    }
+    throw error;
+  }
+  if (!isUtf8(contents)) throw new Error("config.json must be UTF-8");
+  const raw: unknown = JSON.parse(contents.toString("utf8"));
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.json must contain a JSON object");
+  }
+  return { ...DEFAULT_CONFIG, ...raw };
+}
+
+function loadConfigFile(): AetherConfig {
+  try {
+    return readConfigFile() ?? { ...DEFAULT_CONFIG };
   } catch {
     // Corrupt config must never brick the CLI — fall back to defaults.
     return { ...DEFAULT_CONFIG };
@@ -64,6 +87,17 @@ function loadConfigFile(): AetherConfig {
 }
 
 export function saveConfig(cfg: AetherConfig): void {
+  const path = configPath();
+  let persisted: AetherConfig | undefined;
+  try {
+    // Re-read at save time: config may have become corrupt since startup.
+    persisted = readConfigFile();
+  } catch (error) {
+    throw new Error(
+      `Cannot save settings: ${path} is unreadable or invalid. Repair it or move it aside, then retry. The original file was not changed.`,
+      { cause: error },
+    );
+  }
   const dir = configDir();
   // 0700: this directory also holds the .token credential — keep it owner-only.
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -74,7 +108,7 @@ export function saveConfig(cfg: AetherConfig): void {
   const out = { ...cfg };
   const envBase = process.env["AETHER_BASE_URL"];
   if (envBase && out.baseUrl === envBase) {
-    out.baseUrl = loadConfigFile().baseUrl;
+    out.baseUrl = persisted ? persisted.baseUrl : DEFAULT_CONFIG.baseUrl;
   }
 
   // Write-then-rename instead of an in-place truncate: two processes saving
@@ -82,7 +116,6 @@ export function saveConfig(cfg: AetherConfig): void {
   // the file, and a reader parsing a torn JSON file falls back to defaults —
   // silently resetting baseUrl to production. rename() is atomic on both
   // POSIX and NTFS.
-  const path = configPath();
   const tmp = `${path}.${process.pid}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(out, null, 2) + "\n", "utf8");
