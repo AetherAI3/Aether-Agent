@@ -26,6 +26,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 import { configDir } from "../core/config.js";
+import { checkoutDiffSummary } from "../core/rc/diff_summary.js";
 import type { CommandFlags } from "../core/command_dispatch.js";
 import type { AppContext } from "../core/context.js";
 import { digestOf } from "../core/device_runtime/canonical_json.js";
@@ -72,6 +73,17 @@ export function projectRefFor(projectRoot: string): string {
 
 export function rcOutboxPath(projectRef: string): string {
   return join(configDir(), "device-runtime", "rc", `${projectRef}.json`);
+}
+
+/** Best-effort refresh after a code run has established its final checkout. */
+export async function publishRcCheckoutDiff(api: AppContext["api"], projectRoot: string): Promise<void> {
+  const outboxPath = rcOutboxPath(projectRefFor(projectRoot));
+  const record = loadOutbox(outboxPath, projectRoot);
+  if (!record.session_id || record.revoke_pending) return;
+  const event = await checkoutDiffSummary(projectRoot);
+  if (!event || !enqueueEvent(record, event.event_type, event.payload)) return;
+  saveOutbox(outboxPath, record);
+  await flushOutbox({ api, outboxPath, projectRoot }, record);
 }
 
 // ── repo summary (identifiers only) ─────────────────────────────────────────
@@ -329,6 +341,12 @@ async function start(
     enqueueEvent(record, opened.event_type, opened.payload);
     const presence = hostPresenceEvent(enrolled.device_id, "live");
     enqueueEvent(record, presence.event_type, presence.payload);
+    try {
+      const diff = await checkoutDiffSummary(deps.cwd);
+      if (diff) enqueueEvent(record, diff.event_type, diff.payload);
+    } catch {
+      // Diff observation is optional; session opening still succeeds.
+    }
     saveOutbox(hostDeps.outboxPath, record);
     await flushOutbox(hostDeps, record);
 

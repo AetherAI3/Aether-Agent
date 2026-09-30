@@ -381,15 +381,17 @@ test("cloud output cap counts task progress and duplicate acknowledgments cannot
 test("long task progress frames sharing a display prefix still advance on novel suffixes", async () => {
   const real = globalThis.fetch;
   const previous = process.env["AETHER_STREAM_TIMEOUT_MS"];
-  process.env["AETHER_STREAM_TIMEOUT_MS"] = "18";
+  // Keep the per-frame gap well below the timeout while the full stream runs
+  // longer than it. Windows CI can pause the event loop beyond 18 ms.
+  process.env["AETHER_STREAM_TIMEOUT_MS"] = "200";
   globalThis.fetch = (async () => ({
     ok: true,
     status: 200,
     headers: new Headers({ "content-type": "text/event-stream" }),
     body: (async function* (): AsyncIterable<Uint8Array> {
-      for (let i = 0; i < 12; i += 1) {
+      for (let i = 0; i < 60; i += 1) {
         yield new TextEncoder().encode(`data: ${JSON.stringify({ type: "task_progress", task_id: "t", delta: "shared ".repeat(110) + ` novel ${i}` })}\n\n`);
-        await new Promise<void>((resolve) => setTimeout(resolve, 3));
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
       }
       yield new TextEncoder().encode('data: {"type":"done","uvt":1,"cents":0}\n\n');
     })(),

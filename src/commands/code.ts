@@ -1011,6 +1011,14 @@ export async function cmdCode(
     process.stderr.write("\n  " + runSummary(summaryStatus, remaining, touched.size, secs) + "\n");
   }
   if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
+  // A viewer sees only Git's measured checkout snapshot after the run settles.
+  // RC is optional; an unavailable broker must not change the code result.
+  try {
+    const { publishRcCheckoutDiff } = await import("./rc.js");
+    await publishRcCheckoutDiff(ctx.api, cwd);
+  } catch {
+    // The coding verdict remains authoritative if observation fails.
+  }
   if (process.env["AETHER_PROJECT_MEMORY_RECEIPTS_ENABLED"] === "1") {
     const memory = await completeMemory(memoryContext, pinnedMemory, outcome.state === "succeeded");
     if (ctx.flags.json) process.stdout.write(JSON.stringify({ type: "project_memory_status", text: memory }) + "\n");
