@@ -97,13 +97,45 @@ test("settings and Voice dispatch without falling through to a hosted chat", asy
 });
 
 test("--live reaches the command and produces the live report", async (t) => {
-  // Regression pin. main.ts parses non-strictly, so before the flag table
+  // Regression pin. Before the flag table included --live,
   // `--live` was captured as an undeclared global and stripped from the argv
   // doctor was handed: the end-to-end proof silently degraded to the fast
   // configured-only report while still exiting 0. Unknown rendered as verified.
   await withCli(t, ["doctor", "--live", "--no-ui", "--json"], (r) => {
     const report = JSON.parse(r.out);
     assert.equal(report.mode, "live");
+  });
+});
+
+test("a misspelled doctor option fails before running the fast report", async (t) => {
+  await withCli(t, ["doctor", "--lve", "--json"], (r) => {
+    assert.equal(r.exit, 2);
+    assert.match(r.err, /Unknown option '--lve'/);
+    assert.equal(r.out, "");
+  });
+});
+
+test("unknown options fail even when --version would otherwise exit successfully", async (t) => {
+  await withCli(t, ["--version", "--not-a-real-flag"], (r) => {
+    assert.equal(r.exit, 2);
+    assert.match(r.err, /Unknown option '--not-a-real-flag'/);
+    assert.equal(r.out, "");
+  });
+});
+
+test("bare positionals and options after -- remain accepted", async (t) => {
+  await withCli(t, ["--version", "bare prompt", "--", "--not-a-real-flag"], (r) => {
+    assert.equal(r.exit, 0);
+    assert.match(r.out, /^\d+\.\d+\.\d+/);
+    assert.equal(r.err, "");
+  });
+});
+
+test("a flag-shaped value of a declared string option stays a value", async (t) => {
+  await withCli(t, ["doctor", "--fix", "--only=--lve"], (r) => {
+    assert.equal(r.exit, 2);
+    assert.match(r.out, /unknown repair --lve/);
+    assert.doesNotMatch(r.err, /Unknown option/);
   });
 });
 

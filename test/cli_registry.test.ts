@@ -51,11 +51,9 @@ test("every registered command is reachable, by exactly one mechanism", () => {
 });
 
 test("every flag main.ts reads is a flag the parser was told about", () => {
-  // main.ts parses with strict:false, so an undeclared flag is not an error —
-  // it is captured into `values` and stripped from the positionals the command
-  // receives. A dropped declaration therefore reads as "flag silently ignored",
-  // which is how `aether doctor --live` came to run the fast report and exit 0.
-  // Written against main.ts's source because `values` only exists inside main().
+  // Keep every flag main.ts reads in the shared parser table. Unknown options
+  // now fail before dispatch; a missing declaration must not turn a valid flag
+  // into an unknown one. Written against source because `values` is local to main().
   const source = readFileSync(join(here, "..", "..", "src", "main.ts"), "utf8");
   const read = new Set([...source.matchAll(/values\["([a-z0-9-]+)"\]/g)].map((match) => match[1]!));
   assert.ok(read.size > 10, "flag-read scan found almost nothing — the pattern has drifted");

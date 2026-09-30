@@ -199,17 +199,32 @@ export function hostPresenceEvent(deviceId: string, liveness: "live" | "offline"
  * `model` is deliberately NOT published. Model identity is one of the four
  * identities this program keeps separate from device, account and connector
  * identity, and a viewer stream is exactly where they would start to blur.
- * `step` carries what the worker is doing, which is the observable fact.
+ * `step` only selects a fixed activity label; its source text is never sent.
  */
 export function subagentEvent(worker: TreeWorker): RcProducedEvent {
+  const step = typeof worker.step === "string" ? worker.step.toLowerCase() : "";
+  // The service's free-text step can contain a task prompt or worker message.
+  // Publish only a fixed activity category, never any of those source bytes.
+  const summary = /\b(tests?|verify|check)\b/.test(step) ? "Testing" :
+    /\b(review|inspect)\b/.test(step) ? "Reviewing" :
+    /\b(research|search|read)\b/.test(step) ? "Researching" :
+    /\b(plan|design)\b/.test(step) ? "Planning" :
+    /\b(write|edit|implement|build|code)\b/.test(step) ? "Implementing" :
+    step ? "Working" : "Waiting";
   return {
     event_type: "subagent",
     payload: {
       subagent_id: worker.id,
-      status: worker.step ? "running" : "idle",
-      summary: worker.step,
+      status: step ? "running" : "idle",
+      summary,
     },
   };
+}
+
+/** A successful delegate response proves an identified worker was accepted. */
+export function subagentStartedEvent(workerId: string, status: string): RcProducedEvent {
+  const safeStatus = status === "running" || status === "queued" ? status : "queued";
+  return { event_type: "subagent", payload: { subagent_id: workerId, status: safeStatus, summary: "Delegated" } };
 }
 
 /** subagent — the terminal fact, from a delegate/gather result. */

@@ -3,10 +3,19 @@
 // under the repo's ~800-line file convention.
 
 import type { Writable } from "node:stream";
+import { resolve } from "node:path";
 import type { AppContext } from "../core/context.js";
 import { AGENTS_PATH } from "../core/transport.js";
 import { theme } from "../ui/theme.js";
 import { delegateWorker, getOrchTree, broadcastToAgents, gatherResults, requireOrchestrator } from "../core/orchestrator.js";
+import { projectRefFor, rcOutboxPath } from "./rc.js";
+import { subagentEvent, subagentFinishedEvent, subagentStartedEvent, type RcProducedEvent } from "../core/rc/producers.js";
+import { publishSubagentEvents } from "../core/rc/subagents.js";
+
+async function publishWorkers(ctx: AppContext, events: readonly RcProducedEvent[]): Promise<void> {
+  const root = resolve(ctx.flags.cwd);
+  await publishSubagentEvents(ctx.api, root, rcOutboxPath(projectRefFor(root)), events);
+}
 
 // ── Agents slash handler ────────────────────────
 
@@ -69,6 +78,7 @@ export async function delegateSlash(ctx: AppContext, out: Writable, arg: string)
   }
   try {
     const r = await delegateWorker(ctx.api, ctx.flags.agent!, model, task);
+    await publishWorkers(ctx, [subagentStartedEvent(r.worker_id, r.status)]);
     out.write(`delegated → worker ${r.worker_id} (${r.status}) running ${model}\n`);
   } catch (err) {
     out.write(`✗ ${err instanceof Error ? err.message : String(err)}\n`);
@@ -79,6 +89,7 @@ export async function treeSlash(ctx: AppContext, out: Writable): Promise<void> {
   if (!requireOrchestrator(ctx, out)) return;
   try {
     const r = await getOrchTree(ctx.api, ctx.flags.agent!);
+    await publishWorkers(ctx, r.workers.map(subagentEvent));
     out.write(theme.bold(`orchestrator: ${r.orchestrator}`) + "\n");
     if (r.workers.length === 0) {
       out.write("  (no active sub-agents)\n");
@@ -131,6 +142,7 @@ export async function gatherSlash(ctx: AppContext, out: Writable, arg: string): 
   if (!workerId) { out.write("usage: /gather <sub_agent_id|all>\n"); return; }
   try {
     const r = await gatherResults(ctx.api, ctx.flags.agent!, workerId);
+    await publishWorkers(ctx, r.results.map((result) => subagentFinishedEvent(result.worker_id, "done")));
     if (r.results.length === 0) { out.write("(no results to gather)\n"); return; }
     for (const res of r.results) {
       out.write(`${theme.bold(res.worker_id)}:\n`);
