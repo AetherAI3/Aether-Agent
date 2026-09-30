@@ -95,9 +95,9 @@ export function producerCoverage(): { produced: string[]; unproduced: string[]; 
   };
 }
 
-/** A short hint at what a tool acted on. Never the arguments themselves. */
+/** A path identifier for tool activity, never arbitrary argument text. */
 function targetHint(args: Record<string, unknown>): string | undefined {
-  for (const key of ["path", "file", "target", "name"]) {
+  for (const key of ["path", "file"]) {
     const value = args[key];
     // This only picks WHICH value is worth showing. Relativizing, scrubbing and
     // capping happen in sanitizeRemotePayload; anything not a plain string is
@@ -105,6 +105,17 @@ function targetHint(args: Record<string, unknown>): string | undefined {
     if (typeof value === "string" && value) return value;
   }
   return undefined;
+}
+
+/** Collapse free-text activity into a fixed label before it reaches the viewer. */
+function activityLabel(source: string): string {
+  const step = source.toLowerCase();
+  return /\b(tests?|verify|check)\b/.test(step) ? "Testing" :
+    /\b(review|inspect)\b/.test(step) ? "Reviewing" :
+    /\b(research|search|read)\b/.test(step) ? "Researching" :
+    /\b(plan|design)\b/.test(step) ? "Planning" :
+    /\b(write|edit|implement|build|code)\b/.test(step) ? "Implementing" :
+    step ? "Working" : "Waiting";
 }
 
 /**
@@ -117,7 +128,7 @@ function targetHint(args: Record<string, unknown>): string | undefined {
 export function mapBrainEventToRc(event: BrainEvent): RcProducedEvent | null {
   switch (event.type) {
     case "stage":
-      return event.name ? displayEvent("plan", { title: event.name, status: "running" }) : null;
+      return event.name ? displayEvent("plan", { title: activityLabel(event.name), status: "running" }) : null;
 
     case "tool_call": {
       if (!event.name) return null;
@@ -126,13 +137,15 @@ export function mapBrainEventToRc(event: BrainEvent): RcProducedEvent | null {
     }
 
     case "done":
-      return displayEvent("done", { status: event.ok ? "passed" : "failed", summary: event.result });
+      // A brain's ok is advisory until host verification. Completion reports
+      // that its turn ended; the independent tests frame owns verification.
+      return displayEvent("done", { status: event.ok ? "completed" : "failed",
+        summary: event.ok ? "Agent turn completed" : "Agent turn failed" });
 
     case "error":
-      // `msg` can carry tool or model output. It reaches the allowlisted
-      // `message` key and is scrubbed and capped by sanitizeRemotePayload on
-      // the way into the outbox; nothing is published from here directly.
-      return event.msg ? displayEvent("error", { code: "agent_error", message: event.msg }) : null;
+      // msg can carry model output, tool output or a private command. The
+      // viewer receives the occurrence, never those source bytes.
+      return displayEvent("error", { code: "agent_error", message: "Agent reported an error" });
 
     // Refused on purpose — see the header. Listed rather than folded into the
     // default so a new BrainEvent variant shows up here as a decision to make,
@@ -204,15 +217,10 @@ export function hostPresenceEvent(deviceId: string, liveness: "live" | "offline"
  * `step` only selects a fixed activity label; its source text is never sent.
  */
 export function subagentEvent(worker: TreeWorker): RcProducedEvent {
-  const step = typeof worker.step === "string" ? worker.step.toLowerCase() : "";
+  const step = typeof worker.step === "string" ? worker.step : "";
   // The service's free-text step can contain a task prompt or worker message.
   // Publish only a fixed activity category, never any of those source bytes.
-  const summary = /\b(tests?|verify|check)\b/.test(step) ? "Testing" :
-    /\b(review|inspect)\b/.test(step) ? "Reviewing" :
-    /\b(research|search|read)\b/.test(step) ? "Researching" :
-    /\b(plan|design)\b/.test(step) ? "Planning" :
-    /\b(write|edit|implement|build|code)\b/.test(step) ? "Implementing" :
-    step ? "Working" : "Waiting";
+  const summary = activityLabel(step);
   return displayEvent("subagent", {
     subagent_id: worker.id,
     status: step ? "running" : "idle",
@@ -255,12 +263,17 @@ export function diffSummaryEvent(total: CountTotal, paths: readonly string[]): R
  * The four statuses are the verifier's own, including "stale" and "unknown".
  * Those two matter most: "unknown" means the tree moved while the command ran,
  * and collapsing it to pass or fail is precisely the claim RC must not make on
- * a viewer's behalf. Counts are omitted because the verifier records a status
- * and a reason, not a parsed tally — inventing 0/0/0 would read as evidence
- * that nothing failed.
+ * a viewer's behalf. Counts are omitted because the verifier records no parsed
+ * tally. Its reason can contain the exact test command, so it stays local.
  */
 export function testsEvent(reading: VerificationReading): RcProducedEvent {
-  return displayEvent("tests", { status: reading.status, summary: reading.reason });
+  const summary = {
+    verified: "Verification passed",
+    failed: "Verification failed",
+    stale: "Verification is stale",
+    unknown: "Verification unavailable",
+  }[reading.status];
+  return displayEvent("tests", { status: reading.status, summary });
 }
 
 /** Strict `owner/name`, so nothing else can be spliced into a URL. */

@@ -107,7 +107,7 @@ test("no refused text can be smuggled through by way of the outbox", () => {
 
 test("a stage becomes a plan step", () => {
   const out = mapBrainEventToRc({ type: "stage", name: "build", face: ":)" });
-  assert.deepEqual(out, { event_type: "plan", payload: { projection_version: "1", title: "build", status: "running" } });
+  assert.deepEqual(out, { event_type: "plan", payload: { projection_version: "1", title: "Implementing", status: "running" } });
 });
 
 test("a tool call becomes tool activity naming the tool, not its arguments", () => {
@@ -129,7 +129,7 @@ test("a tool call with nothing worth naming still reports the tool", () => {
   assert.equal(out?.payload["tool"], "list");
 });
 
-test("done carries pass or fail, not a bare truthy flag", () => {
+test("done reports the brain turn without claiming host verification", () => {
   const ok = mapBrainEventToRc({
     type: "done",
     ok: true,
@@ -144,13 +144,30 @@ test("done carries pass or fail, not a bare truthy flag", () => {
     remaining: 1,
     reason: "unverified",
   });
-  assert.equal(ok?.payload["status"], "passed");
+  assert.equal(ok?.payload["status"], "completed");
   assert.equal(bad?.payload["status"], "failed");
+  assert.equal(ok?.payload["summary"], "Agent turn completed");
+  assert.equal(bad?.payload["summary"], "Agent turn failed");
 });
 
 test("an error maps to the error type with a code a viewer can group on", () => {
   const out = mapBrainEventToRc({ type: "error", msg: "boom" });
-  assert.deepEqual(out, { event_type: "error", payload: { projection_version: "1", code: "agent_error", message: "boom" } });
+  assert.deepEqual(out, { event_type: "error", payload: { projection_version: "1", code: "agent_error", message: "Agent reported an error" } });
+});
+
+test("free-text model output and verification commands never enter viewer frames", () => {
+  const privateText = "private prompt with operator command --password=hunter2";
+  const events = [
+    mapBrainEventToRc({ type: "stage", name: privateText, face: "" })!,
+    mapBrainEventToRc({ type: "done", ok: false, result: privateText, remaining: 1, reason: privateText })!,
+    mapBrainEventToRc({ type: "error", msg: privateText })!,
+    testsEvent({ status: "failed", reason: privateText, record: null }),
+  ];
+  for (const event of events) {
+    const payload = persisted(event);
+    assert.ok(payload);
+    assert.doesNotMatch(JSON.stringify(payload), /private prompt|hunter2/);
+  }
 });
 
 test("session and presence describe the run without naming a controller", () => {
@@ -320,6 +337,7 @@ test("tests reports the verifier's own status, inventing no counts", () => {
   );
   assert.ok(payload);
   assert.equal(payload["status"], "unknown");
+  assert.equal(payload["summary"], "Verification unavailable");
   assert.equal(payload["passed"], undefined, "a count nobody measured must not appear");
   assert.equal(payload["failed"], undefined);
 });
@@ -469,7 +487,10 @@ test("path traversal and URL targets are reduced to safe identifiers", () => {
   const tool = mapBrainEventToRc({ type: "tool_call", id: "1", name: "fetch", args: {
     target: "https://user:password@example.test/path?token=private",
   } });
-  assert.equal(persisted(tool!)?.["target"], "[external-target]");
+  assert.equal(tool?.payload["target"], undefined);
+  const forced = persisted({ event_type: "tool_activity", payload: { projection_version: "1",
+    tool: "fetch", status: "started", target: "https://user:password@example.test/path?token=private" } });
+  assert.equal(forced?.["target"], "[external-target]");
 });
 
 test("preview never publishes pids, ports or the child's error text", () => {
@@ -492,7 +513,7 @@ test("every Agent display projection matches the Cloud and browser golden frames
   const path = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "fixtures", "rc-display-v1.json");
   const raw = readFileSync(path);
   assert.equal(createHash("sha256").update(raw).digest("hex"),
-    "0e47b647f2bf792606e25ecca263c6f3d921fcd417fc3cc2ccb85596e3ca10a5");
+    "eb24adf8b48aa439285f1bf1eab2a1e05e08fe56068550fdc4a30dee7eeda4f9");
   const fixture = JSON.parse(raw.toString("utf8")) as {
     schema: string;
     payload_keys: Record<string, string[]>;
