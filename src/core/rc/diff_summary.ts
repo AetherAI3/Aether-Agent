@@ -28,7 +28,7 @@ export async function checkoutDiffSummary(
   event.payload["files_changed"] = paths.length;
   // A failed side, binary or untracked path has no complete line count. The
   // schema has optional counts, so omission is the honest unknown state.
-  if (!snapshot.complete || total.uncounted.length ||
+  if (!snapshot.complete || total.uncounted.length || paths.some((path) => snapshot.counts.get(path)?.binary) ||
       !Number.isSafeInteger(total.additions) || !Number.isSafeInteger(total.deletions)) {
     delete event.payload["insertions"];
     delete event.payload["deletions"];

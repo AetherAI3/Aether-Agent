@@ -45,6 +45,14 @@ test("RC publishes measured changed, clean, and binary checkout snapshots", asyn
   const record = createOutbox({ session_id: "s", project_ref: "p", device_id: "d", epoch: 1, project_root: dir });
   assert.equal(enqueueEvent(record, binary!.event_type, binary!.payload), true);
   assert.deepEqual(record.events[0]?.payload["files"], ["a.txt", "image.bin"]);
+
+  git("restore", "image.bin");
+  git("add", "a.txt");
+  writeFileSync(join(dir, "a.txt"), Buffer.from([0, 1, 9]));
+  const mixed = await checkoutDiffSummary(dir);
+  assert.deepEqual(mixed?.payload["files"], ["a.txt"]);
+  assert.equal(mixed?.payload["insertions"], undefined, "a binary side makes the aggregate unknown");
+  assert.equal(mixed?.payload["deletions"], undefined);
 });
 
 test("external paths are refused before durable enqueue", async () => {
