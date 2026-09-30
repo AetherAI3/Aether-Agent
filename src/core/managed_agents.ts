@@ -6,6 +6,85 @@ import { HttpError } from "./errors.js";
 
 export const MANAGED_AGENTS_PATH = "/agent/managed";
 export const MANAGED_AGENT_ID = /^mag_[0-9a-f]{16}$/;
+export const TERMINAL_READINESS_CONTRACT = "aether.terminal-readiness/1";
+export type ReadinessState = "enabled" | "disabled" | "unavailable";
+export interface ReadinessGate {
+  state: ReadinessState;
+  code: string;
+  reason: string;
+  remedy: string;
+}
+export interface ManagedReadiness {
+  schema_version: typeof TERMINAL_READINESS_CONTRACT;
+  required_contract: string;
+  registry: ReadinessGate;
+  dm: ReadinessGate;
+  model_uvt: ReadinessGate;
+}
+
+const safeGate = (state: ReadinessState, code: string, reason: string, remedy: string): ReadinessGate => ({ state, code, reason, remedy });
+const unavailable = (code: string, reason: string, remedy: string): ManagedReadiness => ({
+  schema_version: TERMINAL_READINESS_CONTRACT, required_contract: "unknown",
+  registry: safeGate("unavailable", code, reason, remedy),
+  dm: safeGate("unavailable", code, reason, remedy),
+  model_uvt: safeGate("unavailable", code, reason, remedy),
+});
+const incompatible = (): ManagedReadiness => unavailable("INCOMPATIBLE_CONTRACT", "Terminal and Cloud agent contracts are incompatible.", "Update the terminal and Cloud adapter.");
+const GATE_TEXT: Record<string, { state: ReadinessState; reason: string; remedy: string }> = {
+  READY: { state: "enabled", reason: "Available for this account.", remedy: "No action needed." },
+  ACCOUNT_DISABLED: { state: "disabled", reason: "Managed agents are disabled for this account.", remedy: "Ask the account administrator to enable managed agents." },
+  REGISTRY_UNAVAILABLE: { state: "unavailable", reason: "The agent registry is temporarily unavailable.", remedy: "Retry after the service recovers." },
+  DM_DISABLED: { state: "disabled", reason: "Agent DMs are disabled for this account.", remedy: "Ask the account administrator to enable agent DMs." },
+  ONLINE_DISABLED: { state: "disabled", reason: "Aether Online is disabled for this account.", remedy: "Ask the account administrator to enable Aether Online." },
+  DM_UNAVAILABLE: { state: "unavailable", reason: "Online DMs are temporarily unavailable.", remedy: "Retry after the service recovers." },
+  ADMISSION_DISABLED: { state: "disabled", reason: "Model and UVT execution is disabled for this account.", remedy: "Ask the account administrator to enable agent execution and UVT." },
+  EXECUTION_DISABLED: { state: "disabled", reason: "Managed-agent execution is disabled for this account.", remedy: "Ask the account administrator to enable agent execution." },
+  UVT_DISABLED: { state: "disabled", reason: "UVT is disabled for this account.", remedy: "Ask the account administrator to enable UVT." },
+  ADMISSION_UNAVAILABLE: { state: "unavailable", reason: "Model and UVT admission is unavailable.", remedy: "Retry after the service is repaired." },
+  ADMISSION_AVAILABLE: { state: "enabled", reason: "Model and UVT admission is available; each message is checked separately.", remedy: "Check each message admission receipt." },
+};
+
+/** Never reuse a probe across calls: a CLI token may rotate or switch accounts. */
+export async function probeManagedReadiness(api: ApiClient, signal?: AbortSignal): Promise<ManagedReadiness> {
+  try {
+    const value = await api.getJson<unknown>(`${MANAGED_AGENTS_PATH}/readiness`, signal, 10_000);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return incompatible();
+    const raw = value as Record<string, unknown>;
+    if (raw["schema_version"] !== TERMINAL_READINESS_CONTRACT || !["aether.managed-agents/1", "aether.managed-agents/1.1"].includes(String(raw["required_contract"]))) {
+      return incompatible();
+    }
+    const gates: Partial<Record<"registry" | "dm" | "model_uvt", ReadinessGate>> = {};
+    for (const key of ["registry", "dm", "model_uvt"] as const) {
+      const value = raw[key];
+      if (!value || typeof value !== "object" || Array.isArray(value)) return incompatible();
+      const gate = value as Record<string, unknown>;
+      const code = String(gate["code"]);
+      const known = GATE_TEXT[code];
+      if (!known || gate["state"] !== known.state ||
+          (key === "registry" && !["READY", "ACCOUNT_DISABLED", "REGISTRY_UNAVAILABLE"].includes(code)) ||
+          (key === "dm" && !["READY", "DM_DISABLED", "ONLINE_DISABLED", "DM_UNAVAILABLE"].includes(code)) ||
+          (key === "model_uvt" && !["ADMISSION_AVAILABLE", "ADMISSION_DISABLED", "EXECUTION_DISABLED", "UVT_DISABLED", "ADMISSION_UNAVAILABLE"].includes(code)) ||
+          typeof gate["reason"] !== "string" || typeof gate["remedy"] !== "string") {
+        return incompatible();
+      }
+      gates[key] = safeGate(known.state, code, known.reason, known.remedy);
+    }
+    if (gates.registry!.state !== "enabled" && (gates.dm!.state === "enabled" || gates.model_uvt!.state === "enabled")) return incompatible();
+    if (gates.dm!.state !== "enabled" && gates.model_uvt!.state === "enabled") return incompatible();
+    return { schema_version: TERMINAL_READINESS_CONTRACT, required_contract: String(raw["required_contract"]),
+      registry: gates.registry!, dm: gates.dm!, model_uvt: gates.model_uvt! };
+  } catch (error) {
+    if (error instanceof HttpError) {
+      const body = error.body && typeof error.body === "object" ? error.body as Record<string, unknown> : {};
+      const detail = body["detail"] && typeof body["detail"] === "object" ? body["detail"] as Record<string, unknown> : {};
+      if (detail["code"] === "WRONG_CREDENTIAL_CLASS") return unavailable("WRONG_CREDENTIAL_CLASS", "This credential cannot access terminal agents.", "Sign in with `aether auth login`.");
+      if (error.status === 401) return unavailable("AUTH_REQUIRED", "The CLI account credential is invalid or expired.", "Sign in with `aether auth login`.");
+      if (error.status === 403) return unavailable("ACCOUNT_DISABLED", "Terminal agents are disabled for this account.", "Ask the account administrator to enable managed agents.");
+      if (error.status === 404) return unavailable("INCOMPATIBLE_CONTRACT", "Cloud has not deployed the terminal readiness contract.", "Update the terminal and Cloud adapter.");
+    }
+    return unavailable("TEMPORARILY_UNAVAILABLE", "Terminal agent readiness could not be checked.", "Retry when Cloud is available.");
+  }
+}
 
 export interface ManagedAgentConfig {
   profile?: { schema_version: "aether.managed-agent.profile/1"; kind: "ats" } | null;
@@ -35,7 +114,7 @@ export interface AgentMessage {
 }
 
 export interface MessageAdmission {
-  state: string;
+  state: "saved" | "blocked_budget" | "blocked_policy" | "needs_review" | "admitted" | "replied";
   reason?: string | null;
   run_id?: string | null;
 }
@@ -161,7 +240,7 @@ export class ManagedAgentsClient {
     if (typeof receipt["id"] !== "string" || typeof receipt["body"] !== "string") throw new Error("Cloud did not confirm a saved message.");
     if (receipt["admission"] !== undefined) {
       const admission = record(receipt["admission"]);
-      if (typeof admission["state"] !== "string") throw new Error("Cloud returned an invalid message admission.");
+      if (!["saved", "blocked_budget", "blocked_policy", "needs_review", "admitted", "replied"].includes(String(admission["state"]))) throw new Error("Cloud returned an invalid message admission.");
     }
     return receipt as SentAgentMessage;
   }
