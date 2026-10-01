@@ -16,7 +16,7 @@ import type { CommandFlags } from "../core/command_dispatch.js";
 import { saveConfig } from "../core/config.js";
 import { VERSION } from "../version.js";
 import { renderHealthReport } from "../core/health.js";
-import { isCredentialSafeUrl } from "../core/transport.js";
+import { ApiClient, isCredentialSafeUrl } from "../core/transport.js";
 import { DEVICE_ENROLL_PATH } from "../core/device_runtime/contract.js";
 import { deviceRuntimeEnabled } from "../core/device_runtime/enablement.js";
 import { loadEnrollment, saveEnrollment, type EnrollmentRecord } from "../core/device_runtime/identity.js";
@@ -200,7 +200,11 @@ async function enroll(ctx: AppContext, flags: CommandFlags): Promise<number> {
   }
   let resp: EnrollResponse;
   try {
-    resp = await ctx.api.postJson<EnrollResponse>(DEVICE_ENROLL_PATH, {
+    // The saved device bearer must point to the same Cloud that minted it.
+    // An explicit --base-url changes both the enrollment request and record.
+    const api = resolved.url.replace(/\/+$/, "") === ctx.cfg.baseUrl.replace(/\/+$/, "")
+      ? ctx.api : new ApiClient(resolved.url, ctx.tokens);
+    resp = await api.postJson<EnrollResponse>(DEVICE_ENROLL_PATH, {
       client_label: hostname(),
       allowed_projects: [],
     });
