@@ -1115,7 +1115,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     process.stdout.write(theme.dim(`backend: ${where}`) + "\n");
     process.stdout.write("Type a prompt, or /help for commands. /exit to quit.\n\n");
   }
-  const consoleShell = new ConsoleShell(ctx.flags.cwd, text => { process.stdout.write(text); }, ctx.flags.json);
+  let consoleWrite = (text: string): void => { process.stdout.write(text); };
+  const consoleShell = new ConsoleShell(ctx.flags.cwd, text => consoleWrite(text), ctx.flags.json);
   skillOpts = { ...skillOpts, exec: consoleShell.exec };
   if (!process.stdin.isTTY) return replLines(ctx, skillOpts, consoleShell);
 
@@ -1132,6 +1133,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   // the answer is currently streaming onto.
   let busy = false;
   let setupOwnsInput = false;
+  let terminalOwnsInput = false;
   const renderHudLine = (): void => {
     if (!process.stdout.isTTY) return;
     const reg = getRegistry();
@@ -1153,6 +1155,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   const repaint = (): void => {
     if (busy) return;
     process.stdout.write(repaintString(prompt + consoleShell.prompt(), buf.value, buf.pos, process.stdout.columns ?? 80));
+  };
+  consoleWrite = (text: string): void => {
+    if (!busy) process.stdout.write("\r\x1b[2K");
+    process.stdout.write(text);
+    if (!busy) repaint();
   };
   // Unlike repaint(), this does NOT gate on busy: it's the thinking-pulse's
   // onPaint hook, fired from inside the pulse's own \r-repaint on stderr
@@ -1392,6 +1399,15 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     const onSubmit = async (): Promise<void> => {
       const raw = buf.value;
+      if (ConsoleShell.isTerminalCommand(raw)) {
+        if (busy) { process.stdout.write("\nWait for the current operation before terminal handoff.\n"); return; }
+        buf.clear(); // Explicit terminal commands never enter model/history.
+        busy = true; terminalOwnsInput = true;
+        try { await consoleShell.terminalCommand(raw); }
+        catch (error) { printError(error, ctx.cfg.baseUrl); }
+        finally { terminalOwnsInput = false; busy = false; repaint(); }
+        return;
+      }
       const queuePrefix = /^\s*\/queue[ \t]+/.exec(raw);
       const input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
       const commit = (): void => {
@@ -1729,6 +1745,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     // decoded as two replacement chars.
     const decoder = new StringDecoder("utf8");
     const onData = (chunk: Buffer): void => {
+      if (terminalOwnsInput) return;
       if (setupOwnsInput) { if (chunk.includes(3)) slashAbort?.abort(); return; }
       let data = carry + decoder.write(chunk);
       carry = "";
@@ -1738,7 +1755,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         data = data.slice(0, partial.index);
       }
       for (const seq of splitKeys(data)) {
-        if (setupOwnsInput) break;
+        if (setupOwnsInput || terminalOwnsInput) break;
         processSeq(seq);
       }
     };
@@ -1762,6 +1779,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
   try {
     if (p) process.stdout.write(p + consoleShell.prompt());
     for await (const line of rl) {
+    if (ConsoleShell.isTerminalCommand(line)) { await consoleShell.terminalCommand(line); continue; }
     let input = classifyConsoleInput(line);
     if (input.kind === "share") input = consoleShell.share();
     if (input.kind === "error") { process.stdout.write(input.message + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }

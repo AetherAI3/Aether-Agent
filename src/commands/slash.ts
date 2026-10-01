@@ -114,6 +114,12 @@ export async function handleSlash(
   const arg = parts.slice(1).join(" ");
 
   switch (cmd) {
+    case "terminal":
+    case "terminal-attach":
+    case "terminal-stop":
+    case "terminal-status":
+      out.write("Interactive terminal commands belong to the local coding console; Linux/Python 3 and a TTY are required.\n");
+      break;
     case "shell-reset":
       out.write("/shell-reset belongs to the local coding console; submit it there to discard shell state.\n");
       break;

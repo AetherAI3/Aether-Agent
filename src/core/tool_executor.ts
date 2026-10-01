@@ -83,6 +83,27 @@ export class ToolExecutor {
    */
   private committer: GitCommitGuard | null = null;
   private ownership: WorkspaceOwnership | null = null;
+  private terminalActive = false;
+
+  /** Reserve local authority for an explicit interactive user terminal. */
+  async beginUserTerminal(): Promise<() => void> {
+    const reserve = async (): Promise<() => void> => {
+      if (this.mode !== "coding" || this.terminalActive) throw new Error("local terminal already active or unavailable");
+      this.armCommitGuard();
+      if (this.reconcileCheckout()) throw new Error("checkout changed; re-submit terminal command");
+      const ownership = this.ownership!;
+      const before = ownership.before();
+      this.terminalActive = true;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        try { ownership.after(before, "user"); }
+        finally { this.terminalActive = false; this.reconcileCheckout(); }
+      };
+    };
+    return this.shellSession ? this.shellSession.withSlot(reserve) : reserve();
+  }
   private readonly shellSession?: ShellSession;
   private checkout: string | undefined;
 
@@ -114,6 +135,7 @@ export class ToolExecutor {
 
   /** Compatibility entrypoint; a console-owned executor shares its session. */
   async runUserCommand(command: string, options: RunOptions = {}): Promise<ToolResult> {
+    if (this.terminalActive) return { output: "[interactive terminal active; stop it before running local tools]", exitCode: 1 };
     if (this.mode === "pc") return this.pcToolRefusal();
     if (this.shellSession) return this.runUserShell(command, options);
     this.armCommitGuard();
@@ -124,10 +146,12 @@ export class ToolExecutor {
 
   /** Explicit user submissions are not model tools and confer no permission. */
   async runUserShell(command: string, options: RunOptions = {}): Promise<ToolResult> {
+    if (this.terminalActive) return { output: "[interactive terminal active; stop it before running local tools]", exitCode: 1 };
     if (this.mode === "pc" || !this.shellSession) return { output: "[no console shell session]", exitCode: 1 };
     if (!command.trim()) return { output: "[empty shell command]", exitCode: 1 };
     try {
       return await this.shellSession.withSlot(async () => {
+        if (this.terminalActive) return { output: "[interactive terminal active; stop it before running local tools]", exitCode: 1 };
         this.armCommitGuard();
         if (this.reconcileCheckout()) return { output: "[checkout changed; shell state reset; re-submit command]", exitCode: 1 };
         const before = this.ownership!.before();
@@ -349,6 +373,7 @@ export class ToolExecutor {
    * pointer rather than silently no-op'ing.
    */
   execute(name: string, rawArgs: unknown): ToolResult {
+    if (this.terminalActive) return { output: "[interactive terminal active; stop it before running local tools]", exitCode: 1 };
     if (this.shellSession?.busy) return { output: "[local execution busy — call executeAsync to queue]", exitCode: 1 };
     if (this.reconcileCheckout()) return { output: "[checkout changed; shell state reset; request fresh approval]", exitCode: 1 };
     const mutation = (name === "write_file" || name === "git_commit") && validateToolCall(name, rawArgs).ok && this.mode === "coding";
@@ -404,6 +429,7 @@ export class ToolExecutor {
    */
   async executeAsync(name: string, rawArgs: unknown, options: RunOptions = {}): Promise<ToolResult> {
     const dispatch = async (): Promise<ToolResult> => {
+      if (this.terminalActive) return { output: "[interactive terminal active; stop it before running local tools]", exitCode: 1 };
       if (options.signal?.aborted) return { output: "[aborted before start]", exitCode: 130 };
       if (this.reconcileCheckout()) return { output: "[checkout changed; shell state reset; request fresh approval]", exitCode: 1 };
       if (options.expectedShellContext !== undefined && options.expectedShellContext !== this.shellContext) {

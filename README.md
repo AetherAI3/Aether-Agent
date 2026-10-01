@@ -89,6 +89,30 @@ Explicit user execution never grants future
 model execution authority; model tool validation and permission gates still
 apply. Online managed-agent DMs are a separate surface and do not run `!commands`.
 
+### Interactive Linux terminal
+
+Use `/terminal <command>` in the local coding console for a program that needs
+terminal input (for example `/terminal python3`). This explicit user action
+requires Linux, `python3` on PATH, and TTY stdin/stdout. It starts an isolated
+Bash child in the current shell directory with the reviewed child environment;
+it does not inherit the persistent shell's exports/functions or change its cwd.
+Normal `!commands` and approved model tools keep their existing capture path.
+
+While attached, input and resize go to the terminal. Ctrl+C interrupts its
+foreground command; **Ctrl+] detaches back to chat without stopping it**.
+Use `/terminal-status` to see its ID, `/terminal-attach` to return, and
+`/terminal-stop` to terminate it. Only one terminal runs per console. Local
+file/shell/model tools refuse execution while it remains active, including when
+detached, so they cannot race user edits. Ordinary model chat remains available.
+Terminal edits are attributed to the user and excluded from automatic commits.
+
+Exit, crash or launch failure restores the console; leaving the console stops
+its terminal. Restart never replays commands or reconnects an old session.
+Output is live while attached; reattachment shows only an 8 KiB recent tail.
+Output and terminal commands are not automatically sent to the model or saved
+in chat history. Pipes/CI and other platforms show guidance to use `!command`.
+No model-callable PTY tool, Online DM terminal or ATS authority is introduced.
+
 ## Account agents and ATS — 0.4.0 source candidate
 
 ATS is the trading adapter for account agents.
