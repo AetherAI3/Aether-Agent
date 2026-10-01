@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -100,6 +101,35 @@ test("a safe error is queued when the broker is disconnected without delaying th
   assert.deepEqual(saved.map((event) => event.event_type), ["session", "presence", "plan", "error"]);
   assert.equal(saved[3]?.payload["message"], "Agent reported an error");
   assert.doesNotMatch(JSON.stringify(saved), /private-prompt-and-model-output/);
+});
+
+test("a settled coding worktree queues a measured diff in the launch project's RC session", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rc-code-repo-"));
+  const checkout = `${root}-checkout`;
+  const outbox = join(mkdtempSync(join(tmpdir(), "rc-code-outbox-")), "outbox.json");
+  const git = (...args: string[]): void => {
+    const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@t.t");
+  git("config", "user.name", "t");
+  git("config", "commit.gpgsign", "false");
+  git("config", "core.autocrlf", "false");
+  writeFileSync(join(root, "a.txt"), "one\n");
+  git("add", "a.txt");
+  git("commit", "-q", "-m", "base");
+  git("worktree", "add", "-q", "--detach", checkout);
+  writeFileSync(join(checkout, "a.txt"), "one\ntwo\n");
+  seeded(root, outbox);
+
+  const api = { postJson: async () => { throw new Error("offline"); } } as unknown as ApiClient;
+  const observer = openRcCodingObserver(root, api, outbox);
+  assert.ok(observer);
+  await observer.publishDiff(checkout);
+  await observer.drain();
+  const diff = loadOutbox(outbox, root).events.find((event) => event.event_type === "diff_summary");
+  assert.deepEqual(diff?.payload, { projection_version: "1", files_changed: 1, insertions: 1, deletions: 0, files: ["a.txt"] });
 });
 
 test("without rc start there is no observer and no account or upload call", async () => {

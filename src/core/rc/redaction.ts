@@ -76,6 +76,13 @@ const MAX_STRING_LENGTH = 1024;
 const MAX_LIST_ITEMS = 64;
 
 const ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\|\/|~[\\/])/;
+/** Git's project-relative path form, with traversal and machine paths refused. */
+export function isSafeRelativePath(value: string): boolean {
+  return value.length > 0 && value.length <= 512 &&
+    !ABSOLUTE_PATH.test(value) && !value.includes(":") &&
+    !/[\\\u0000-\u001f\u007f]/.test(value) &&
+    value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
 // C0 controls and DEL, built without literal control characters in the source.
 const CONTROL_CHARS = new RegExp(
   `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`,
@@ -145,6 +152,15 @@ export function sanitizeRemotePayload(
   options: SanitizeOptions,
 ): Record<string, unknown> | null {
   if (!isViewerEventType(eventType)) return null;
+  if (eventType === "diff_summary") {
+    const files = payload["files"];
+    if (files !== undefined && (!Array.isArray(files) || files.some((path: unknown) =>
+      typeof path !== "string" || !isSafeRelativePath(path)))) return null;
+    for (const key of ["files_changed", "insertions", "deletions"]) {
+      const count = payload[key];
+      if (count !== undefined && (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0)) return null;
+    }
+  }
   const allowed = RC_ALLOWED_KEYS[eventType];
   const env = options.env ?? process.env;
   const out: Record<string, unknown> = {};

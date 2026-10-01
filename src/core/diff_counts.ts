@@ -114,7 +114,7 @@ export function numstatArgs(staged: boolean): string[] {
  * repository, and running them in series doubles the latency of the headline
  * number for no benefit. Neither writes anything.
  */
-export async function readDiffCounts(run: AsyncRunner, root: string): Promise<Map<string, DiffCounts>> {
+export async function readDiffCountSnapshot(run: AsyncRunner, root: string): Promise<{ counts: Map<string, DiffCounts>; complete: boolean }> {
   const [stagedRun, unstagedRun] = await Promise.all([
     run("git", ["-C", root, ...numstatArgs(true)], root),
     run("git", ["-C", root, ...numstatArgs(false)], root),
@@ -133,7 +133,11 @@ export async function readDiffCounts(run: AsyncRunner, root: string): Promise<Ma
   };
   absorb(stagedRun, "staged");
   absorb(unstagedRun, "unstaged");
-  return counts;
+  return { counts, complete: stagedRun.status === 0 && unstagedRun.status === 0 };
+}
+
+export async function readDiffCounts(run: AsyncRunner, root: string): Promise<Map<string, DiffCounts>> {
+  return (await readDiffCountSnapshot(run, root)).counts;
 }
 
 export interface CountTotal {

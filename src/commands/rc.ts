@@ -27,6 +27,7 @@ import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
 import { configDir } from "../core/config.js";
+import { checkoutDiffSummary } from "../core/rc/diff_summary.js";
 import type { CommandFlags } from "../core/command_dispatch.js";
 import type { AppContext } from "../core/context.js";
 import { digestOf } from "../core/device_runtime/canonical_json.js";
@@ -380,6 +381,12 @@ async function start(
     enqueueEvent(record, opened.event_type, opened.payload);
     const presence = hostPresenceEvent(enrolled.device_id, "live");
     enqueueEvent(record, presence.event_type, presence.payload);
+    try {
+      const diff = await checkoutDiffSummary(deps.cwd);
+      if (diff) enqueueEvent(record, diff.event_type, diff.payload);
+    } catch {
+      // Diff observation is optional; session opening still succeeds.
+    }
     saveOutbox(hostDeps.outboxPath, record);
     const flushed = await flushOutbox(hostDeps, record);
 

@@ -497,11 +497,11 @@ test("preview publishes a public URL but never a loopback one", () => {
   assert.equal(persisted(previewEvent({ ...PREVIEW, url: "https://preview.example/app?token=private" }, () => false))?.["url"], undefined);
 });
 
-test("path traversal and URL targets are reduced to safe identifiers", () => {
+test("unsafe diff paths are refused and URL targets are reduced to safe identifiers", () => {
   const diff = persisted(diffSummaryEvent({ additions: 1, deletions: 0, uncounted: [] }, ["../private.txt"]));
-  assert.deepEqual(diff?.["files"], ["[external-path]"]);
+  assert.equal(diff, null);
   const unnamed = persisted(diffSummaryEvent({ additions: 0, deletions: 0, uncounted: [] }, [""]));
-  assert.deepEqual(unnamed?.["files"], ["[unnamed-file]"]);
+  assert.equal(unnamed, null);
   const tool = mapBrainEventToRc({ type: "tool_call", id: "1", name: "fetch", args: {
     target: "https://user:password@example.test/path?token=private",
   } });
