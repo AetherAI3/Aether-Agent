@@ -1,5 +1,8 @@
 name: CI
 
+# GitHub artifact storage is at quota. Set repository variable
+# AETHER_UPLOAD_CI_ARTIFACTS=true after the quota is restored.
+
 on:
   push:
     branches:
@@ -25,6 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
+          # Restore the Windows matrix and runner mapping when GitHub billing is fixed.
           - linux
     runs-on: [self-hosted, Linux, X64, aether-agent-ci]
     timeout-minutes: 20
@@ -43,6 +47,7 @@ jobs:
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
 
       - name: Upload exact-source evidence
+        if: vars.AETHER_UPLOAD_CI_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: aether-exact-head-test-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
@@ -98,6 +103,7 @@ jobs:
         run: node scripts/verify-ats-execution-parity.mjs --atsv2 _atsv2 --report ats-execution-parity.json
 
       - name: Upload ATS execution parity evidence
+        if: vars.AETHER_UPLOAD_CI_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: aether-ats-execution-parity-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
@@ -248,6 +254,7 @@ jobs:
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
 
       - name: Upload exact-source evidence
+        if: vars.AETHER_UPLOAD_CI_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: aether-exact-head-supply-chain-${{ github.event.pull_request.head.sha || github.sha }}
@@ -312,7 +319,7 @@ jobs:
           esac
 
       - name: Upload dependency-audit evidence
-        if: always()
+        if: always() && vars.AETHER_UPLOAD_CI_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: aether-dependency-audit-${{ github.event.pull_request.head.sha || github.sha }}
@@ -344,6 +351,7 @@ jobs:
         run: npm sbom --sbom-format cyclonedx > aether-agents.cdx.json
 
       - name: Upload SBOM
+        if: vars.AETHER_UPLOAD_CI_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: aether-agents-sbom-${{ github.event.pull_request.head.sha || github.sha }}
@@ -371,6 +379,7 @@ jobs:
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
 
       - name: Upload exact-source evidence
+        if: vars.AETHER_UPLOAD_CI_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: aether-exact-head-pypi-launcher-${{ github.event.pull_request.head.sha || github.sha }}

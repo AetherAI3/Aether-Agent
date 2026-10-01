@@ -1,5 +1,7 @@
 name: CodeQL
 
+# Set AETHER_UPLOAD_CI_ARTIFACTS=true after GitHub artifact storage is restored.
+
 on:
   push:
     branches:
@@ -42,6 +44,7 @@ jobs:
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
 
       - name: Upload exact-source evidence
+        if: vars.AETHER_UPLOAD_CI_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: aether-exact-head-codeql-${{ github.event.pull_request.head.sha || github.sha }}
