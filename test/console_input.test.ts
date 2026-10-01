@@ -66,51 +66,74 @@ for (const tty of [false, true]) {
       Object.defineProperty(process, 'stdin', { value: input });
       Object.defineProperty(process.stdout, 'isTTY', { value: ${tty} });
       Object.defineProperty(process.stdout, 'columns', { value: 100 });
+      let observed = '';
+      const write = process.stdout.write.bind(process.stdout);
+      process.stdout.write = (chunk, ...args) => { observed += String(chunk); return write(chunk, ...args); };
       let calls = 0;
       let sharing = false;
+      let releaseModel = null;
       globalThis.fetch = async (_url, options) => {
         const body = String(options?.body ?? '');
         if (body.includes('SHELL_ONLY') || body.includes('QUEUED_SHELL')) throw new Error('shell output leaked');
         if (body.includes('SHARE_ALLOWED') && !sharing) throw new Error('implicit sharing');
         if (sharing && !body.includes('SHARE_ALLOWED')) throw new Error('explicit sharing missing output');
         calls++; process.stdout.write('MODEL_CALL_' + calls + '\\n');
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(resolve => { releaseModel = resolve; });
         return new Response('data: {"type":"delta","text":"model response"}\\n\\ndata: {"type":"done","uvt":0,"cents":0}\\n\\n', { headers: {'content-type':'text/event-stream'} });
       };
       const tokens = { get: async () => 'test-token' };
       const ctx = { cfg: { backend:'cloud', baseUrl:'https://stub.test', defaultModel:'', defaultEffort:'', permissionMode:'ask', autoApply:false, telemetry:false }, flags: { cwd:${JSON.stringify(cwd)}, json:false, yes:false }, tokens, api:new ApiClient('https://stub.test', tokens) };
       const enter = ${tty ? "'\\r'" : "'\\n'"};
       const submit = text => input.write(text + enter);
-      const delay = ms => new Promise(r => setTimeout(r, ms));
+      const until = async (predicate, label) => {
+        const deadline = Date.now() + 5000;
+        while (!predicate()) {
+          if (Date.now() >= deadline) throw new Error('waiting for ' + label + ': ' + observed.slice(-2000));
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+        // Let the submit handler finish its continuation and clear busy before
+        // the next input; a terminal state event precedes that continuation.
+        await new Promise(resolve => setImmediate(resolve));
+      };
+      const completed = () => (observed.match(/\\| completed \\| exit \\d+ \\| session /g) ?? []).length;
+      const releaseTurn = async number => {
+        await until(() => calls === number && releaseModel !== null, 'model call ' + number);
+        const release = releaseModel;
+        releaseModel = null;
+        release();
+        await until(() => (observed.match(/model response/g) ?? []).length >= number, 'model response ' + number);
+      };
       const session = cmdChat(ctx, '');
-      await delay(50);
+      await until(() => input.listenerCount('data') > 0 && observed.includes(${JSON.stringify(cwd)}), 'console input ready');
       submit('!echo SHELL_ONLY');
-      await delay(150);
+      await until(() => completed() === 1, 'first shell completion');
       if (calls !== 0) throw new Error('shell made API call');
       submit(${JSON.stringify(process.platform === 'win32' ? '!cd' : '!pwd')});
-      await delay(100);
+      await until(() => completed() === 2, 'cwd command completion');
       submit('hello');
-      await delay(20);
+      await until(() => calls === 1 && releaseModel !== null, 'model turn running');
       submit('!echo QUEUED_SHELL');
-      await delay(250);
+      ${tty ? "await until(() => observed.includes('Local shell queued'), 'shell queued during model turn');" : ""}
+      await releaseTurn(1);
+      await until(() => completed() === 3, 'queued shell completion');
       submit(${JSON.stringify(`!"${process.execPath}" -e "process.exit(7)"`)});
-      await delay(100);
+      await until(() => completed() === 4 && observed.includes('completed | exit 7'), 'nonzero shell completion');
       submit('!');
-      await delay(50);
-      ${tty ? "input.write('\\x1b[200~!echo MULTILINE_BAD\\necho SECOND_BAD\\x1b[201~\\r'); await delay(50);" : ""}
+      await until(() => observed.includes('usage: !<command>'), 'empty shell refusal');
+      ${tty ? "input.write('\\x1b[200~!echo MULTILINE_BAD\\necho SECOND_BAD\\x1b[201~\\r'); await until(() => completed() === 5, 'multiline shell completion');" : ""}
       submit(${JSON.stringify(`!"${process.execPath}" -e "setTimeout(()=>{},30000)"`)});
-      await delay(100);
+      await until(() => observed.includes(${JSON.stringify(`running] !"${process.execPath}" -e "setTimeout(()=>{},30000)"`)}), 'cancellable shell running');
       ${tty ? "input.write('\\\\!literal'); input.write('\\x03');" : "process.emit('SIGINT');"}
-      await delay(350);
+      await until(() => observed.includes('cancelled | exit 130'), 'shell cancellation');
       ${tty ? "input.write(enter);" : "submit('\\\\!literal');"}
-      await delay(200);
+      await releaseTurn(2);
       submit('/shell-reset');
-      await delay(100);
+      await until(() => observed.includes('shell reset — cwd/environment/functions cleared'), 'shell reset');
       submit('!echo SHARE_ALLOWED');
-      await delay(100);
+      await until(() => completed() === ${tty ? 6 : 5}, 'shareable shell completion');
       sharing = true;
       submit('/shell-result');
-      await delay(200);
+      await releaseTurn(3);
       submit('/exit');
       await session;
       if(calls !== 3) throw new Error('wrong model call count: ' + calls);
@@ -125,7 +148,7 @@ for (const tty of [false, true]) {
         let output = "";
         child.stdout.on("data", (chunk) => { output += chunk; });
         child.stderr.on("data", (chunk) => { output += chunk; });
-        const timer = setTimeout(() => { child.kill(); reject(new Error("console timed out: " + output)); }, 10000);
+        const timer = setTimeout(() => { child.kill(); reject(new Error("console timed out: " + output)); }, 30000);
         child.on("error", reject);
         child.on("close", (code) => { clearTimeout(timer); resolve({ code, output }); });
       });

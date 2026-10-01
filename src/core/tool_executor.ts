@@ -9,6 +9,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, constants as fsConstants, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { BoundedOutput } from "./bounded_output.js";
 import type { ToolName } from "./brain_protocol.js";
 import { validateToolCall } from "./tool_registry.js";
 import { GitCommitGuard, SpawnGitRunner } from "./git_commit_guard.js";
@@ -257,18 +259,19 @@ export class ToolExecutor {
         stdio: ["ignore", "pipe", "pipe"],
       });
 
-      let out = "";
-      let bytes = 0;
-      const CAP = 64 * 1024 * 1024;
-      const absorb = (chunk: Buffer): void => {
-        options.onOutput?.(chunk.toString("utf8"));
-        bytes += chunk.length;
-        // Keep draining past the cap so the pipe never blocks the child, but
-        // stop retaining; capHeadTail trims the ends at the boundary anyway.
-        if (bytes <= CAP) out += chunk.toString("utf8");
+      const output = new BoundedOutput(MAX_OUTPUT);
+      const absorb = (text: string): void => {
+        if (!text) return;
+        output.append(text);
+        options.onOutput?.(text);
       };
-      child.stdout?.on("data", absorb);
-      child.stderr?.on("data", absorb);
+      // stdout and stderr may interleave mid-codepoint. Each owns a decoder,
+      // while capture and live output receive every complete decoded chunk.
+      for (const pipe of [child.stdout, child.stderr]) {
+        const decoder = new StringDecoder("utf8");
+        pipe?.on("data", (chunk: Buffer) => absorb(decoder.write(chunk)));
+        pipe?.on("end", () => absorb(decoder.end()));
+      }
 
       let settled = false;
       let verdict: "timeout" | "aborted" | null = null;
@@ -324,7 +327,7 @@ export class ToolExecutor {
       // 'close' rather than 'exit': it fires once the pipes are drained, so a
       // test summary arriving with the exit is not lost.
       child.on("close", (code, sig) => {
-        const body = capHeadTail(out, MAX_OUTPUT);
+        const body = output.render();
         if (verdict === "timeout") {
           finish({ output: `[timeout after ${Math.round(timeoutMs / 1000)}s]\n${body}`, exitCode: 124 });
           return;
