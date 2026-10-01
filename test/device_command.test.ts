@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdDevice, DEVICE_EXIT, deviceHealthState, resolveEnrollBaseUrl } from "../src/commands/device.js";
@@ -180,17 +181,38 @@ test("resolveEnrollBaseUrl REFUSES a URL that would put the device bearer in cle
 
 test("device enroll --base-url persists the override into the enrollment record", async () => {
   await withConfigDir(async () => {
+    let path: string | undefined;
+    let authorization: string | undefined;
+    const server = createServer(async (request, response) => {
+      path = request.url;
+      authorization = request.headers.authorization;
+      for await (const _chunk of request) { /* Drain the request. */ }
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        device_id: "dev-flag", device_token: "t", command_key_hex: "ab".repeat(32),
+      }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const override = `http://127.0.0.1:${address.port}/cloud`;
     const ctx = fakeCtx({
       cfg: { ...DEFAULT_CONFIG, baseUrl: "https://config.example.test" },
       api: {
-        postJson: async () => ({ device_id: "dev-flag", device_token: "t", command_key_hex: "ab".repeat(32) }),
+        postJson: async () => { throw new Error("enrollment used configured Cloud instead of override"); },
       } as unknown as AppContext["api"],
     });
-    const { code } = await capture(() =>
-      cmdDevice(ctx, ["enroll"], flagsWith({ "base-url": "https://laptop-cloud.example.test/cloud" })),
-    );
-    assert.equal(code, DEVICE_EXIT.ok);
-    assert.equal(loadEnrollment()?.base_url, "https://laptop-cloud.example.test/cloud");
+    try {
+      const { code } = await capture(() =>
+        cmdDevice(ctx, ["enroll"], flagsWith({ "base-url": override })),
+      );
+      assert.equal(code, DEVICE_EXIT.ok);
+      assert.equal(loadEnrollment()?.base_url, override);
+      assert.equal(path, "/cloud/device/v1/enroll");
+      assert.equal(authorization, "Bearer sess-token");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });
 
