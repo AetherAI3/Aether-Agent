@@ -19,14 +19,14 @@ concurrency:
 
 jobs:
   build-and-test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+          - linux
+    runs-on: [self-hosted, Linux, X64, aether-agent-ci]
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -119,15 +119,15 @@ jobs:
   # passes every other job here and throws MODULE_NOT_FOUND on a user's first
   # command, which is the failure this job exists to catch.
   clean-install:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Clean install (${{ matrix.os }})
     needs: build-and-test
     strategy:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+          - linux
+    runs-on: [self-hosted, Linux, X64, aether-agent-ci]
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -230,7 +230,8 @@ jobs:
         shell: bash
 
   supply-chain:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, aether-agent-ci]
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -351,8 +352,9 @@ jobs:
           retention-days: 90
 
   pypi-launcher:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: PyPI launcher
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, aether-agent-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout repository
