@@ -41,6 +41,7 @@ const MUTATING_TOOLS: ReadonlySet<string> = new Set([
 export interface RunOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  onOutput?: (chunk: string) => void;
 }
 
 export interface ToolResult {
@@ -145,6 +146,11 @@ export class ToolExecutor {
     return abs;
   }
 
+  /** Explicit console input only; never changes model permissions or custody. */
+  runUserCommand(command: string, options: RunOptions = {}): Promise<ToolResult> {
+    return this.run(command, options);
+  }
+
   /**
    * Run a shell command in the workspace; capture combined output, capped.
    *
@@ -188,6 +194,7 @@ export class ToolExecutor {
       let bytes = 0;
       const CAP = 64 * 1024 * 1024;
       const absorb = (chunk: Buffer): void => {
+        options.onOutput?.(chunk.toString("utf8"));
         bytes += chunk.length;
         // Keep draining past the cap so the pipe never blocks the child, but
         // stop retaining; capHeadTail trims the ends at the boundary anyway.

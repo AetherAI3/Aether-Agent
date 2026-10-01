@@ -321,6 +321,7 @@ export async function handleSlash(
     case "clear":
       out.write("\x1b[2J\x1b[H");
       break;
+    case "shell-result":
     case "queue":
     case "steer":
     case "btw":
