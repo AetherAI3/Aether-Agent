@@ -4000,6 +4000,45 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:shell-result",
+    "surface": "slash",
+    "name": "shell-result",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "explicitly share the last local shell result with chat (bounded)",
+    "detailedHelp": "/shell-result\nexplicitly share the last local shell result with chat (bounded)",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "network",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.shell-result",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:shell-result",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "shell-result",
+      "usage": "/shell-result",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Coding console only; explicit sharing of at most 8 KiB of untrusted local output."
+    }
+  },
+  {
     "key": "slash:queue",
     "surface": "slash",
     "name": "queue",

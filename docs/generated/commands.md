@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:a8c24ac055d15ec28da0252b99970330b8e6d8d1c2994e8b54f4fd126680e11f -->
+<!-- manifest-digest: sha256:667c4bba57664e7a670b601c9590de69a02b9a8c5008d3f9e3daf471bc5bc058 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -468,6 +468,12 @@ write plan to \.hermes/plans/
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.writing-plans`
 
 ### Steering
+
+#### `/shell-result`
+
+explicitly share the last local shell result with chat \(bounded\)
+
+Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.shell-result`
 
 #### `/queue <task>`
 
