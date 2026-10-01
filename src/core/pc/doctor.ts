@@ -182,6 +182,7 @@ export function pcMapV2(
 }
 
 export interface PcDoctorDeps {
+  networkInterfaces?: typeof networkInterfaces;
   platform?: NodeJS.Platform;
   now?: () => number;
   wait?: (ms: number) => Promise<void>;
@@ -288,8 +289,12 @@ export async function pcDoctor(target: PcTarget, root: string, probeNetwork = fa
     metrics.push(missing("disk.free", "unavailable", "GiB", "fs.statfs", "workspace filesystem cannot be sampled", at));
     metrics.push(missing("disk.free_pct", "unavailable", "%", "fs.statfs", "workspace filesystem cannot be sampled", at));
   }
-  const activeInterfaces = Object.values(networkInterfaces()).flat().filter((item) => item && !item.internal).length;
-  metrics.push(measured("network.interfaces", activeInterfaces, "addresses", "os.networkInterfaces; not a reachability test", at));
+  try {
+    const activeInterfaces = Object.values((deps.networkInterfaces ?? networkInterfaces)()).flat().filter((item) => item && !item.internal).length;
+    metrics.push(measured("network.interfaces", activeInterfaces, "addresses", "os.networkInterfaces; not a reachability test", at));
+  } catch (err) {
+    metrics.push(missing("network.interfaces", "unavailable", "addresses", "os.networkInterfaces", String(err), at));
+  }
   metrics.push(sample.swap_used_mb === null
     ? missing("swap.used", "unavailable", "MiB", "Windows CIM", "virtual memory probe unavailable", at)
     : measured("swap.used", sample.swap_used_mb, "MiB", "Windows CIM", at));

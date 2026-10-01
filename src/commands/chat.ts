@@ -2,6 +2,7 @@
 // This is the coding front door: build an envelope, POST to the universal
 // stream, decode frames, render. The agent brain runs on Aether's servers.
 
+import { classifyConsoleInput, ConsoleShell, type ConsoleInput } from "./console_input.js";
 import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import type { AppContext, GlobalFlags } from "../core/context.js";
@@ -29,7 +30,7 @@ import {
 } from "../core/turn_lifecycle.js";
 import { formatErrorLine } from "../ui/error_line.js";
 import { appendCustody } from "../core/custody.js";
-import { handleSlash, primeCatalog } from "./slash.js";
+import { handleSlash } from "./slash.js";
 import { applyPromptMode } from "./prompt_modes.js";
 import { userInfo } from "node:os";
 import { renderSplash } from "../ui/splash.js";
@@ -1104,10 +1105,9 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
     // One-line dim banner: which brain serves turns this session (local-first).
     const where = backend === "local" ? "local Ollama (offline)" : "cloud (Aether API)";
     process.stdout.write(theme.dim(`backend: ${where}`) + "\n");
-    process.stdout.write("Type a prompt, or /help for commands. /exit to quit.\n\n");
+    process.stdout.write("Type a prompt, !command for local shell, /shell-result to share output, or /help. /exit to quit.\n\n");
   }
   if (!process.stdin.isTTY) return replLines(ctx, skillOpts);
-  void primeCatalog(ctx); // non-blocking warm; first /models is then instant
 
   const buf = new InputBuffer();
   const histPath = historyPath(ctx.flags.cwd);
@@ -1170,7 +1170,8 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
   let pasting = false;
   let pasteAcc = "";
   let carry = ""; // partial escape sequence held across chunk boundaries
-  const queue: string[] = [];
+  const queue: ConsoleInput[] = [];
+  const shell = new ConsoleShell(ctx.flags.cwd, (text) => process.stdout.write(text));
   let steering: string | null = null;
   const btwNotes: string[] = [];
   let turnAbort: AbortController | null = null; // live while a local/cloud turn runs
@@ -1204,6 +1205,9 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
       process.stdout.removeListener("resize", onResize);
     };
     const finish = (code: number): void => {
+      turnAbort?.abort();
+      slashAbort?.abort();
+      queue.length = 0;
       cleanup();
       process.stdout.write("\n");
       resolve(code);
@@ -1350,40 +1354,64 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
       }
     };
 
+    const runInput = async (input: ConsoleInput): Promise<"completed" | "aborted" | "failed"> => {
+      if (input.kind === "share") input = shell.share();
+      if (input.kind === "error") { process.stdout.write(input.message + "\n"); return "completed"; }
+      if (input.kind === "empty") return "completed";
+      if (input.kind === "shell") {
+        turnAbort = new AbortController();
+        try { return await shell.run(input.command, turnAbort.signal); }
+        finally { turnAbort = null; }
+      }
+      return runQueuedTurn(input.text);
+    };
+
     const onSubmit = async (): Promise<void> => {
-      let t = buf.value.trim();
+      const raw = buf.value;
+      const queuePrefix = /^\s*\/queue[ \t]+/.exec(raw);
+      const input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
+      let t = input.kind === "chat" ? input.text : raw.trim();
+      const commit = (): void => {
+        if (input.kind === "chat") { remember(buf.value); buf.commit(buf.value); }
+        else buf.clear();
+      };
       // ── mid-turn Enter: bypass commands + type-ahead queueing ──
       if (busy) {
         if (t.startsWith("/steer ")) {
           steering = t.slice(7).trim() || steering;
-          remember(buf.value);
-          buf.commit(buf.value);
+          commit();
           if (steering) process.stdout.write(`\n🎯 Steering set: "${steering}"\n`);
           return;
         }
         if (t.startsWith("/btw ")) {
           const note = t.slice(5).trim();
-          remember(buf.value);
-          buf.commit(buf.value);
+          commit();
           if (note) {
             btwNotes.push(note);
             process.stdout.write(`\n📝 Noted: "${note}"\n`);
           }
           return;
         }
-        if (t.startsWith("/queue ")) t = t.slice(7).trim();
-        remember(buf.value);
-        buf.commit(buf.value);
-        if (!t || t.startsWith("/")) return; // other slashes wait for the turn
-        queue.push(t);
+        commit();
+        if (!t || (input.kind === "chat" && t.startsWith("/"))) return; // stateful commands above; typed shell/share items keep their identity
+        queue.push(input);
         process.stdout.write(`\n⏳ Queued (${queue.length}): "${previewLine(t)}"\n`);
         return;
       }
 
       process.stdout.write("\n");
-      remember(buf.value);
-      buf.commit(buf.value);
+      commit();
       if (!t) {
+        repaint();
+        return;
+      }
+      if (input.kind !== "chat") {
+        busy = true;
+        try {
+          let result = await runInput(input);
+          while (result === "completed" && queue.length) result = await runInput(queue.shift()!);
+          if (result !== "completed") queue.length = 0;
+        } finally { busy = false; }
         repaint();
         return;
       }
@@ -1402,13 +1430,7 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
         process.stdout.write(`📝 Noted: "${note}"\n`);
         repaint(); return;
       }
-      if (t.startsWith("/queue ") || t === "/queue") {
-        const task = t.slice(6).trim();
-        if (!task) { process.stdout.write("usage: /queue <task>\n"); repaint(); return; }
-        // not busy — run immediately as a normal turn
-        process.stdout.write(`⏳ Running: "${task}"\n`);
-        t = task;
-      }
+      if (t === "/queue") { process.stdout.write("usage: /queue <task>\n"); repaint(); return; }
       // ── stateless prompt-rewrite modes (/recon, /plan, /research, …) ──
       const mode = applyPromptMode(t);
       if (mode.handled) {
@@ -1434,6 +1456,7 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
           }
         } catch (err) {
           if (isAbortError(err)) {
+            queue.length = 0;
             process.stdout.write(theme.dim("✗ canceled") + "\n");
           } else {
             printError(err, ctx.cfg.baseUrl);
@@ -1443,6 +1466,14 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
           setupOwnsInput = false;
           busy = false;
           slashAbort = null;
+        }
+        if (queue.length) {
+          busy = true;
+          try {
+            let result: "completed" | "aborted" | "failed" = "completed";
+            while (result === "completed" && queue.length) result = await runInput(queue.shift()!);
+            if (result !== "completed") queue.length = 0;
+          } finally { busy = false; }
         }
         renderHudLine();
         repaint();
@@ -1455,9 +1486,9 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
         let result = await runQueuedTurn(t);
         while (result === "completed" && queue.length > 0) {
           const next = queue.shift()!;
-          process.stdout.write(`\n→ Queued: "${previewLine(next)}"\n`);
-          result = await runQueuedTurn(next);
+          result = await runInput(next);
         }
+        if (result !== "completed") queue.length = 0;
       } finally {
         busy = false;
         getRegistry().startUserTimer();
@@ -1706,6 +1737,7 @@ async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<
  *  SIGINT delivered normally since readline isn't in terminal mode here). */
 async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Promise<number> {
   const rl = createInterface({ input: process.stdin });
+  const shell = new ConsoleShell(ctx.flags.cwd, (text) => process.stdout.write(text));
   const p = ctx.flags.json ? "" : promptPrefix(userInfo().username || "you");
   let inflight: AbortController | null = null;
   const onSigint = (): void => inflight?.abort();
@@ -1713,12 +1745,25 @@ async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {}): Pro
   try {
     if (p) process.stdout.write(p);
     for await (const line of rl) {
-    const t = line.trim();
+    let input = classifyConsoleInput(line);
+    if (input.kind === "share") input = shell.share();
+    if (input.kind === "shell") {
+      inflight = new AbortController();
+      try { await shell.run(input.command, inflight.signal); } finally { inflight = null; }
+      if (p) process.stdout.write(p);
+      continue;
+    }
+    if (input.kind === "error") {
+      process.stdout.write(input.message + "\n");
+      if (p) process.stdout.write(p);
+      continue;
+    }
+    const t = input.kind === "chat" ? input.text : "";
     if (!t) {
       if (p) process.stdout.write(p);
       continue;
     }
-    if (historyEnabled()) appendHistory(t, historyPath(ctx.flags.cwd));
+    if (historyEnabled() && line.trim() !== "/shell-result") appendHistory(line.trim(), historyPath(ctx.flags.cwd));
     if (t.startsWith("/")) {
       inflight = new AbortController();
       try {
