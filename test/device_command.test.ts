@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdDevice, DEVICE_EXIT, deviceHealthState, resolveEnrollBaseUrl } from "../src/commands/device.js";
 import { findDispatchedCliCommand } from "../src/commands/cli_registry.js";
@@ -95,14 +95,17 @@ test("device last reports unenrolled without leaking secrets", async () => {
 
 test("device enroll saves the enrollment record", async () => {
   await withConfigDir(async () => {
+    let posted: unknown;
     const ctx = fakeCtx({
       api: {
-        postJson: async () => ({
+        postJson: async (path: string, body: unknown) => {
+          posted = { path, body };
+          return {
           device_id: "dev-99",
           device_token: "dtok",
-          device_command_key: "dkey",
-          display_name: "host",
-        }),
+          command_key_hex: "ab".repeat(32),
+          };
+        },
       } as unknown as AppContext["api"],
     });
     const { code, out } = await capture(() => cmdDevice(ctx, ["enroll"], NOOP_FLAGS));
@@ -110,7 +113,10 @@ test("device enroll saves the enrollment record", async () => {
     assert.match(out, /dev-99/);
     const record = loadEnrollment();
     assert.equal(record?.device_id, "dev-99");
-    assert.equal(record?.device_command_key, "dkey");
+    assert.equal(record?.device_command_key, "ab".repeat(32));
+    assert.deepEqual(posted, { path: "/device/v1/enroll", body: {
+      client_label: hostname(), allowed_projects: [],
+    } });
   });
 });
 
@@ -177,7 +183,7 @@ test("device enroll --base-url persists the override into the enrollment record"
     const ctx = fakeCtx({
       cfg: { ...DEFAULT_CONFIG, baseUrl: "https://config.example.test" },
       api: {
-        postJson: async () => ({ device_id: "dev-flag", device_token: "t", device_command_key: "k" }),
+        postJson: async () => ({ device_id: "dev-flag", device_token: "t", command_key_hex: "ab".repeat(32) }),
       } as unknown as AppContext["api"],
     });
     const { code } = await capture(() =>
@@ -193,7 +199,7 @@ test("device enroll without --base-url still uses config, unchanged", async () =
     const ctx = fakeCtx({
       cfg: { ...DEFAULT_CONFIG, baseUrl: "https://config.example.test" },
       api: {
-        postJson: async () => ({ device_id: "dev-cfg", device_token: "t", device_command_key: "k" }),
+        postJson: async () => ({ device_id: "dev-cfg", device_token: "t", command_key_hex: "ab".repeat(32) }),
       } as unknown as AppContext["api"],
     });
     await capture(() => cmdDevice(ctx, ["enroll"], NOOP_FLAGS));
