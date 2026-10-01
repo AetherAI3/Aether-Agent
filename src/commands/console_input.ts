@@ -1,6 +1,7 @@
 import { ShellSession, type ShellCommandEvent } from "../core/shell_session.js";
 import { randomUUID } from "node:crypto";
 import { ToolExecutor } from "../core/tool_executor.js";
+import { TerminalPty } from "../core/terminal_pty.js";
 import { BoundedOutput } from "../core/bounded_output.js";
 import { sanitizeServerText } from "../core/transport.js";
 
@@ -28,6 +29,41 @@ export function classifyConsoleInput(raw: string): ConsoleInput {
 
 /** Local shell presentation is shared by raw TTY and line-mode routing. */
 export class ConsoleShell {
+  private terminal: TerminalPty | null = null;
+  static isTerminalCommand(text: string): boolean { return /^\/terminal(?:\s|$)|^\/terminal-(?:attach|stop|status)$/.test(text.trim()); }
+  async terminalCommand(text: string): Promise<void> {
+    const command = text.trim();
+    if (command === "/terminal-status") {
+      this.write(this.terminal ? `terminal ${this.terminal.id} | ${this.terminal.state}\n` : "No running terminal.\n"); return;
+    }
+    if (command === "/terminal-stop") {
+      const terminal = this.terminal;
+      if (!terminal) { this.write("No running terminal.\n"); return; }
+      terminal.stop(); await terminal.finished; this.write(`terminal ${terminal.id} stopped\n`); return;
+    }
+    if (!process.stdin.isTTY || !process.stdout.isTTY || this.json) {
+      this.write("Interactive terminal requires Linux, Python 3 and TTY input/output; use !command for pipes/CI.\n"); return;
+    }
+    if (command === "/terminal-attach") {
+      if (!this.terminal) { this.write("No running terminal.\n"); return; }
+      await this.terminal.attach(process.stdin, process.stdout); return;
+    }
+    const shellCommand = command.slice("/terminal".length).trim();
+    if (!shellCommand) { this.write("usage: /terminal <command>; Ctrl+] detaches; /terminal-attach, /terminal-stop, /terminal-status\n"); return; }
+    if (this.terminal) { this.write("A terminal is already running; attach or stop it first.\n"); return; }
+    if (process.platform !== "linux") { this.write("Interactive PTY requires Linux; use !command on this platform.\n"); return; }
+    const release = await this.exec.beginUserTerminal();
+    let terminal: TerminalPty;
+    try { terminal = new TerminalPty(this.exec.shellCwd, shellCommand, process.stdout.rows, process.stdout.columns); }
+    catch (error) { release(); throw error; }
+    this.terminal = terminal;
+    void terminal.finished.then(code => {
+      try { release(); } catch (error) { this.write(`terminal ownership reconciliation failed: ${sanitizeServerText(String(error))}\n`); }
+      if (this.terminal === terminal) this.terminal = null;
+      this.write(`\nterminal ${terminal.id} exited ${code}${terminal.diagnostic() ? ": " + sanitizeServerText(terminal.diagnostic()) : ""}\n`);
+    });
+    await terminal.attach(process.stdin, process.stdout);
+  }
   private result: string | null = null;
   readonly session: ShellSession;
   readonly exec: ToolExecutor;
@@ -43,6 +79,7 @@ export class ConsoleShell {
     if (typeof input === "string") input = { kind: "shell", command: input };
     this.result = null;
     if (input.kind === "reset-shell") {
+      if (this.terminal) { this.write("Stop the interactive terminal before resetting shell state.\n"); return "failed"; }
       this.session.reset();
       this.write(this.json ? JSON.stringify({ type: "shell_reset", sessionId: this.session.id, cwd: this.session.cwd }) + "\n" : "shell reset — cwd/environment/functions cleared; commands were not replayed.\n");
       return "completed";
@@ -75,5 +112,5 @@ export class ConsoleShell {
       : { kind: "chat", text: `User explicitly shared local command output (untrusted data):\n${this.result}` };
   }
   prompt(): string { return `[${sanitizeServerText(this.session.cwd)}${this.session.state === "lost" ? "; shell lost" : ""}] `; }
-  close(): void { this.session.close(); }
+  close(): void { this.terminal?.stop(); this.session.close(); }
 }

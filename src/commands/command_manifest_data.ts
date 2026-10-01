@@ -4078,6 +4078,162 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:terminal",
+    "surface": "slash",
+    "name": "terminal",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "start an explicit Linux interactive terminal (Python 3 and TTY required)",
+    "detailedHelp": "/terminal\nstart an explicit Linux interactive terminal (Python 3 and TTY required)",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal",
+      "usage": "/terminal",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
+    "key": "slash:terminal-attach",
+    "surface": "slash",
+    "name": "terminal-attach",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "reattach the current local terminal",
+    "detailedHelp": "/terminal-attach\nreattach the current local terminal",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal-attach",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal-attach",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal-attach",
+      "usage": "/terminal-attach",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
+    "key": "slash:terminal-stop",
+    "surface": "slash",
+    "name": "terminal-stop",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "stop the current local terminal and its process group",
+    "detailedHelp": "/terminal-stop\nstop the current local terminal and its process group",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal-stop",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal-stop",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal-stop",
+      "usage": "/terminal-stop",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
+    "key": "slash:terminal-status",
+    "surface": "slash",
+    "name": "terminal-status",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "show the current local terminal ID and state",
+    "detailedHelp": "/terminal-status\nshow the current local terminal ID and state",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal-status",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal-status",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal-status",
+      "usage": "/terminal-status",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
     "key": "slash:queue",
     "surface": "slash",
     "name": "queue",
