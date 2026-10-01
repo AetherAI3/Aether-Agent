@@ -1,6 +1,7 @@
 import { ShellSession, type ShellCommandEvent } from "../core/shell_session.js";
 import { randomUUID } from "node:crypto";
 import { ToolExecutor } from "../core/tool_executor.js";
+import { BoundedOutput } from "../core/bounded_output.js";
 import { sanitizeServerText } from "../core/transport.js";
 
 /** Classify before history, prompt rewriting, or the busy queue. */
@@ -58,7 +59,9 @@ export class ConsoleShell {
     } });
     if (fallback) this.event({ ...fallback, state: result.exitCode === 130 ? "cancelled" : "completed", exitCode: result.exitCode });
     const full = `!${input.command}\ncwd: ${this.session.cwd}\nexit: ${result.exitCode}\n${result.output}`;
-    this.result = Buffer.from(full).subarray(0, 8192).toString("utf8").replace(/\ufffd$/, "");
+    const shared = new BoundedOutput(8192);
+    shared.append(full);
+    this.result = shared.render();
     // Stream once; retain the bounded capture for explicit sharing. Refusal and
     // state-loss explanations still render even when some output was streamed.
     const visible = streamed ? result.output.split("\n", 1)[0]! : result.output;

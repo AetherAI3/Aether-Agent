@@ -4,6 +4,7 @@ import { realpathSync, statSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
+import { BoundedOutput } from "./bounded_output.js";
 import { childEnv } from "./child_env.js";
 import type { RunOptions, ToolResult } from "./tool_executor.js";
 
@@ -157,7 +158,7 @@ export class ShellSession {
     emit("running");
     return new Promise<ToolResult>((settle) => {
       const marker = `\x1e${commandId}\x1f`;
-      let output = "";
+      const output = new BoundedOutput();
       let completed = false;
       let control = "";
       let code: number | null = null;
@@ -165,11 +166,9 @@ export class ShellSession {
       let outDone = false;
       let errDone = false;
       const retain = (text: string): void => {
-        if (output.length < 8000) {
-          const kept = text.slice(0, 8000 - output.length);
-          output += kept;
-          options.onOutput?.(kept);
-        }
+        if (!text) return;
+        output.append(text);
+        options.onOutput?.(text);
       };
       const streamReader = (stream: Readable, end: () => void): (() => void) => {
         let pending = "";
@@ -183,7 +182,9 @@ export class ShellSession {
             end();
           } else {
             // A marker may span chunks. Drain everything except its suffix.
-            const safe = Math.max(0, pending.length - marker.length + 1);
+            let safe = Math.max(0, pending.length - marker.length + 1);
+            // The marker lookbehind must not divide an astral code point.
+            if (safe > 0 && /[\uD800-\uDBFF]/.test(pending[safe - 1]!)) safe--;
             retain(pending.slice(0, safe));
             pending = pending.slice(safe);
           }
@@ -197,7 +198,7 @@ export class ShellSession {
         clearTimeout(timer);
         options.signal?.removeEventListener("abort", abort);
         cleanupOut(); cleanupErr();
-        if (state !== "completed") result.output += output;
+        result.output += output.render();
         fd.off("data", onControl);
         this.failActive = null;
         emit(state, result.exitCode);
@@ -213,7 +214,7 @@ export class ShellSession {
           return;
         }
         this.cwd = physical;
-        finish({ output: `[exit ${code}]\n${output}`, exitCode: code }, "completed");
+        finish({ output: `[exit ${code}]\n`, exitCode: code }, "completed");
       };
       const cleanupOut = streamReader(child.stdout!, () => { outDone = true; check(); });
       const cleanupErr = streamReader(child.stderr!, () => { errDone = true; check(); });
