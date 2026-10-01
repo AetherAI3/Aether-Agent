@@ -13,6 +13,8 @@ import type { ToolName } from "./brain_protocol.js";
 import { validateToolCall } from "./tool_registry.js";
 import { GitCommitGuard, SpawnGitRunner } from "./git_commit_guard.js";
 import { webFetch, webSearch } from "./web.js";
+import { ShellSession } from "./shell_session.js";
+import { WorkspaceOwnership } from "./workspace_ownership.js";
 
 const MAX_OUTPUT = 8000;
 // CONTRACTS.md invariant 5: an unset test_cmd means "no ground truth to assert" —
@@ -42,6 +44,8 @@ export interface RunOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   onOutput?: (chunk: string) => void;
+  /** Bind a model approval to the exact session and cwd displayed by the host. */
+  expectedShellContext?: string;
 }
 
 export interface ToolResult {
@@ -52,6 +56,7 @@ export interface ToolResult {
 /** Chosen by the local host when it creates an executor, never by a tool call. */
 export interface ToolExecutionContext {
   readonly mode: "coding" | "pc";
+  readonly shellSession?: ShellSession;
 }
 
 /**
@@ -75,6 +80,9 @@ export class ToolExecutor {
    * eagerly froze the CLI before its first turn.
    */
   private committer: GitCommitGuard | null = null;
+  private ownership: WorkspaceOwnership | null = null;
+  private readonly shellSession?: ShellSession;
+  private checkout: string | undefined;
 
   constructor(
     cwd: string,
@@ -90,6 +98,46 @@ export class ToolExecutor {
     // Canonicalize the root once (resolve any symlinks in the workspace path).
     const r = resolve(cwd);
     this.root = existsSync(r) ? realpathSync(r) : r;
+    if (context.shellSession && (context.mode !== "coding" || context.shellSession.workspaceRoot !== this.root)) {
+      throw new Error("shell session must belong to this coding workspace");
+    }
+    this.shellSession = context.shellSession;
+  }
+
+  /** Directory shown to the user; never substitutes for the file-tool root. */
+  get shellCwd(): string { return this.shellSession?.cwd ?? this.root; }
+  get shellContext(): string { return `${this.shellSession?.id ?? "one-shot"}\0${this.shellSession?.revision ?? 0}\0${this.shellCwd}`; }
+
+  close(): void { this.shellSession?.close(); }
+
+  /** Compatibility entrypoint; a console-owned executor shares its session. */
+  async runUserCommand(command: string, options: RunOptions = {}): Promise<ToolResult> {
+    if (this.mode === "pc") return this.pcToolRefusal();
+    if (this.shellSession) return this.runUserShell(command, options);
+    this.armCommitGuard();
+    const before = this.ownership!.before();
+    try { return await this.run(command, options); }
+    finally { this.ownership!.after(before, "user"); }
+  }
+
+  /** Explicit user submissions are not model tools and confer no permission. */
+  async runUserShell(command: string, options: RunOptions = {}): Promise<ToolResult> {
+    if (this.mode === "pc" || !this.shellSession) return { output: "[no console shell session]", exitCode: 1 };
+    if (!command.trim()) return { output: "[empty shell command]", exitCode: 1 };
+    try {
+      return await this.shellSession.withSlot(async () => {
+        this.armCommitGuard();
+        if (this.reconcileCheckout()) return { output: "[checkout changed; shell state reset; re-submit command]", exitCode: 1 };
+        const before = this.ownership!.before();
+        try {
+          const result = await this.shellSession!.runInSlot(command, "user", options);
+          this.ownership!.after(before, "user");
+          if (this.reconcileCheckout()) result.output += "\n[checkout changed; shell cwd/environment/functions reset; queued commands discarded]";
+          return result;
+        }
+        catch (error) { this.ownership!.after(before, "user"); throw error; }
+      });
+    } catch (error) { return { output: `[shell rejected: ${String(error)}]`, exitCode: 1 }; }
   }
 
   /**
@@ -111,8 +159,31 @@ export class ToolExecutor {
   private armCommitGuard(): GitCommitGuard {
     if (!this.committer) {
       this.committer = new GitCommitGuard(new SpawnGitRunner(this.root));
+      this.ownership = new WorkspaceOwnership(this.root);
+      this.checkout = this.checkoutIdentity();
     }
     return this.committer;
+  }
+
+  private checkoutIdentity(): string {
+    const runner = new SpawnGitRunner(this.root);
+    const dir = runner.run(["rev-parse", "--absolute-git-dir"]);
+    const branch = runner.run(["symbolic-ref", "--quiet", "HEAD"]);
+    // Detached checkout changes also discard state; ordinary attached commits
+    // preserve the session. An unusable repository is still a shell workspace.
+    const head = branch.ok ? branch.stdout : runner.run(["rev-parse", "HEAD"]).stdout;
+    return dir.ok ? dir.stdout + "\0" + head : "no-git";
+  }
+
+  private reconcileCheckout(): boolean {
+    if (!this.shellSession || this.checkout === undefined) return false;
+    const current = this.checkoutIdentity();
+    if (current === this.checkout) return false;
+    this.shellSession.reset();
+    this.committer = null;
+    this.ownership = null;
+    this.checkout = undefined;
+    return true;
   }
 
   private pcToolRefusal(): ToolResult {
@@ -146,11 +217,6 @@ export class ToolExecutor {
     return abs;
   }
 
-  /** Explicit console input only; never changes model permissions or custody. */
-  runUserCommand(command: string, options: RunOptions = {}): Promise<ToolResult> {
-    return this.run(command, options);
-  }
-
   /**
    * Run a shell command in the workspace; capture combined output, capped.
    *
@@ -169,6 +235,7 @@ export class ToolExecutor {
    * operator, one is the clock, and the caller needs to tell them apart.
    */
   private run(command: string, options: RunOptions = {}): Promise<ToolResult> {
+    if (this.shellSession) return this.shellSession.runInSlot(command, "model", options);
     const timeoutMs = options.timeoutMs ?? 900_000;
     const signal = options.signal;
     const onWindows = process.platform === "win32";
@@ -279,6 +346,16 @@ export class ToolExecutor {
    * pointer rather than silently no-op'ing.
    */
   execute(name: string, rawArgs: unknown): ToolResult {
+    if (this.shellSession?.busy) return { output: "[local execution busy — call executeAsync to queue]", exitCode: 1 };
+    if (this.reconcileCheckout()) return { output: "[checkout changed; shell state reset; request fresh approval]", exitCode: 1 };
+    const mutation = (name === "write_file" || name === "git_commit") && validateToolCall(name, rawArgs).ok && this.mode === "coding";
+    if (mutation) this.armCommitGuard();
+    const before = mutation ? this.ownership!.before() : null;
+    try { return this.executeSync(name, rawArgs); }
+    finally { if (before) this.ownership!.after(before, "model"); }
+  }
+
+  private executeSync(name: string, rawArgs: unknown): ToolResult {
     if (this.mode === "pc") return this.pcToolRefusal();
     const validation = validateToolCall(name, rawArgs);
     if (!validation.ok) {
@@ -323,6 +400,27 @@ export class ToolExecutor {
    * output the brain reads as ordinary tool output).
    */
   async executeAsync(name: string, rawArgs: unknown, options: RunOptions = {}): Promise<ToolResult> {
+    const dispatch = async (): Promise<ToolResult> => {
+      if (options.signal?.aborted) return { output: "[aborted before start]", exitCode: 130 };
+      if (this.reconcileCheckout()) return { output: "[checkout changed; shell state reset; request fresh approval]", exitCode: 1 };
+      if (options.expectedShellContext !== undefined && options.expectedShellContext !== this.shellContext) {
+        return { output: "[tool refused: shell session/cwd changed after approval; request fresh approval]", exitCode: 1 };
+      }
+      const mutation = MUTATING_TOOLS.has(name) && validateToolCall(name, rawArgs).ok && this.mode === "coding";
+      if (mutation) this.armCommitGuard();
+      const before = mutation ? this.ownership!.before() : null;
+      try {
+        const result = await this.dispatchAsync(name, rawArgs, options);
+        if (before) this.ownership!.after(before, "model");
+        if (this.reconcileCheckout()) result.output += "\n[checkout changed; shell cwd/environment/functions reset; queued commands discarded]";
+        return result;
+      } catch (error) { if (before) this.ownership!.after(before, "model"); throw error; }
+    };
+    try { return await (this.shellSession ? this.shellSession.withSlot(dispatch) : dispatch()); }
+    catch (error) { return { output: `[tool ${name} error: ${String(error)}]`, exitCode: 1 }; }
+  }
+
+  private async dispatchAsync(name: string, rawArgs: unknown, options: RunOptions): Promise<ToolResult> {
     if (this.mode === "pc") return this.pcToolRefusal();
     const validation = validateToolCall(name, rawArgs);
     if (!validation.ok) {
@@ -356,7 +454,7 @@ export class ToolExecutor {
       const text = await webFetch(String(args["url"] ?? ""), MAX_OUTPUT);
       return { output: capHeadTail(text, MAX_OUTPUT), exitCode: 0 };
     }
-    return this.execute(name, args);
+    return this.executeSync(name, args);
   }
 
   private readFile(path: string): ToolResult {
@@ -440,7 +538,7 @@ export class ToolExecutor {
   }
 
   private gitCommit(message: string): ToolResult {
-    return this.armCommitGuard().commit(message);
+    return this.armCommitGuard().commit(message, this.ownership!.candidates());
   }
 }
 

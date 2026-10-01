@@ -17,6 +17,7 @@ import { OllamaBrain } from "../core/brain_ollama.js";
 import { resolveHostedModel, resolveLocalModelSelection } from "../core/local_ollama.js";
 import { CloudBrain } from "../core/brain_cloud.js";
 import { ToolExecutor } from "../core/tool_executor.js";
+import { ShellSession } from "../core/shell_session.js";
 import { stdioPrompt } from "../ui/interact.js";
 import { defaultRunner, type Runner } from "../core/worktree.js";
 import { isCurrentWorkspace } from "../core/workspace_scope.js";
@@ -670,7 +671,9 @@ export async function cmdCode(
       // silently accept the one-way chat transport, whose tools run
       // server-side against the cloud vault (brain_cloud CloudBrainOptions).
       new CloudBrain(ctx.api, undefined, { requireLocalAuthority: true });
-  const exec = new ToolExecutor(cwd, opts.testCmd);
+  // A worktree gets its own fresh shell; launch-project state never follows it.
+  const shellSession = process.platform === "linux" || process.platform === "darwin" ? new ShellSession(cwd) : undefined;
+  const exec = new ToolExecutor(cwd, opts.testCmd, { mode: "coding", ...(shellSession ? { shellSession } : {}) });
   // Scope the session manifest to the ORIGINAL launch directory (ctx.flags.cwd),
   // not the possibly-substituted `cwd` (an auto-created worktree, or a manually
   // redirected directory from the repo gate) — resume always compares against
@@ -788,7 +791,7 @@ export async function cmdCode(
     }
     const detail = String(args["command"] ?? args["path"] ?? args["message"] ?? "");
     const shown = detail.length > 200 ? detail.slice(0, 197) + "…" : detail;
-    return ctx.confirm(`\n⚠ ${name}${shown ? ` ${shown}` : ""} — run it? [y/N] `);
+    return ctx.confirm(`\n⚠ ${name}${shown ? ` ${shown}` : ""} [cwd: ${sanitizeServerText(exec.shellCwd)}; file root: ${sanitizeServerText(cwd)}] — run it? [y/N] `);
   };
 
   // Presentation fork — TTY (and not --json/--quiet) gets the live animated
@@ -1051,6 +1054,7 @@ export async function cmdCode(
   if (outcome.state === "cancelled") return signalExitCode ?? 130;
   return verifyExit > 0 ? verifyExit : outcome.exitCode;
   } finally {
+    exec.close();
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigterm);
   }
@@ -1202,6 +1206,7 @@ export async function hostLoop(
             modelOutput.reset();
             break;
           }
+          const approvalContext = exec.shellContext;
           const approved = gate
             ? await boundedCodeOperation(
                 () => gate({ name: ev.name, args: ev.args }),
@@ -1214,6 +1219,7 @@ export async function hostLoop(
             : true;
           const remaining = remainingCodeProgressMs(timeoutMs, lastMeaningfulAt);
           const runOptions: RunOptions = {
+            expectedShellContext: approvalContext,
             ...(signal ? { signal } : {}),
             ...(timeoutMs > 0 ? { timeoutMs: Math.max(1, remaining) } : {}),
           };

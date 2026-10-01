@@ -30,7 +30,7 @@ class FakeRunner implements GitRunner {
   }
 }
 
-test("repository probes are bounded to the workspace and take no optional locks", () => {
+test("dirty probe stays workspace-bounded, staged probe covers the whole commit index, and neither takes locks", () => {
   // `git status` reports the whole repository regardless of where it runs, and
   // `--untracked-files=all` enumerates every untracked path individually. A
   // workspace that is a small directory inside a large repository therefore
@@ -39,10 +39,11 @@ test("repository probes are bounded to the workspace and take no optional locks"
   // pathspec bounds it to the subtree the guard can actually stage from.
   assert.ok(STATUS_PROBE.includes("--"), "status probe must carry a pathspec");
   assert.deepEqual(STATUS_PROBE.slice(-2), ["--", "."]);
-  assert.deepEqual(STAGED_PROBE.slice(-2), ["--", "."]);
+  assert.equal(STAGED_PROBE.includes("--"), false, "a commit also consumes staged paths outside a nested workspace");
   // Reading a repository must not write to it: without this, merely starting
   // the agent rewrites the user's index.
   assert.ok(GIT_GLOBAL_ARGS.includes("--no-optional-locks"));
+  assert.ok(GIT_GLOBAL_ARGS.includes("--literal-pathspecs"));
   assert.ok(GIT_GLOBAL_ARGS.includes("core.literalPathspecs=true"));
 });
 
