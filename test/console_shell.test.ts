@@ -59,6 +59,21 @@ test("line console shell commands make zero model calls, keep output out of prom
   }
 });
 
+test("explicit shell-result sharing keeps a final summary after a long Unicode command", { skip: !supported }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "aether-console-share-"));
+  const shell = new ConsoleShell(root, () => {}, true);
+  try {
+    await shell.run(`printf 'FINAL SUMMARY: 1 failed'; # ${"😀".repeat(4000)}`);
+    const shared = shell.share();
+    assert.equal(shared.kind, "chat");
+    if (shared.kind !== "chat") return;
+    assert.ok(shared.text.endsWith("FINAL SUMMARY: 1 failed"));
+    assert.match(shared.text, /UTF-8 bytes elided/);
+    assert.doesNotMatch(shared.text, /\ufffd/);
+    assert.ok(Buffer.byteLength(shared.text) <= 8192 + 80);
+  } finally { shell.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 class ShellBrain implements Brain {
   result: ToolResult | null = null;
   async *run(_task: TaskCommand): AsyncGenerator<BrainEvent> {
