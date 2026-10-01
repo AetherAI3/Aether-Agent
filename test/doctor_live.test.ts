@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import type { McpClient } from "../src/core/mcp.js";
 import { LocalMcpStore } from "../src/core/mcp_store.js";
 import type { RunResult, Runner } from "../src/core/worktree.js";
 import type { HealthCheck, HealthReport } from "../src/core/health.js";
+import { renderHealthReport } from "../src/core/health.js";
 import {
   CLOUD_DOCTOR_CONTRACT_COMMIT,
   CLOUD_DOCTOR_PROBE_CONTENT,
@@ -549,15 +551,36 @@ test("signed out means the agent loop is unproven, not failed", async () => {
   );
 });
 
+test("live doctor reports registry and DM gates separately in human and JSON output", async () => {
+  const { ctx } = fakeCtx();
+  (ctx.api as unknown as { getJson: (path: string) => Promise<unknown> }).getJson = async (path) => {
+    if (path.endsWith("/readiness")) return {
+      schema_version: "aether.terminal-readiness/1", required_contract: "aether.managed-agents/1.1",
+      registry: { state: "enabled", code: "READY", reason: "Ready", remedy: "None" },
+      dm: { state: "disabled", code: "DM_DISABLED", reason: "Disabled", remedy: "Enable DMs" },
+      model_uvt: { state: "disabled", code: "ADMISSION_DISABLED", reason: "Disabled", remedy: "Enable admission" },
+    };
+    return { models: [{ id: "sonnet", kind: "model", available: true }], tier: "pro", default: "sonnet" };
+  };
+  const report = await liveReport(ctx, liveOpts());
+  assert.equal(find(report, "online.terminal.registry").verified.state, "yes");
+  assert.equal(find(report, "online.terminal.dm").verified.evidence, "DM_DISABLED");
+  assert.equal(find(report, "online.terminal.model_uvt").verified.evidence, "ADMISSION_DISABLED");
+  assert.match(JSON.stringify(report), /DM_DISABLED/);
+  assert.match(renderHealthReport(report), /DM_DISABLED/);
+});
+
 test("a live run leaves no doctor sandbox behind", async () => {
-  const before = readdirSync(tmpdir()).filter((n) => n.startsWith("aether-doctor-")).length;
+  const runId = randomUUID();
+  const prefix = `aether-doctor-${runId.slice(0, 8)}-`;
+  const before = readdirSync(tmpdir()).filter((n) => n.startsWith(prefix));
   const { ctx } = fakeCtx({
     created: { session_id: "sess-0198f4c2", purpose: "doctor", billable: false },
     frames: CLOUD_DOCTOR_FRAMES,
   });
-  await liveReport(ctx, liveOpts());
-  const after = readdirSync(tmpdir()).filter((n) => n.startsWith("aether-doctor-")).length;
-  assert.ok(after <= before, "the doctor sandbox was not cleaned up");
+  await liveReport(ctx, liveOpts({ runId }));
+  const after = readdirSync(tmpdir()).filter((n) => n.startsWith(prefix));
+  assert.deepEqual(after, before, "the doctor sandbox was not cleaned up");
 });
 
 test("a live report never leaks the stored credential", async () => {

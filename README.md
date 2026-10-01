@@ -122,6 +122,10 @@ and [operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md).
 After signing in, use `aether agent list` to see the same managed agents as
 Aether Online. `aether agent chat` opens the one-column picker; select an agent
 to read and send messages in its existing Online conversation.
+The list and show commands report fresh account registry, DM, and model/UVT
+readiness separately. `aether doctor --live` checks the same read-only Cloud
+contract; plain `aether doctor` leaves account readiness unverified. A saved DM
+is reported as admitted only when Cloud's message admission says so.
 
 ```bash
 aether agent list
