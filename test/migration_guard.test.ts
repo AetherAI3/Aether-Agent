@@ -34,11 +34,11 @@ test("TypeScript 7 toolchain and Node 24 contract stay pinned", () => {
   assert.equal(pkg.scripts?.["typecheck"], "tsc -p tsconfig.json --noEmit");
 });
 
-test("published package restricts runtime dependencies to the bundled ATS source and excludes compiled tests", () => {
+test("published package restricts runtime dependencies to reviewed bundled ATS and QR packages", () => {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageManifest;
-  assert.deepEqual(pkg.workspaces, ["packages/ats-skills"]);
-  assert.deepEqual(pkg.dependencies, { "aether-ats-skills": "0.2.0" });
-  assert.deepEqual(pkg.bundledDependencies, ["aether-ats-skills"]);
+  assert.deepEqual(pkg.workspaces, ["packages/ats-skills", "packages/qrcode-terminal"]);
+  assert.deepEqual(pkg.dependencies, { "aether-ats-skills": "0.2.0", "aether-rc-qr": "0.1.0" });
+  assert.deepEqual(pkg.bundledDependencies, ["aether-ats-skills", "aether-rc-qr"]);
   assert.deepEqual(pkg.optionalDependencies ?? {}, {});
   assert.deepEqual(pkg.peerDependencies ?? {}, {});
   assert.ok(pkg.files?.includes("dist/src"));

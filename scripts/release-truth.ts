@@ -226,6 +226,16 @@ export function packageClaimsFromFiles(files: Readonly<Record<string, string>>):
           ].map((path) => `packages/ats-skills/${path}`) });
           continue;
         }
+        if (item === "packages/qrcode-terminal") {
+          claims.push({ id: "package.json#files:packages/qrcode-terminal", source: "package.json#files", requiredPaths: [
+            "package.json", "LICENSE", "NOTICE.md", "src/index.d.ts", "lib/main.js", "vendor/QRCode/LICENSE",
+            "vendor/QRCode/index.js", "vendor/QRCode/QR8bitByte.js", "vendor/QRCode/QRBitBuffer.js",
+            "vendor/QRCode/QRErrorCorrectLevel.js", "vendor/QRCode/QRMaskPattern.js", "vendor/QRCode/QRMath.js",
+            "vendor/QRCode/QRMode.js", "vendor/QRCode/QRPolynomial.js", "vendor/QRCode/QRRSBlock.js",
+            "vendor/QRCode/QRUtil.js",
+          ].map((path) => `packages/qrcode-terminal/${path}`) });
+          continue;
+        }
         if (typeof item === "string" && item !== "dist/src" && !item.endsWith("/")) {
           claims.push({ id: `package.json#files:${item}`, source: "package.json#files", requiredPaths: [item.replace(/^\.\//, "")] });
         }

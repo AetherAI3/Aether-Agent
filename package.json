@@ -29,10 +29,12 @@
     "NOTICE.md",
     "ATS_ACCEPTABLE_USE_POLICY.md",
     "packages/ats-skills",
+    "packages/qrcode-terminal",
     "packages/ats-skills-source.json"
   ],
   "workspaces": [
-    "packages/ats-skills"
+    "packages/ats-skills",
+    "packages/qrcode-terminal"
   ],
   "engines": {
     "node": ">=24"
@@ -85,9 +87,11 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "aether-ats-skills": "0.2.0"
+    "aether-ats-skills": "0.2.0",
+    "aether-rc-qr": "0.1.0"
   },
   "bundledDependencies": [
-    "aether-ats-skills"
+    "aether-ats-skills",
+    "aether-rc-qr"
   ]
 }
