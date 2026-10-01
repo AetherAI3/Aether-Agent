@@ -60,13 +60,13 @@ test("the compiled output for every new module exists after a build", () => {
 
 // ── bounded dependencies, and nothing reaching outside them ────────────────
 
-test("the package declares only the bundled ATS runtime dependency", () => {
-  // Deliberate, and load-bearing for the supply-chain story: the sole runtime
-  // dependency is source-controlled and bundled with the published package.
-  // RC and browser modules themselves remain builtin-or-relative only below.
-  assert.deepEqual(pkg.workspaces ?? [], ["packages/ats-skills"]);
+test("the package declares only reviewed bundled ATS and QR dependencies", () => {
+  // Both runtime dependencies are exact and bundled in the published package.
+  // The QR import is restricted to the observer invitation renderer below.
+  assert.deepEqual(pkg.workspaces ?? [], ["packages/ats-skills", "packages/qrcode-terminal"]);
   assert.deepEqual(pkg.dependencies ?? {}, {
     "aether-ats-skills": "0.2.0",
+    "aether-rc-qr": "0.1.0",
   });
 });
 
@@ -98,8 +98,9 @@ test("no RC or browser module imports a package that is not declared", () => {
 
   for (const file of files) {
     for (const specifier of importsOf(readFileSync(file, "utf8"))) {
-      const ok = specifier.startsWith("node:") || specifier.startsWith(".");
-      assert.ok(ok, `${file} imports ${specifier}, which is neither a builtin nor relative`);
+      const ok = specifier.startsWith("node:") || specifier.startsWith(".") ||
+        (file.endsWith("observer_handoff.ts") && specifier === "aether-rc-qr");
+      assert.ok(ok, `${file} imports ${specifier}, which is not a reviewed dependency`);
     }
   }
 });

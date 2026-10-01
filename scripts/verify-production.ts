@@ -57,12 +57,20 @@ const REQUIRED_PUBLIC_ASSETS = ["assets/aether-agent-hero.png"] as const;
 const ALLOWED_PUBLIC_ASSETS = new Set<string>(REQUIRED_PUBLIC_ASSETS);
 
 const MAX_UNPACKED_BYTES = 5_000_000;
-const ATS_DEPENDENCY = { "aether-ats-skills": "0.2.0" };
+const RUNTIME_DEPENDENCIES = { "aether-ats-skills": "0.2.0", "aether-rc-qr": "0.1.0" };
 const ATS_SOURCE_FILES = ["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"];
+const QR_SOURCE_FILES = [
+  "package.json", "LICENSE", "NOTICE.md", "src/index.d.ts", "lib/main.js", "vendor/QRCode/LICENSE",
+  "vendor/QRCode/index.js", "vendor/QRCode/QR8bitByte.js", "vendor/QRCode/QRBitBuffer.js",
+  "vendor/QRCode/QRErrorCorrectLevel.js", "vendor/QRCode/QRMaskPattern.js", "vendor/QRCode/QRMath.js",
+  "vendor/QRCode/QRMode.js", "vendor/QRCode/QRPolynomial.js", "vendor/QRCode/QRRSBlock.js",
+  "vendor/QRCode/QRUtil.js",
+];
 const RUNTIME_PACKAGES = {
   "aether-ats-skills": { version: "0.2.0", entry: "src/index.js" },
   "aether-browser": { version: "0.2.2", entry: "src/index.js" },
   "aether-context": { version: "0.3.1", entry: "bin/aether-context.js" },
+  "aether-rc-qr": { version: "0.1.0", entry: "lib/main.js" },
 } as const;
 
 function exactRecord(value: unknown, expected: Record<string, string>): boolean {
@@ -72,7 +80,7 @@ function exactRecord(value: unknown, expected: Record<string, string>): boolean 
 }
 
 function runtimeRoots(name: keyof typeof RUNTIME_PACKAGES): string[] {
-  return name === "aether-ats-skills" ? [`node_modules/${name}/`]
+  return name === "aether-ats-skills" || name === "aether-rc-qr" ? [`node_modules/${name}/`]
     : [`node_modules/${name}/`, `node_modules/aether-ats-skills/node_modules/${name}/`];
 }
 
@@ -85,12 +93,16 @@ function allowedRuntimePath(path: string): boolean {
     const relative = path.slice("packages/ats-skills/".length);
     return ATS_SOURCE_FILES.includes(relative) || strategyAsset(relative);
   }
+  if (path.startsWith("packages/qrcode-terminal/")) {
+    return QR_SOURCE_FILES.includes(path.slice("packages/qrcode-terminal/".length));
+  }
   for (const name of Object.keys(RUNTIME_PACKAGES) as (keyof typeof RUNTIME_PACKAGES)[]) {
     for (const prefix of runtimeRoots(name)) {
       if (!path.startsWith(prefix)) continue;
       const relative = path.slice(prefix.length);
       if (/^(?:package\.json|README\.md|LICENSE(?:\.md)?)$/.test(relative)) return true;
       if (name === "aether-ats-skills" && relative === "SETTINGS.md") return true;
+      if (name === "aether-rc-qr") return QR_SOURCE_FILES.includes(relative);
       if (name === "aether-context") return relative === "bin/aether-context.js";
       if (/^src\/[A-Za-z0-9_-]+\.(?:js|d\.ts)$/.test(relative)) return true;
       if (name === "aether-ats-skills" && (["python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"].includes(relative) || strategyAsset(relative))) return true;
@@ -123,9 +135,10 @@ export function validateManifest(manifest: PackageManifest, expectedTag?: string
     errors.push("package repository.url must match the trusted publisher repository");
   }
 
-  if (!exactRecord(manifest.dependencies, ATS_DEPENDENCY)) errors.push("runtime dependencies must be exactly the reviewed bundled aether-ats-skills source package");
-  if (!Array.isArray(manifest.bundledDependencies) || manifest.bundledDependencies.length !== 1 || manifest.bundledDependencies[0] !== "aether-ats-skills") {
-    errors.push("bundledDependencies must contain exactly aether-ats-skills");
+  if (!exactRecord(manifest.dependencies, RUNTIME_DEPENDENCIES)) errors.push("runtime dependencies must be exactly the reviewed ATS and QR packages");
+  if (!Array.isArray(manifest.bundledDependencies) || manifest.bundledDependencies.length !== 2 ||
+      manifest.bundledDependencies[0] !== "aether-ats-skills" || manifest.bundledDependencies[1] !== "aether-rc-qr") {
+    errors.push("bundledDependencies must contain exactly aether-ats-skills and aether-rc-qr");
   }
   for (const kind of ["optionalDependencies", "peerDependencies"] as const) {
     if (manifest[kind] !== undefined && !exactRecord(manifest[kind], {})) errors.push(`${kind} must not widen the reviewed runtime dependency graph`);
@@ -133,7 +146,9 @@ export function validateManifest(manifest: PackageManifest, expectedTag?: string
 
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   if (!files.includes("dist/src")) errors.push("package files must include dist/src");
-  for (const path of ["packages/ats-skills", "packages/ats-skills-source.json"]) if (!files.includes(path)) errors.push(`package files must include reviewed ATS source ${path}`);
+  for (const path of ["packages/ats-skills", "packages/ats-skills-source.json", "packages/qrcode-terminal"]) {
+    if (!files.includes(path)) errors.push(`package files must include reviewed source ${path}`);
+  }
   for (const path of REQUIRED_GENERATED_DOCS) if (!files.includes(path)) errors.push(`package files must include generated public document ${path}`);
   for (const path of REQUIRED_PUBLIC_ASSETS) if (!files.includes(path)) errors.push(`package files must include public asset ${path}`);
   if (files.includes("dist") || files.some((value) => typeof value === "string" && value.includes("test"))) {
@@ -191,6 +206,11 @@ export function validatePack(report: PackReport, manifest: PackageManifest): str
   }
   for (const path of ["packages/ats-skills-source.json", ...ATS_SOURCE_FILES.map((file) => `packages/ats-skills/${file}`)]) {
     if (!paths.has(path)) errors.push(`package is missing reviewed ATS source ${path}`);
+  }
+  for (const file of QR_SOURCE_FILES) {
+    for (const prefix of ["packages/qrcode-terminal/", "node_modules/aether-rc-qr/"]) {
+      if (!paths.has(`${prefix}${file}`)) errors.push(`package is missing reviewed QR source ${prefix}${file}`);
+    }
   }
   if (report.unpackedSize > MAX_UNPACKED_BYTES) {
     errors.push(`unpacked package exceeds ${MAX_UNPACKED_BYTES} bytes`);
