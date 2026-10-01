@@ -114,6 +114,9 @@ export async function handleSlash(
   const arg = parts.slice(1).join(" ");
 
   switch (cmd) {
+    case "shell-reset":
+      out.write("/shell-reset belongs to the local coding console; submit it there to discard shell state.\n");
+      break;
     case "exit":
     case "quit":
       return { exit: true };
