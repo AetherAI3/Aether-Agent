@@ -11,16 +11,24 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   RC_NO_CONTROL_LINE,
+  cmdRc,
   renderExposure,
   renderStatus,
+  renderStatusJson,
   type RcStatusView,
 } from "../src/commands/rc.js";
 import { COMMAND_MANIFEST_SOURCE } from "../src/commands/command_manifest_data.js";
 import { assertViewerManifest, tokenize } from "../src/core/rc/viewer_profile.js";
 import { producerCoverage } from "../src/core/rc/producers.js";
+import { payloadDigest } from "../src/core/rc/receipts.js";
+import type { AppContext } from "../src/core/context.js";
+import type { CommandFlags } from "../src/core/command_dispatch.js";
 
 const TOKEN_SHAPED = "aek_" + "Z".repeat(32);
 
@@ -213,6 +221,100 @@ test("status renders with nothing running and invents no session", () => {
   );
   assert.match(text, /state\s+off/);
   assert.match(text, /session\s+—/);
+});
+
+test("machine status binds session and device without replaying an invitation", () => {
+  const data = JSON.parse(renderStatusJson(view())) as Record<string, unknown>;
+  assert.equal(data["schema"], "aether.cli.rc/1");
+  assert.equal(data["session_id"], "rs_" + "e".repeat(32));
+  assert.equal(data["device_id"], "dev-1");
+  assert.equal(data["host_state"], "active");
+  assert.deepEqual(data["viewer_capabilities"], ["observe"]);
+  assert.equal(data["observer"], null);
+  assert.ok(!renderStatusJson(view()).includes("rsgt_"));
+});
+
+test("machine handoff carries a one-time link only in the requested start or link result", () => {
+  const url = "https://app.aethersystems.net/rc#grant=rsgt_canary";
+  const data = JSON.parse(renderStatusJson(view(), {
+    url,
+    expires_at: "2026-09-07T00:05:00.000Z",
+  })) as { observer: { url: string; expires_at: string } };
+  assert.equal(data.observer.url, url);
+  assert.equal(data.observer.expires_at, "2026-09-07T00:05:00.000Z");
+});
+
+test("json start and status bind one RC host without replaying the one-time link", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aether-rc-json-"));
+  const priorConfig = process.env["AETHER_CONFIG_DIR"];
+  process.env["AETHER_CONFIG_DIR"] = directory;
+  const output: string[] = [];
+  const sessionId = "rs_" + "1".repeat(32);
+  const grantToken = "rsgt_" + "a".repeat(48);
+  const api = {
+    async postJson(path: string, body: unknown): Promise<unknown> {
+      if (path === "/remote/sessions") return { session_id: sessionId, state: "pending_host" };
+      if (path.endsWith("/host/attach")) return { session_id: sessionId, state: "live" };
+      if (path.endsWith("/host/events")) {
+        const events = (body as { events: Array<{ host_event_id: string; payload: Record<string, unknown> }> }).events;
+        return { session_id: sessionId, receipts: events.map((event, index) => ({
+          host_event_id: event.host_event_id, seq: index + 1, payload_digest: payloadDigest(event.payload),
+        })) };
+      }
+      if (path.endsWith("/grants")) return {
+        session_id: sessionId, purpose: "observe", device_id: (body as { device_id: string }).device_id,
+        token: grantToken, expires_at: new Date(Date.now() + 300_000).toISOString(),
+      };
+      if (path.endsWith("/revoke")) return {};
+      throw new Error(`unexpected route ${path}`);
+    },
+  };
+  const ctx = { api, flags: { cwd: directory, json: true } } as unknown as AppContext;
+  const flags = { str: () => undefined } as unknown as CommandFlags;
+  const overrides = {
+    cwd: directory,
+    enrollment: () => ({ device_id: "dev-1", display_name: "test" }),
+    repo: () => ({ repo: "fixture", branch: "main", base_commit: "0".repeat(40), dirty_file_count: 0 }),
+    connector: () => null,
+    browser: () => null,
+    out: (value: string) => output.push(value),
+    err: (value: string) => { throw new Error(value); },
+    isTTY: false,
+    columns: undefined,
+  };
+  try {
+    assert.equal(await cmdRc(ctx, ["start"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const started = JSON.parse(output.pop()!) as { session_id: string; device_id: string; observer: { url: string } };
+    assert.equal(started.session_id, sessionId);
+    assert.equal(started.device_id, "dev-1");
+    assert.equal(new URL(started.observer.url).search, "");
+    assert.ok(started.observer.url.includes(`#grant=${grantToken}`));
+
+    assert.equal(await cmdRc(ctx, ["status"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const status = JSON.parse(output[0]!) as { session_id: string; observer: unknown };
+    assert.equal(status.session_id, sessionId);
+    assert.equal(status.observer, null);
+    assert.ok(!output[0]!.includes(grantToken));
+
+    output.length = 0;
+    assert.equal(await cmdRc(ctx, ["link"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const linked = JSON.parse(output.pop()!) as { session_id: string; observer: { url: string } };
+    assert.equal(linked.session_id, sessionId);
+    assert.ok(linked.observer.url.includes(grantToken));
+
+    assert.equal(await cmdRc(ctx, ["off"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const closed = JSON.parse(output[0]!) as { session_id: string | null; host_state: string };
+    assert.equal(closed.session_id, null);
+    assert.equal(closed.host_state, "off");
+  } finally {
+    if (priorConfig === undefined) delete process.env["AETHER_CONFIG_DIR"];
+    else process.env["AETHER_CONFIG_DIR"] = priorConfig;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 // ── 3. Nothing rendered can carry a credential ──────────────────────────────

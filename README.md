@@ -326,6 +326,9 @@ Cloud viewer journey is still unproven, and the old draft
 evidence for current `main`. The source-candidate contract is:
 
 - Starting a session prints a link and a QR code.
+- `aether --json rc start|link|status` gives local integrations one structured
+  session/device identity. Only `start` and `link` return the short-lived
+  observer link; `status` never replays it. Integrations must not log that link.
 - Your phone or browser **watches** the run. It never gets tool authority.
 - One command shows what is exposed; another revokes it.
 - Outbound TLS only — no inbound listener on your machine.

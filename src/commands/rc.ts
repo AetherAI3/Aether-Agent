@@ -35,6 +35,7 @@ import { detectBrowserRuntime } from "../core/browser_runtime.js";
 import { McpClient } from "../core/mcp.js";
 import { loadEnrollmentMetadata } from "../core/device_runtime/identity.js";
 import {
+  RC_HOST_SCHEMA,
   RcError,
   attachHost,
   flushOutbox,
@@ -253,25 +254,49 @@ export interface RcCommandDeps {
   err: (text: string) => void;
   isTTY: boolean;
   columns: number | undefined;
+  json: boolean;
+}
+
+interface RcObserverInvitation {
+  url: string;
+  expires_at: string;
+}
+
+/** Stable machine handoff for a caller that must bind its own browser session. */
+export function renderStatusJson(view: RcStatusView, invitation: RcObserverInvitation | null = null): string {
+  return JSON.stringify({
+    schema: RC_HOST_SCHEMA,
+    host_state: view.running ? view.state : "off",
+    session_id: view.session_id,
+    device_id: view.device_id,
+    project_ref: view.project_ref,
+    revoke_pending: view.revoke_pending,
+    outbox_pending: view.pending,
+    acked_seq: view.acked,
+    viewer_capabilities: VIEWER_CAPABILITIES,
+    observer: invitation,
+  }) + "\n";
 }
 
 async function printObserverLink(
   deps: RcCommandDeps,
   hostDeps: RcHostDeps,
   sessionId: string,
-): Promise<boolean> {
+): Promise<RcObserverInvitation | null> {
   try {
     const grant = await mintObserverGrant(hostDeps, sessionId, newObserverId());
     const link = observerLink(grant);
-    deps.out(`\nObserver link (expires ${grant.expires_at}):\n${link}\n`);
-    const qr = deps.isTTY ? observerQr(link, deps.columns) : null;
-    if (qr) deps.out(`${qr}\n`);
-    else deps.out("Open the link directly; this terminal cannot fit a scannable QR.\n");
-    return true;
+    if (!deps.json) {
+      deps.out(`\nObserver link (expires ${grant.expires_at}):\n${link}\n`);
+      const qr = deps.isTTY ? observerQr(link, deps.columns) : null;
+      if (qr) deps.out(`${qr}\n`);
+      else deps.out("Open the link directly; this terminal cannot fit a scannable QR.\n");
+    }
+    return { url: link, expires_at: grant.expires_at };
   } catch (error) {
     const code = error instanceof RcError ? error.code : "RC_BROKER_UNREACHABLE";
     deps.err(`${code}: RC is running, but an observer link could not be minted. Retry with \`aether rc link\`.\n`);
-    return false;
+    return null;
   }
 }
 
@@ -283,7 +308,7 @@ function viewOf(record: OutboxRecord, deps: RcCommandDeps, observers: number | n
     browser: browser?.code ?? null,
     connector: deps.connector(),
     last_receipt: null,
-    device_id: enrolled?.device_id ?? null,
+    device_id: record.session_id ? record.device_id : enrolled?.device_id ?? null,
     device_name: enrolled?.display_name ?? null,
     session_id: record.session_id || null,
     project_ref: record.project_ref || null,
@@ -365,9 +390,10 @@ async function start(
     saveOutbox(hostDeps.outboxPath, record);
     const flushed = await flushOutbox(hostDeps, record);
 
-    deps.out(renderStatus(viewOf(record, deps, null)));
-    if (flushed.ok) await printObserverLink(deps, hostDeps, session.session_id);
-    else deps.err(`${flushed.code}: RC is running, but its opening events are pending. Retry with \`aether rc link\`.\n`);
+    if (!deps.json) deps.out(renderStatus(viewOf(record, deps, null)));
+    const invitation = flushed.ok ? await printObserverLink(deps, hostDeps, session.session_id) : null;
+    if (!flushed.ok) deps.err(`${flushed.code}: RC is running, but its opening events are pending. Retry with \`aether rc link\`.\n`);
+    if (deps.json) deps.out(renderStatusJson(viewOf(record, deps, null), invitation));
     return EXIT_OK;
   } catch (error) {
     if (error instanceof RcError) {
@@ -403,6 +429,7 @@ export async function cmdRc(
     err: overrides.err ?? ((text): void => void process.stderr.write(text)),
     isTTY: overrides.isTTY ?? Boolean(process.stdout.isTTY),
     columns: overrides.columns ?? process.stdout.columns,
+    json: overrides.json ?? ctx.flags.json,
   };
 
   // Connector state is read once, best-effort, before anything renders. A
@@ -428,7 +455,7 @@ export async function cmdRc(
       return start(deps, hostDeps, record, flags.str("name"), projectRef);
 
     case "status":
-      deps.out(renderStatus(viewOf(record, deps, null)));
+      deps.out(deps.json ? renderStatusJson(viewOf(record, deps, null)) : renderStatus(viewOf(record, deps, null)));
       return EXIT_OK;
 
     case "link":
@@ -442,7 +469,9 @@ export async function cmdRc(
           deps.err(`${flushed.code}: RC opening events are still pending. Retry \`aether rc link\` after reconnecting.\n`);
           return EXIT_OPERATIONAL;
         }
-        return await printObserverLink(deps, hostDeps, record.session_id) ? EXIT_OK : EXIT_OPERATIONAL;
+        const invitation = await printObserverLink(deps, hostDeps, record.session_id);
+        if (deps.json && invitation) deps.out(renderStatusJson(viewOf(record, deps, null), invitation));
+        return invitation ? EXIT_OK : EXIT_OPERATIONAL;
       }
 
     case "exposure":
@@ -467,7 +496,8 @@ export async function cmdRc(
         deps.err(`${outcome.code}: ${outcome.detail}\n`);
         return EXIT_OPERATIONAL;
       }
-      deps.out("RC is off. The session, its grants and its streams are revoked.\n");
+      deps.out(deps.json ? renderStatusJson(viewOf(record, deps, null)) :
+        "RC is off. The session, its grants and its streams are revoked.\n");
       return EXIT_OK;
     }
 
