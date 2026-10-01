@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:87b77f7b88832826ba0dbeca6bb2ad30c038c96a14b96a88207cc205d757005a -->
+<!-- manifest-digest: sha256:3117ca87f984fc9b292b70bfb29242858b728a203a1aee77439a88fb39110451 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -480,6 +480,30 @@ Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.
 discard local shell cwd/environment/functions; never replay
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.shell-reset`
+
+#### `/terminal`
+
+start an explicit Linux interactive terminal \(Python 3 and TTY required\)
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal`
+
+#### `/terminal-attach`
+
+reattach the current local terminal
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-attach`
+
+#### `/terminal-stop`
+
+stop the current local terminal and its process group
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-stop`
+
+#### `/terminal-status`
+
+show the current local terminal ID and state
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-status`
 
 #### `/queue <task>`
 
