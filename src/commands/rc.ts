@@ -5,6 +5,7 @@
 //   aether rc exposure                the same, framed as "what can be seen"
 //   aether rc viewers                 who is currently observing
 //   aether rc off                     stop, locally first and server-final
+//   aether rc link                    mint a fresh one-time observer invitation
 //
 // THIS COMMAND CANNOT CONTROL ANYTHING
 //
@@ -37,6 +38,7 @@ import {
   RcError,
   attachHost,
   flushOutbox,
+  mintObserverGrant,
   registerSession,
   revokeHost,
   type RcHostDeps,
@@ -55,6 +57,7 @@ import {
   sessionOpenedEvent,
 } from "../core/rc/producers.js";
 import { VIEWER_CAPABILITIES } from "../core/rc/viewer_profile.js";
+import { newObserverId, observerLink, observerQr } from "../core/rc/observer_handoff.js";
 
 /** Printed verbatim on every human-facing RC surface. Spec §7. */
 export const RC_NO_CONTROL_LINE = "No terminal or tool control";
@@ -248,6 +251,28 @@ export interface RcCommandDeps {
   repo: (cwd: string) => RepoSummary;
   out: (text: string) => void;
   err: (text: string) => void;
+  isTTY: boolean;
+  columns: number | undefined;
+}
+
+async function printObserverLink(
+  deps: RcCommandDeps,
+  hostDeps: RcHostDeps,
+  sessionId: string,
+): Promise<boolean> {
+  try {
+    const grant = await mintObserverGrant(hostDeps, sessionId, newObserverId());
+    const link = observerLink(grant);
+    deps.out(`\nObserver link (expires ${grant.expires_at}):\n${link}\n`);
+    const qr = deps.isTTY ? observerQr(link, deps.columns) : null;
+    if (qr) deps.out(`${qr}\n`);
+    else deps.out("Open the link directly; this terminal cannot fit a scannable QR.\n");
+    return true;
+  } catch (error) {
+    const code = error instanceof RcError ? error.code : "RC_BROKER_UNREACHABLE";
+    deps.err(`${code}: RC is running, but an observer link could not be minted. Retry with \`aether rc link\`.\n`);
+    return false;
+  }
 }
 
 function viewOf(record: OutboxRecord, deps: RcCommandDeps, observers: number | null): RcStatusView {
@@ -338,9 +363,11 @@ async function start(
       // Diff observation is optional; session opening still succeeds.
     }
     saveOutbox(hostDeps.outboxPath, record);
-    await flushOutbox(hostDeps, record);
+    const flushed = await flushOutbox(hostDeps, record);
 
     deps.out(renderStatus(viewOf(record, deps, null)));
+    if (flushed.ok) await printObserverLink(deps, hostDeps, session.session_id);
+    else deps.err(`${flushed.code}: RC is running, but its opening events are pending. Retry with \`aether rc link\`.\n`);
     return EXIT_OK;
   } catch (error) {
     if (error instanceof RcError) {
@@ -374,6 +401,8 @@ export async function cmdRc(
     repo: overrides.repo ?? repoSummary,
     out: overrides.out ?? ((text): void => void process.stdout.write(text)),
     err: overrides.err ?? ((text): void => void process.stderr.write(text)),
+    isTTY: overrides.isTTY ?? Boolean(process.stdout.isTTY),
+    columns: overrides.columns ?? process.stdout.columns,
   };
 
   // Connector state is read once, best-effort, before anything renders. A
@@ -401,6 +430,20 @@ export async function cmdRc(
     case "status":
       deps.out(renderStatus(viewOf(record, deps, null)));
       return EXIT_OK;
+
+    case "link":
+      if (!record.session_id || record.revoke_pending) {
+        deps.err("RC is not running for this project\n");
+        return EXIT_OPERATIONAL;
+      }
+      {
+        const flushed = await flushOutbox(hostDeps, record);
+        if (!flushed.ok) {
+          deps.err(`${flushed.code}: RC opening events are still pending. Retry \`aether rc link\` after reconnecting.\n`);
+          return EXIT_OPERATIONAL;
+        }
+        return await printObserverLink(deps, hostDeps, record.session_id) ? EXIT_OK : EXIT_OPERATIONAL;
+      }
 
     case "exposure":
       deps.out(renderExposure(viewOf(record, deps, null)));
@@ -430,7 +473,7 @@ export async function cmdRc(
 
     default:
       deps.err(
-        `unknown subcommand: ${String(argv[0])}\nusage: aether rc <start|status|exposure|viewers|off>\n`,
+        `unknown subcommand: ${String(argv[0])}\nusage: aether rc <start|link|status|exposure|viewers|off>\n`,
       );
       return EXIT_USAGE;
   }

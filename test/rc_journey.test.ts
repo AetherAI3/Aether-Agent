@@ -11,11 +11,9 @@
 //   registers and attaches -> events observable -> heartbeat -> restart
 //   restores durable state -> `rc off` revokes and stays off
 //
-// ON OPENING A VIEWER PAGE: the Cloud exposes no viewer PAGE route. There is an
-// SSE stream at /remote/sessions/{id}/observe and a one-shot grant mint, and
-// nothing that renders. So the browser's job in this journey is the connector
-// authorization and nothing else. Inventing a viewer URL to make the browser
-// integration look complete is exactly what this lane was told not to do.
+// The viewer handoff is covered separately by rc_observer_handoff.test.ts. This
+// journey only opens a browser for connector authorization; it never treats
+// that launch as proof that a remote viewer reached the live session.
 //
 // No socket is opened, no browser is launched, no request leaves the process.
 

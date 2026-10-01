@@ -114,6 +114,39 @@ export interface RemoteSessionSummary {
   expires_at?: string;
 }
 
+/** One-time observer invitation. Never put this response in the durable outbox. */
+export interface ObserverGrant {
+  session_id: string;
+  purpose: "observe";
+  device_id: string;
+  token: string;
+  expires_at: string;
+}
+
+export async function mintObserverGrant(
+  deps: RcHostDeps,
+  sessionId: string,
+  observerId: string,
+): Promise<ObserverGrant> {
+  try {
+    const grant = await deps.api.postJson<ObserverGrant>(
+      `/remote/sessions/${encodeURIComponent(sessionId)}/grants`,
+      { purpose: "observe", device_id: observerId },
+      undefined,
+      REQUEST_TIMEOUT_MS,
+    );
+    if (grant.session_id !== sessionId || grant.purpose !== "observe" ||
+        grant.device_id !== observerId || !/^rsgt_[0-9a-f]{48}$/.test(grant.token) ||
+        !Number.isFinite(Date.parse(grant.expires_at)) || Date.parse(grant.expires_at) <= Date.now()) {
+      throw new RcError("RC_RECEIPTS_UNPROVEN", "the broker returned an invalid observer grant");
+    }
+    return grant;
+  } catch (error) {
+    if (error instanceof RcError) throw error;
+    rethrow(error);
+  }
+}
+
 export type FlushOutcome =
   | { ok: true; sent: number; cursor: number }
   | { ok: false; code: RcCode; detail: string };

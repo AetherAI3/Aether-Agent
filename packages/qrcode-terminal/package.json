@@ -1,0 +1,9 @@
+{
+  "name": "aether-rc-qr",
+  "version": "0.1.0",
+  "description": "Reviewed terminal QR renderer for Aether RC observer invitations",
+  "main": "lib/main.js",
+  "types": "src/index.d.ts",
+  "license": "Apache-2.0 AND MIT",
+  "files": ["lib", "vendor", "src/index.d.ts", "LICENSE", "NOTICE.md"]
+}

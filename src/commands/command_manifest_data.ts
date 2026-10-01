@@ -705,7 +705,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "deprecatedAliases": [],
     "args": "<subcommand>",
     "summary": "publish a viewer-only observation stream for this session",
-    "detailedHelp": "aether rc <subcommand>\npublish a viewer-only observation stream for this session\n\nstart [--name <name>]  begin publishing\nstatus                 what is being published\nexposure               what an observer can see\nviewers                who is observing\noff                    end publishing and revoke the session\n\nObservation only. Run `aether rc exposure` for the full disclosure.",
+    "detailedHelp": "aether rc <subcommand>\npublish a viewer-only observation stream for this session\n\nstart [--name <name>]  begin publishing and make an observer link\nlink                   make a fresh one-time observer link\nstatus                 what is being published\nexposure               what an observer can see\nviewers                who is observing\noff                    end publishing and revoke the session\n\nObservation only. Run `aether rc exposure` for the full disclosure.",
     "section": "Account",
     "hidden": true,
     "permissionClass": "account",
