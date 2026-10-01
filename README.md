@@ -61,19 +61,21 @@ an explicit user command locally, then type a normal question to return to chat.
 Shell submissions make zero model API calls and consume no model UVT. Leading
 whitespace is allowed; `!` alone shows usage. Type `\!literal` to send text
 starting with `!` to the model. Quotes, pipelines and shell operators use
-`/bin/sh` on Linux/macOS and `cmd.exe` on Windows.
+persistent `/bin/bash --noprofile --norc` on Linux/macOS. Windows retains
+fresh noninteractive `cmd.exe` commands without persistent cwd or exports.
 
 The console displays user origin, checkout directory, running/completed/cancelled
 state, streamed output and exit code. Commands wait for the current model/tool
 turn or slash operation before running; Ctrl+C cancels the shell process tree,
 drops queued follow-ups and restores the composer, preserving any type-ahead
 draft. A nonzero exit still returns to chat. Shell commands cannot read console
-stdin. This first version runs each command in a fresh shell in the selected
-checkout: `!cd` and environment changes do not persist. PTY support and persistent
-shell state are separate follow-ups.
+stdin. Linux/macOS user commands and approved local-model shell tools share
+cwd, exports and functions. File tools remain workspace-root relative.
+`/shell-reset` starts fresh after exit/crash/cancellation; commands are never
+replayed. Checkout switches discard shell state. PTY support remains separate.
 
-TTY bracketed multiline shell paste is refused without execution; normal
-multiline chat paste remains chat. In line mode (pipes/CI), each newline is a
+TTY bracketed multiline shell paste runs as one command; normal multiline
+chat paste remains chat. In line mode (pipes/CI), each newline is a
 separate submission, processed sequentially. Submit one shell command per line.
 `/queue !command` is also supported in the TTY coding console.
 
@@ -81,7 +83,9 @@ Shell commands and output are session-local and excluded from saved chat history
 and automatic hosted prompts. `/shell-result` explicitly sends at most 8 KiB
 of the most recent result to the next model turn, labelled as untrusted data.
 Review output for secrets before sharing it. `AETHER_NO_HISTORY=1` continues to
-disable chat-history persistence. Explicit user execution never grants future
+disable chat-history persistence. See [local shell sessions](docs/LOCAL_SHELL_SESSION.md)
+for recovery, workspace boundaries and automatic commit ownership.
+Explicit user execution never grants future
 model execution authority; model tool validation and permission gates still
 apply. Online managed-agent DMs are a separate surface and do not run `!commands`.
 

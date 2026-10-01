@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:667c4bba57664e7a670b601c9590de69a02b9a8c5008d3f9e3daf471bc5bc058 -->
+<!-- manifest-digest: sha256:87b77f7b88832826ba0dbeca6bb2ad30c038c96a14b96a88207cc205d757005a -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -474,6 +474,12 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 explicitly share the last local shell result with chat \(bounded\)
 
 Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.shell-result`
+
+#### `/shell-reset`
+
+discard local shell cwd/environment/functions; never replay
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.shell-reset`
 
 #### `/queue <task>`
 

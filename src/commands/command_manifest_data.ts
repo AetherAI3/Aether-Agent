@@ -4039,6 +4039,45 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:shell-reset",
+    "surface": "slash",
+    "name": "shell-reset",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "discard local shell cwd/environment/functions; never replay",
+    "detailedHelp": "/shell-reset\ndiscard local shell cwd/environment/functions; never replay",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.shell-reset",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:shell-reset",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "shell-reset",
+      "usage": "/shell-reset",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
     "key": "slash:queue",
     "surface": "slash",
     "name": "queue",

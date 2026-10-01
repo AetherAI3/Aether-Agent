@@ -17,8 +17,9 @@ for (const [raw, expected] of [
   assert.deepEqual(classifyConsoleInput(raw), expected);
 });
 
-test("empty ! and multiline shell paste are refused", () => {
-  for (const raw of ["!", " !  ", "!pwd\nls", "!pwd\rwhoami", "!pwd\n", "\n!pwd"]) {
+test("empty ! is refused and multiline shell paste is one preserved command", () => {
+  assert.deepEqual(classifyConsoleInput("!pwd\nls"), { kind: "shell", command: "pwd\nls" });
+  for (const raw of ["!", " !  "]) {
     assert.equal(classifyConsoleInput(raw).kind, "error");
   }
 });
@@ -43,11 +44,12 @@ test("user execution uses the chosen checkout, quotes/pipelines, bounded explici
     setTimeout(() => controller.abort(), 50);
     assert.equal(await pending, "aborted");
     assert.ok(output.includes("cancelled | exit 130"));
+    await shell.run({ kind: "reset-shell" });
     await shell.run(`"${process.execPath}" -e "process.stdout.write('x'.repeat(20000))"`, new AbortController().signal);
     const shared = shell.share();
     assert.equal(shared.kind, "chat");
     if (shared.kind === "chat") assert.ok(shared.text.length < 8300);
-  } finally { rmSync(cwd, { recursive: true, force: true }); }
+  } finally { shell.close(); rmSync(cwd, { recursive: true, force: true }); }
 });
 
 /** Exercise the real submit handlers in isolated processes, with a synthetic
@@ -91,7 +93,7 @@ for (const tty of [false, true]) {
       await delay(20);
       submit('!echo QUEUED_SHELL');
       await delay(250);
-      submit('!exit 7');
+      submit(${JSON.stringify(`!"${process.execPath}" -e "process.exit(7)"`)});
       await delay(100);
       submit('!');
       await delay(50);
@@ -99,9 +101,11 @@ for (const tty of [false, true]) {
       submit(${JSON.stringify(`!"${process.execPath}" -e "setTimeout(()=>{},30000)"`)});
       await delay(100);
       ${tty ? "input.write('\\\\!literal'); input.write('\\x03');" : "process.emit('SIGINT');"}
-      await delay(150);
+      await delay(350);
       ${tty ? "input.write(enter);" : "submit('\\\\!literal');"}
       await delay(200);
+      submit('/shell-reset');
+      await delay(100);
       submit('!echo SHARE_ALLOWED');
       await delay(100);
       sharing = true;
@@ -129,7 +133,7 @@ for (const tty of [false, true]) {
       assert.ok(result.output.includes("VERIFIED_CALLS_3"), result.output);
       assert.ok(result.output.includes("completed | exit 7"), result.output);
       assert.ok(result.output.includes("cancelled | exit 130"), result.output);
-      if (tty) assert.ok(result.output.includes("Multiline shell paste refused"), result.output);
+      if (tty) assert.ok(result.output.includes("MULTILINE_BAD") && result.output.includes("SECOND_BAD"), result.output);
       assert.ok(result.output.includes("usage: !<command>"), result.output);
       assert.ok(result.output.indexOf("model response") < result.output.indexOf("running] !echo QUEUED_SHELL"), result.output);
       assert.ok(result.output.includes(cwd), result.output);
@@ -142,6 +146,6 @@ test("console submit routing remains before history/rewrite and uses typed queue
   const code = readFileSync("src/commands/chat.ts", "utf8");
   assert.ok(code.includes("const queue: ConsoleInput[]"));
   assert.ok(code.indexOf("classifyConsoleInput(queuePrefix") < code.indexOf("const commit ="));
-  assert.ok(code.includes("result = await runInput(next)"));
+  assert.ok(code.includes("result = await runQueuedTurn(next)"));
   assert.ok(code.includes("appendHistory(line.trim(), historyPath(ctx.flags.cwd))"), "save the original escaped input, not its model prompt");
 });
