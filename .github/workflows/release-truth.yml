@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   watchdog:
-    # Registry verification may use a trusted VPS; npm publishing stays in release.yml.
+    # Registry verification may use a trusted VPS; package publication stays in release.yml.
     runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
