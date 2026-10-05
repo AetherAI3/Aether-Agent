@@ -83,6 +83,8 @@ export class StatusRenderer {
   private beats = 0; // heartbeat pulses so far (the live "tracking each beat")
   private startedMs: number;
   private ticker: ReturnType<typeof setInterval> | null = null;
+  private promptPaused = false;
+  private ended = false;
   private cleanupBound = false;
   private onExit: (() => void) | null = null;
   private onSigint: (() => void) | null = null;
@@ -98,6 +100,7 @@ export class StatusRenderer {
   }
 
   start(): void {
+    this.ended = false;
     this.startedMs = this.now(); // begin the thinking timer (even off-TTY: harmless)
     if (!this.tty) return;
     try { this.sink.write(HIDE); } catch { /* terminal already gone */ }
@@ -105,6 +108,21 @@ export class StatusRenderer {
     this.ticker = setInterval(() => this.repaint(), 1000);
     if (typeof this.ticker.unref === "function") this.ticker.unref();
     this.repaint();
+  }
+
+  /** Keep a human confirmation visible while animation and heartbeat timers tick. */
+  pauseForPrompt(): () => void {
+    if (!this.tty || this.ended) return () => {};
+    this.promptPaused = true;
+    try { this.sink.write(CLR_LINE + SHOW); } catch { /* terminal already gone */ }
+    let resumed = false;
+    return () => {
+      if (resumed || this.ended) return;
+      resumed = true;
+      this.promptPaused = false;
+      try { this.sink.write(HIDE); } catch { /* terminal already gone */ }
+      this.repaint();
+    };
   }
 
   /** A meaningful scrollback line (tool call, checkpoint, monologue, result). */
@@ -203,6 +221,8 @@ export class StatusRenderer {
 
   /** Tear down: clear the pinned line, restore the cursor. */
   end(): void {
+    this.ended = true;
+    this.promptPaused = false;
     if (this.ticker) {
       clearInterval(this.ticker);
       this.ticker = null;
@@ -213,7 +233,7 @@ export class StatusRenderer {
   }
 
   private repaint(): void {
-    if (!this.tty) return;
+    if (!this.tty || this.promptPaused || this.ended) return;
     try { this.sink.write(CLR_LINE + this.composeLine()); } catch { /* terminal already gone */ }
   }
 

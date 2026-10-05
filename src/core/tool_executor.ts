@@ -15,6 +15,7 @@ import { StringDecoder } from "node:string_decoder";
 import { BoundedOutput } from "./bounded_output.js";
 import type { ToolName } from "./brain_protocol.js";
 import { validateToolCall } from "./tool_registry.js";
+import { toolCallBinding } from "./tool_approval.js";
 import { GitCommitGuard, SpawnGitRunner } from "./git_commit_guard.js";
 import { webFetch, webSearch } from "./web.js";
 import { ShellSession } from "./shell_session.js";
@@ -53,6 +54,8 @@ export interface RunOptions {
   onOutput?: (chunk: string) => void;
   /** Bind a model approval to the exact session and cwd displayed by the host. */
   expectedShellContext?: string;
+  /** The validated tool name and arguments shown at approval time. */
+  expectedToolCall?: string;
 }
 
 export interface ToolResult {
@@ -135,6 +138,7 @@ export class ToolExecutor {
   /** Directory shown to the user; never substitutes for the file-tool root. */
   get shellCwd(): string { return this.shellSession?.cwd ?? this.root; }
   get shellContext(): string { return `${this.shellSession?.id ?? "one-shot"}\0${this.shellSession?.revision ?? 0}\0${this.shellCwd}`; }
+  get configuredTestCommand(): string { return this.testCmd; }
 
   close(): void { this.shellSession?.close(); }
 
@@ -443,6 +447,9 @@ export class ToolExecutor {
       if (this.reconcileCheckout()) return { output: "[checkout changed; shell state reset; request fresh approval]", exitCode: 1 };
       if (options.expectedShellContext !== undefined && options.expectedShellContext !== this.shellContext) {
         return { output: "[tool refused: shell session/cwd changed after approval; request fresh approval]", exitCode: 1 };
+      }
+      if (options.expectedToolCall !== undefined && options.expectedToolCall !== toolCallBinding(name, rawArgs)) {
+        return { output: "[tool refused: arguments changed after approval; request fresh approval]", exitCode: 1 };
       }
       const mutation = MUTATING_TOOLS.has(name) && validateToolCall(name, rawArgs).ok && this.mode === "coding";
       if (mutation) this.armCommitGuard();
