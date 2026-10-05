@@ -510,14 +510,19 @@ export class ToolExecutor {
       let digest: string | null = null;
       if (size <= FILE_PATCH_MAX_BYTES) {
         const hash = createHash("sha256");
+        const utf8 = new TextDecoder("utf-8", { fatal: true });
         const block = Buffer.allocUnsafe(64 * 1024);
         for (let at = 0; at < size;) {
           const n = readSync(fd, block, 0, Math.min(block.length, size - at), at);
           if (n === 0) throw new Error("file changed during read");
           if (block.subarray(0, n).includes(0)) return { output: `[binary file: ${path}]`, exitCode: 1 };
+          try { utf8.decode(block.subarray(0, n), { stream: true }); }
+          catch { return { output: `[invalid UTF-8 file: ${path}]`, exitCode: 1 }; }
           hash.update(block.subarray(0, n));
           at += n;
         }
+        try { utf8.decode(); }
+        catch { return { output: `[invalid UTF-8 file: ${path}]`, exitCode: 1 }; }
         digest = hash.digest("hex");
       }
       let result: ToolResult;
@@ -572,7 +577,12 @@ export class ToolExecutor {
             const byte = block[i]!;
             if (byte === 0) return { output: `[binary file: ${path}]`, exitCode: 1 };
             if (byte === 10) { if (finishLine(true)) { stopped = true; break; } }
-            else if (line >= start && current.length <= 6000) current.push(byte);
+            else if (line >= start) {
+              current.push(byte);
+              if (selectedBytes + current.length + (selectedLines ? 1 : 0) > 6000) {
+                next = line; tooLong = selectedLines === 0; stopped = true; break;
+              }
+            }
           }
           at += n;
         }

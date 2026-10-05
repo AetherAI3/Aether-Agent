@@ -75,6 +75,10 @@ test("reads stay bounded for sparse files and report continuations at UTF-8 and 
   assert.equal(read(exec, "empty.txt", { start_line: 1 })["content"], "");
   writeFileSync(join(dir, "binary.dat"), Buffer.from([65, 0, 66]));
   assert.match(exec.execute("read_file", { path: "binary.dat" }).output, /binary file/);
+  writeFileSync(join(dir, "invalid.txt"), Buffer.from([65, 0xff, 66]));
+  assert.match(exec.execute("read_file", { path: "invalid.txt" }).output, /invalid UTF-8/);
+  writeFileSync(join(dir, "long.txt"), "a".repeat(7000) + "\nnext");
+  assert.match(String(read(exec, "long.txt", { start_line: 1 })["note"]), /line exceeds 6000 bytes/);
   assert.notEqual(exec.execute("read_file", { path: "missing.txt" }).exitCode, 0);
 }));
 
