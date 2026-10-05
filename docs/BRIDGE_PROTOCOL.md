@@ -67,6 +67,8 @@ on decode and back on encode.
   binary content, or invalid UTF-8 is rejected. UTF-8 validation covers the
   returned range; unread bytes are not certified as text. A tail range can have
   `truncated=false` while `complete=false` because earlier bytes were omitted.
+  Hosted dev sessions include `read_file_ranges: true` on create when the host
+  supports these arguments; older hosts retain the path-only model schema.
 - Tool output is bounded. Shell and test output includes `[exit N]`; file reads
   include explicit range and continuation metadata. The host sends the same
   result shape to local and cloud brains.
