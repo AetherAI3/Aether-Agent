@@ -599,6 +599,9 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
   process.removeListener("SIGTERM", onSignal);
   process.stdin.removeListener("data", onStdin);
   process.stdin.removeListener("end", onStdinEnd);
+  // Attaching a data listener resumes stdin. Leave no flowing stream behind
+  // after the headless session, or an embedded runner can remain alive.
+  if (!process.stdin.isTTY) process.stdin.pause();
   return exitCode;
 }
 
