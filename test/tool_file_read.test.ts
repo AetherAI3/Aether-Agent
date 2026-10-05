@@ -63,6 +63,8 @@ test("read_file rejects binary controls and malformed UTF-8", () => workspace((d
   writeFileSync(join(dir, "incomplete.bin"), Buffer.from([65, 0xf0, 0x9f]));
   assert.match(executor.execute("read_file", { path: "nul.bin" }).output, /binary file/);
   assert.match(executor.execute("read_file", { path: "control.bin" }).output, /binary file/);
+  assert.match(executor.execute("read_file", { path: "control.bin", start_line: 1 }).output, /binary file/);
+  assert.match(executor.execute("read_file", { path: "control.bin", offset: 2 }).output, /binary file/);
   assert.match(executor.execute("read_file", { path: "invalid.bin" }).output, /invalid UTF-8/);
   assert.match(executor.execute("read_file", { path: "incomplete.bin" }).output, /invalid UTF-8/);
 }));

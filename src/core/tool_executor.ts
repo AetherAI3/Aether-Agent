@@ -523,7 +523,9 @@ export class ToolExecutor {
         for (let at = 0; at < size;) {
           const n = readSync(fd, block, 0, Math.min(block.length, size - at), at);
           if (n === 0) throw new Error("file changed during read");
-          if (block.subarray(0, n).includes(0)) return { output: `[binary file: ${path}]`, exitCode: 1 };
+          if (block.subarray(0, n).some((byte) => byte === 0 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 127)) {
+            return { output: `[binary file: ${path}]`, exitCode: 1 };
+          }
           try { utf8.decode(block.subarray(0, n), { stream: true }); }
           catch { return { output: `[invalid UTF-8 file: ${path}]`, exitCode: 1 }; }
           hash.update(block.subarray(0, n));
@@ -608,7 +610,9 @@ export class ToolExecutor {
           if (n === 0) throw new Error("file changed during read");
           for (let i = 0; i < n; i++) {
             const byte = block[i]!;
-            if (byte === 0) return { output: `[binary file: ${path}]`, exitCode: 1 };
+            if (byte === 0 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 127) {
+              return { output: `[binary file: ${path}]`, exitCode: 1 };
+            }
             if (byte === 10) { if (finishLine(true)) { stopped = true; break; } }
             else if (line >= start) {
               current.push(byte);
