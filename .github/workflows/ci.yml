@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   # A stalled hosted run must not hold the fallback runner queue.
-  group: ${{ github.workflow }}-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && '-self-hosted' || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -31,7 +31,7 @@ jobs:
             self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-windows-ci"]'
     # Only trusted same-repository PRs or opted-in main pushes may use fallback
     # runners. Windows additionally requires its own explicit opt-in.
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && (matrix.os == 'ubuntu-latest' || vars.AETHER_CI_SELF_HOSTED_WINDOWS == '1') && fromJSON(matrix.self_hosted_runner) || matrix.os }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && (matrix.os == 'ubuntu-latest' || vars.AETHER_CI_SELF_HOSTED_WINDOWS == '1') && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -153,7 +153,7 @@ jobs:
             self_hosted_runner: '["self-hosted","Linux","X64","aether-agent-ci"]'
           - os: windows-latest
             self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-windows-ci"]'
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && (matrix.os == 'ubuntu-latest' || vars.AETHER_CI_SELF_HOSTED_WINDOWS == '1') && fromJSON(matrix.self_hosted_runner) || matrix.os }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && (matrix.os == 'ubuntu-latest' || vars.AETHER_CI_SELF_HOSTED_WINDOWS == '1') && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -260,7 +260,7 @@ jobs:
         shell: bash
 
   supply-chain:
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -400,7 +400,7 @@ jobs:
 
   pypi-launcher:
     name: PyPI launcher
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - name: Checkout repository
