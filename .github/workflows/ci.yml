@@ -14,7 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A stalled hosted run must not hold the fallback runner queue.
+  group: ${{ github.workflow }}-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:
