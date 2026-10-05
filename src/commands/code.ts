@@ -46,7 +46,7 @@ import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js"
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
 import { ModelOutputBudget } from "../core/model_output_budget.js";
-import { prepareToolApproval, requestToolApproval } from "../core/tool_approval.js";
+import { prepareToolApproval, requestToolApproval, terminalSafeReview } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SessionContext } from "../core/session_resume.js";
 import type { SkillSessionProvenance } from "../core/skills/skill_session.js";
@@ -778,11 +778,19 @@ export async function cmdCode(
   // non-TTY (CI/pipe) an un-pre-approved call FAILS CLOSED rather than running
   // unattended. `--yes` or `permissionMode: skip` opt out.
   const gate: ToolGate = async ({ name, args }) => {
+    let patchPreview: string | undefined;
+    if (name === "patch_file") {
+      const preview = exec.previewPatch(args);
+      process.stderr.write(terminalSafeReview(preview.output) + "\n");
+      if (preview.exitCode !== 0) return true; // executor returns the same conflict to the brain
+      patchPreview = preview.output;
+    }
     return requestToolApproval({
       name, args: args as Record<string, string | number>,
       permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
       yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
       shellCwd: exec.shellCwd, fileRoot: cwd, confirm: confirmToolReview,
+      patchPreview,
       onDeny: () => process.stderr.write(
         `✗ blocked ${name} — permission mode "${ctx.cfg.permissionMode}" needs confirmation but there is no TTY.\n` +
           `  re-run with --yes, or set a less strict mode: aether config set permissionMode skip\n`,

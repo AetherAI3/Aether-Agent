@@ -28,7 +28,7 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const PACK_ID = /^[a-z][a-z0-9._-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const GIT_OBJECT_ID = /^[a-f0-9]{40,64}$/;
-const TOOL_NAMES = new Set(["read_file", "write_file", "repo_search"]);
+const TOOL_NAMES = new Set(["read_file", "list_directory", "patch_file", "write_file", "repo_search"]);
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "timed_out", "authority_expired"]);
 const CHECKPOINT_STATES = new Set([
   "running", "paused", "completed", "failed", "cancelled", "timed_out", "authority_expired",

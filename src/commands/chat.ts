@@ -58,7 +58,7 @@ import { ConsoleShell, classifyConsoleInput, type ConsoleInput } from "./console
 import { HostRenderer } from "../ui/host_render.js";
 import type { TaskCommand } from "../core/brain.js";
 import { getRegistry } from "../core/context_registry.js";
-import { prepareToolApproval, requestToolApproval } from "../core/tool_approval.js";
+import { prepareToolApproval, requestToolApproval, terminalSafeReview } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SkillRefusal } from "../core/skills/skill_errors.js";
 import { renderHud, timerLive } from "../core/hud.js";
@@ -771,6 +771,7 @@ export interface LocalTurnDeps {
   brain?: Brain;
   exec?: {
     executeAsync(name: string, args: Record<string, unknown>, options?: RunOptions): Promise<ToolResult>;
+    previewPatch?(args: Record<string, unknown>): ToolResult;
     readonly shellCwd?: string;
     readonly shellContext?: string;
     readonly configuredTestCommand?: string;
@@ -811,11 +812,19 @@ export async function runLocalTurn(
     onPaint: deps.onPulsePaint,
   });
   const approveTool = async (name: string, args: Record<string, unknown>): Promise<boolean> => {
+    let patchPreview: string | undefined;
+    if (name === "patch_file" && exec.previewPatch) {
+      const preview = exec.previewPatch(args);
+      process.stderr.write(terminalSafeReview(preview.output) + "\n");
+      if (preview.exitCode !== 0) return true;
+      patchPreview = preview.output;
+    }
     return requestToolApproval({
       name, args: args as Record<string, string | number>,
       permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
       yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
       shellCwd: exec.shellCwd ?? cwd, fileRoot: cwd, confirm: ctx.confirm,
+      patchPreview,
       onDeny: () => process.stderr.write(`blocked ${name}: confirmation required; use --yes or permissionMode skip\n`),
     });
   };

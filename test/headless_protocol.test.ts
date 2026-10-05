@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -287,6 +288,35 @@ test("undeclared tools and permission escalation are denied with receipts", asyn
   assert.match(brain.results[2]!.result.output, /outside workspace/);
   assert.match(brain.results[3]!.result.output, /network-disabled/);
   assert.equal(lines.filter((line) => JSON.parse(line).type === "terminal").length, 1);
+  assert.deepEqual(validateHeadlessFrames(lines), []);
+});
+
+test("headless patch emits the exact preview before permission and mutation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aether-headless-patch-"));
+  const target = join(root, "space é.txt");
+  writeFileSync(target, "before\nafter\n");
+  const expected_sha256 = createHash("sha256").update(readFileSync(target)).digest("hex");
+  const brain = new FakeBrain([
+    { type: "tool_call", id: "patch-1", name: "patch_file", args: {
+      path: "space é.txt", expected_sha256, old_text: "before", new_text: "updated",
+    } },
+    successfulEvent,
+  ]);
+  const lines: string[] = [];
+  const code = await runHeadlessExec(context(root), "patch", {
+    permission: "workspace-write", allowedTools: ["patch_file"], capabilityPacks: [],
+    timeoutMs: 5000, verifyCommand: successfulVerify, brain,
+    writeLine: (line) => lines.push(line.trimEnd()),
+  });
+  assert.equal(code, 0);
+  const frames = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+  const previewIndex = frames.findIndex((frame) => frame["type"] === "patch_preview");
+  const permissionIndex = frames.findIndex((frame) => frame["type"] === "permission_decision");
+  const receiptIndex = frames.findIndex((frame) => frame["type"] === "tool_receipt");
+  assert.ok(previewIndex >= 0 && previewIndex < permissionIndex && permissionIndex < receiptIndex);
+  assert.match(String(frames[previewIndex]?.["output"]), /- "before"\n\+ "updated"/);
+  assert.equal(frames[permissionIndex]?.["approved"], true);
+  assert.equal(readFileSync(target, "utf8"), "updated\nafter\n");
   assert.deepEqual(validateHeadlessFrames(lines), []);
 });
 

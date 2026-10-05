@@ -47,6 +47,14 @@ test("user and model commands share real cwd, exports/functions; file tools stay
     assert.equal((await w.exec.executeAsync("write_file", { path: "root.txt", content: "root" })).exitCode, 0);
     assert.equal(readFileSync(join(w.root, "root.txt"), "utf8"), "root");
     assert.equal(existsSync(join(w.root, "subdir", "root.txt")), false);
+    const ranged = await w.exec.executeAsync("read_file", { path: "root.txt", max_bytes: 4 });
+    const digest = JSON.parse(ranged.output).sha256 as string;
+    assert.equal((await w.exec.executeAsync("patch_file", {
+      path: "root.txt", expected_sha256: digest, old_text: "root", new_text: "ROOT",
+    })).exitCode, 0);
+    assert.equal(readFileSync(join(w.root, "root.txt"), "utf8"), "ROOT");
+    const listing = await w.exec.executeAsync("list_directory", { path: "." });
+    assert.ok(JSON.parse(listing.output).entries.some((entry: { path: string }) => entry.path === "./root.txt"));
     assert.equal((await w.exec.executeAsync("read_file", { path: "../outside" })).exitCode, 1);
     assert.deepEqual(w.events.filter(e => e.state === "running").map(e => e.origin), ["user", "model"]);
     assert.equal(new Set(w.events.map(e => e.sessionId)).size, 1);
