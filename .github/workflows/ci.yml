@@ -238,6 +238,7 @@ jobs:
               const tree = JSON.parse(raw);
               const agent = (tree.dependencies || {})['aether-agents'] || {};
               const ats = (agent.dependencies || {})['aether-ats-skills'] || {};
+              const qr = (agent.dependencies || {})['aether-rc-qr'] || {};
               const exactKeys = (value, expected) => {
                 const actual = Object.keys(value || {}).sort();
                 if (JSON.stringify(actual) !== JSON.stringify([...expected].sort())) {
@@ -246,8 +247,10 @@ jobs:
               };
               if (agent.version !== '0.4.0') throw new Error('unexpected aether-agents version');
               if (ats.version !== '0.2.0') throw new Error('unexpected aether-ats-skills version');
-              exactKeys(agent.dependencies, ['aether-ats-skills']);
+              if (qr.version !== '0.1.0') throw new Error('unexpected aether-rc-qr version');
+              exactKeys(agent.dependencies, ['aether-ats-skills', 'aether-rc-qr']);
               exactKeys(ats.dependencies, ['aether-browser', 'aether-context']);
+              exactKeys(qr.dependencies, []);
               if (ats.dependencies['aether-browser'].version !== '0.2.2') throw new Error('unexpected aether-browser version');
               if (ats.dependencies['aether-context'].version !== '0.3.1') throw new Error('unexpected aether-context version');
               console.log('clean-install dependency graph verified');
