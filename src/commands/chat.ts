@@ -58,7 +58,7 @@ import { ConsoleShell, classifyConsoleInput, type ConsoleInput } from "./console
 import { HostRenderer } from "../ui/host_render.js";
 import type { TaskCommand } from "../core/brain.js";
 import { getRegistry } from "../core/context_registry.js";
-import { decideGate } from "../core/autonomy.js";
+import { prepareToolApproval, requestToolApproval } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SkillRefusal } from "../core/skills/skill_errors.js";
 import { renderHud, timerLive } from "../core/hud.js";
@@ -773,6 +773,7 @@ export interface LocalTurnDeps {
     executeAsync(name: string, args: Record<string, unknown>, options?: RunOptions): Promise<ToolResult>;
     readonly shellCwd?: string;
     readonly shellContext?: string;
+    readonly configuredTestCommand?: string;
     close?(): void;
   };
   /** Reuse runTurn's lifecycle; direct callers get a fresh one automatically. */
@@ -810,18 +811,13 @@ export async function runLocalTurn(
     onPaint: deps.onPulsePaint,
   });
   const approveTool = async (name: string, args: Record<string, unknown>): Promise<boolean> => {
-    const outcome = decideGate(name, ctx.cfg.permissionMode, ctx.cfg.autoApply, {
-      yes: ctx.flags.yes,
-      isTty: Boolean(process.stdin.isTTY),
+    return requestToolApproval({
+      name, args: args as Record<string, string | number>,
+      permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
+      yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
+      shellCwd: exec.shellCwd ?? cwd, fileRoot: cwd, confirm: ctx.confirm,
+      onDeny: () => process.stderr.write(`blocked ${name}: confirmation required; use --yes or permissionMode skip\n`),
     });
-    if (outcome === "allow") return true;
-    if (outcome === "deny") {
-      process.stderr.write(`blocked ${name}: confirmation required; use --yes or permissionMode skip\n`);
-      return false;
-    }
-    const detail = String(args["path"] ?? args["command"] ?? args["message"] ?? "");
-    const shown = detail.length > 120 ? detail.slice(0, 117) + "..." : detail;
-    return ctx.confirm(`\nwarning ${name}${shown ? " " + shown : ""} [cwd: ${sanitizeServerText(exec.shellCwd ?? cwd)}; file root: ${sanitizeServerText(cwd)}] - run it? [y/N] `);
   };
   const task: TaskCommand = {
     type: "task",
@@ -902,9 +898,18 @@ export async function runLocalTurn(
           brain.sendToolResult(ev.id, refusalToolResult(refusal));
         } else {
           // executeAsync so the two web tools (web_search/web_fetch) work too.
+          const prepared = prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
+          if (!prepared.ok) {
+            brain.sendToolResult(ev.id, { output: `[tool ${ev.name} rejected: ${prepared.error}]`, exitCode: 1 });
+            lastMeaningfulAt = Date.now();
+            modelOutput.reset();
+            noteStreamingActivity(lifecycle);
+            pulse.start();
+            continue;
+          }
           const approvalContext = exec.shellContext;
           const approved = await boundedLocalOperation(
-            () => approveTool(ev.name, ev.args),
+            () => approveTool(ev.name, prepared.args),
             controller.signal,
             timeoutMs,
             lastMeaningfulAt,
@@ -916,11 +921,12 @@ export async function runLocalTurn(
           const toolOptions: RunOptions = {
             signal: controller.signal,
             ...(approvalContext !== undefined ? { expectedShellContext: approvalContext } : {}),
+            expectedToolCall: prepared.binding,
             ...(remaining === undefined ? {} : { timeoutMs: remaining }),
           };
           const result = approved
             ? await boundedLocalOperation(
-                () => exec.executeAsync(ev.name, ev.args, toolOptions),
+                () => exec.executeAsync(ev.name, prepared.args, toolOptions),
                 controller.signal,
                 timeoutMs,
                 lastMeaningfulAt,
