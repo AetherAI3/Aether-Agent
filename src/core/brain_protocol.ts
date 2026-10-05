@@ -116,6 +116,15 @@ export interface RoutingDriftFrame {
   fatal: boolean;
 }
 
+/** Bounded byte or line range for read_file tool_call args on both bridge transports. */
+export interface ReadFileArgs {
+  path: string;
+  offset?: number;
+  max_bytes?: number;
+  start_line?: number;
+  max_lines?: number;
+}
+
 export interface WorkflowDoneFrame {
   type: "workflow_done";
   synthesis: string;

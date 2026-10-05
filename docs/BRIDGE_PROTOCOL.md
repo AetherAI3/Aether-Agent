@@ -59,8 +59,21 @@ on decode and back on encode.
 `read_file · list_directory · patch_file · write_file · run_shell · run_tests · repo_search · git_commit`
 
 - One path-guard confines every path to `cwd` (traversal refused).
-- Output is capped and prefixed `[exit N]\n…` so the brain's grounding gate
-  (`tests_pass` / `parse_fail_count`) reads the same shape for local and cloud.
+- `read_file` accepts `path` and either byte `offset`/`max_bytes` (4–4096,
+  default 4096) or line `start_line`/`max_lines` (1–200, default 200). Its JSON
+  result reports content, file size, and an explicit continuation (`next_offset`
+  or `next_start_line`). Byte results also report the returned range,
+  `complete`, `truncated`, and line-boundary flags. A long path or heavily
+  escaped content may reduce the returned byte count to keep output bounded.
+  An offset inside a UTF-8 character, binary content, or invalid UTF-8 is
+  rejected. Patchable files up to 16 MiB have a whole-file `sha256` and
+  `validation_scope: whole_file`; larger files return `sha256: null` and only
+  validate the returned range. A tail byte range can have `truncated: false`
+  while `complete: false` because earlier bytes were omitted. Hosted dev
+  sessions explicitly advertise `read_file_ranges: true` when supported.
+- Tool output is bounded. Shell and test output includes `[exit N]`; file reads
+  include explicit range and continuation metadata. The host sends the same
+  result shape to local and cloud brains.
 
 ## The loop
 

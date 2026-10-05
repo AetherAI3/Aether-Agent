@@ -9,6 +9,16 @@ import {
 } from "../src/core/stream.js";
 import { StreamEventTooLargeError, StreamIncompleteError } from "../src/core/errors.js";
 
+test("hosted tool_call preserves read_file byte range arguments", () => {
+  assert.deepEqual(normalizeFrame({
+    type: "tool_call", tool_call_id: "read-1", name: "read_file",
+    args: { path: "src/a.ts", offset: 4096, max_bytes: 512 },
+  }), {
+    type: "tool_call", toolCallId: "read-1", name: "read_file",
+    args: { path: "src/a.ts", offset: 4096, max_bytes: 512 }, risk: undefined,
+  });
+});
+
 test("normalizeFrame done maps token fields and carries no signature", () => {
   const f = normalizeFrame({
     type: "done",

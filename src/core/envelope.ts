@@ -74,6 +74,7 @@ export interface BuildDevSessionArgs {
   model?: string;
   effort?: string;
   capabilities: readonly string[];
+  readFileRanges?: boolean;
   maxUvt?: number;
   repo?: Record<string, unknown>;
   protocolVersion: number;
@@ -86,10 +87,10 @@ export function buildDevSessionRequest(args: BuildDevSessionArgs): DevSessionWir
     model: resolveHostedModel(args.model) || null,
     effort: args.effort?.trim() || null,
     capabilities: [...args.capabilities],
-    ...(args.capabilities.includes("read_file") ? { read_file_ranges: true } : {}),
     protocol_version: args.protocolVersion,
   };
   if (args.maxUvt && args.maxUvt > 0) req.max_uvt = args.maxUvt;
+  if (args.readFileRanges) req.read_file_ranges = true;
   if (args.repo) req.repo = args.repo;
   return req;
 }

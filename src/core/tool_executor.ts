@@ -537,6 +537,11 @@ export class ToolExecutor {
       if (args["start_line"] === undefined && args["max_lines"] === undefined) {
         const offset = Number(args["offset"] ?? 0);
         if (offset > size) return { output: `[offset beyond EOF: ${path}]`, exitCode: 1 };
+        if (offset < size) {
+          const first = Buffer.allocUnsafe(1);
+          if (readSync(fd, first, 0, 1, offset) !== 1) throw new Error("file changed during read");
+          if ((first[0]! & 0xc0) === 0x80) return { output: `[offset splits a UTF-8 character: ${path}]`, exitCode: 1 };
+        }
         const bytes = Buffer.alloc(Math.min(size - offset, Number(args["max_bytes"] ?? 4096)));
         let loaded = 0;
         while (loaded < bytes.length) {
@@ -544,7 +549,9 @@ export class ToolExecutor {
           if (n === 0) throw new Error("file changed during read");
           loaded += n;
         }
-        if (bytes.includes(0)) return { output: `[binary file: ${path}]`, exitCode: 1 };
+        if (bytes.some((byte) => byte === 0 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 127)) {
+          return { output: `[binary file: ${path}]`, exitCode: 1 };
+        }
         const decoder = new TextDecoder("utf-8", { fatal: true });
         let end = bytes.length;
         while (end > 0) {
@@ -552,7 +559,25 @@ export class ToolExecutor {
           catch { end--; }
         }
         if (end === 0 && offset < size) return { output: `[offset splits a UTF-8 character or invalid UTF-8: ${path}]`, exitCode: 1 };
-        result = { output: JSON.stringify({ path, sha256: digest, offset, next_offset: offset + end < size ? offset + end : null, size, validation_scope: digest === null ? "returned_range" : "whole_file", content: decoder.decode(bytes.subarray(0, end)) }), exitCode: 0 };
+        const previous = Buffer.allocUnsafe(1);
+        const startsMidLine = offset > 0 && readSync(fd, previous, 0, 1, offset - 1) === 1 && previous[0] !== 10;
+        let output = "";
+        while (end > 0 || offset === size) {
+          let content: string;
+          try { content = decoder.decode(bytes.subarray(0, end)); }
+          catch { end--; continue; }
+          const nextOffset = offset + end;
+          output = JSON.stringify({ path, sha256: digest, offset, range_end: nextOffset,
+            next_offset: nextOffset < size ? nextOffset : null, size,
+            complete: offset === 0 && nextOffset === size, truncated: nextOffset < size,
+            starts_mid_line: startsMidLine,
+            ends_mid_line: nextOffset < size && end > 0 && bytes[end - 1] !== 10,
+            validation_scope: digest === null ? "returned_range" : "whole_file", content });
+          if (Buffer.byteLength(output) <= MAX_OUTPUT) break;
+          end--;
+        }
+        if (end === 0 && offset < size) return { output: `[read_file cannot fit a UTF-8 character within output budget: ${path}]`, exitCode: 1 };
+        result = { output, exitCode: 0 };
       } else {
         const start = Number(args["start_line"] ?? 1);
         const count = Number(args["max_lines"] ?? 200);
@@ -604,6 +629,7 @@ export class ToolExecutor {
       }
       const after = fstatSync(fd);
       if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino) return { output: `[read conflict: file changed during read: ${path}]`, exitCode: 1 };
+      if (Buffer.byteLength(result.output) > MAX_OUTPUT) return { output: `[read_file output exceeds budget; use offset/max_bytes: ${path}]`, exitCode: 1 };
       return result;
     } finally { closeSync(fd); }
   }
