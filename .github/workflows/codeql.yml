@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   analyze:
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
       contents: read
