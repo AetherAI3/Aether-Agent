@@ -32,9 +32,9 @@ function lockfile(packages) {
 function bundledAtsLockfile() {
   return lockfile({
     "": {
-      dependencies: { "aether-ats-skills": "0.2.0" },
-      workspaces: ["packages/ats-skills"],
-      bundleDependencies: ["aether-ats-skills"],
+      dependencies: { "aether-ats-skills": "0.2.0", "aether-rc-qr": "0.1.0" },
+      workspaces: ["packages/ats-skills", "packages/qrcode-terminal"],
+      bundleDependencies: ["aether-ats-skills", "aether-rc-qr"],
     },
     "node_modules/aether-ats-skills": { resolved: "packages/ats-skills", link: true },
     "packages/ats-skills": {
@@ -44,6 +44,8 @@ function bundledAtsLockfile() {
     },
     "node_modules/aether-browser": locked("aether-browser", "0.2.2"),
     "node_modules/aether-context": locked("aether-context", "0.3.1"),
+    "node_modules/aether-rc-qr": { resolved: "packages/qrcode-terminal", link: true },
+    "packages/qrcode-terminal": { name: "aether-rc-qr", version: "0.1.0" },
   });
 }
 
@@ -134,13 +136,13 @@ test("fails closed on unsupported locks, malformed entries, inexact versions, na
   );
 });
 
-test("allows only the bundled ATS source link while auditing both pinned registry dependencies", () => {
+test("allows the reviewed ATS and QR source links while auditing both pinned registry dependencies", () => {
   const collected = collectNpmBulkPayload(bundledAtsLockfile());
   assert.deepEqual(collected.payload, {
     "aether-browser": ["0.2.2"],
     "aether-context": ["0.3.1"],
   });
-  assert.equal(collected.nodeModulesEntries, 3);
+  assert.equal(collected.nodeModulesEntries, 4);
   assert.equal(collected.exactPackageVersions, 2);
 
   const nested = bundledAtsLockfile();
@@ -148,6 +150,27 @@ test("allows only the bundled ATS source link while auditing both pinned registr
     nested.packages["node_modules/aether-context"];
   delete nested.packages["node_modules/aether-context"];
   assert.deepEqual(collectNpmBulkPayload(nested).payload, collected.payload);
+});
+
+test("rejects changed QR source, dependency pins, or widened runtime graph", () => {
+  const mutations = [
+    (p) => { p["node_modules/aether-rc-qr"].resolved = "packages/other"; },
+    (p) => { p["node_modules/aether-rc-qr"].link = false; },
+    (p) => { p["node_modules/aether-rc-qr"].version = "0.1.0"; },
+    (p) => { delete p["node_modules/aether-rc-qr"]; },
+    (p) => { p[""].dependencies["aether-rc-qr"] = "^0.1.0"; },
+    (p) => { p[""].dependencies.extra = "1.0.0"; },
+    (p) => { delete p["packages/qrcode-terminal"]; },
+    (p) => { p["packages/qrcode-terminal"].version = "9.9.9"; },
+    (p) => { p["packages/qrcode-terminal"].resolved = "../other"; },
+    (p) => { p["packages/qrcode-terminal"].dependencies = { extra: "1.0.0" }; },
+    (p) => { p["packages/qrcode-terminal"].optionalDependencies = {}; },
+  ];
+  for (const mutate of mutations) {
+    const fixture = bundledAtsLockfile();
+    mutate(fixture.packages);
+    assert.throws(() => collectNpmBulkPayload(fixture), /bundled (?:ATS|QR) link must match/u);
+  }
 });
 
 test("rejects changed ATS link paths, bundle declarations, names, versions or dependency pins", () => {
