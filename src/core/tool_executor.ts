@@ -8,7 +8,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, closeSync, constants as fsConstants, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { BoundedOutput } from "./bounded_output.js";
@@ -29,7 +29,7 @@ const DEFAULT_TEST_CMD = "";
 // Files larger than this are not diffed inline (the transcript would drown).
 const SNAPSHOT_MAX_BYTES = 1024 * 1024;
 const SEARCH_MAX_HITS = 40;
-const FILE_READ_MAX_BYTES = 16 * 1024 * 1024;
+const FILE_PATCH_MAX_BYTES = 16 * 1024 * 1024;
 const DIRECTORY_MAX_ENTRIES = 10_000;
 const SEARCH_SKIP_DIRS = new Set([".git", "node_modules", "dist"]);
 /**
@@ -500,39 +500,94 @@ export class ToolExecutor {
     if (!existsSync(abs) || lstatSync(abs).isSymbolicLink() || !statSync(abs).isFile()) {
       return { output: `[no such file: ${path}]`, exitCode: 1 };
     }
-    const size = statSync(abs).size;
-    if (size > FILE_READ_MAX_BYTES) return { output: `[file too large for digest/ranged read: ${path}]`, exitCode: 1 };
-    const bytes = readFileSync(abs);
-    if (bytes.includes(0)) return { output: `[binary file: ${path}]`, exitCode: 1 };
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    const decoder = new TextDecoder("utf-8", { fatal: true });
-    const content = decoder.decode(bytes);
-    if (args["start_line"] === undefined && args["max_lines"] === undefined) {
-      const offset = Number(args["offset"] ?? 0);
-      if (offset > bytes.length) return { output: `[offset beyond EOF: ${path}]`, exitCode: 1 };
-      let end = Math.min(bytes.length, offset + Number(args["max_bytes"] ?? 4096));
-      // Never return a partial UTF-8 codepoint; the next offset remains exact.
-      while (end > offset) {
-        try { decoder.decode(bytes.subarray(offset, end)); break; }
-        catch { end--; }
+    const fd = openSync(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    try {
+      const before = fstatSync(fd);
+      if (!before.isFile()) return { output: `[no such file: ${path}]`, exitCode: 1 };
+      const size = before.size;
+      // Patch targets are capped, but reads remain available for arbitrarily large files.
+      // A digest is only useful where patch_file can accept the target.
+      let digest: string | null = null;
+      if (size <= FILE_PATCH_MAX_BYTES) {
+        const hash = createHash("sha256");
+        const block = Buffer.allocUnsafe(64 * 1024);
+        for (let at = 0; at < size;) {
+          const n = readSync(fd, block, 0, Math.min(block.length, size - at), at);
+          if (n === 0) throw new Error("file changed during read");
+          if (block.subarray(0, n).includes(0)) return { output: `[binary file: ${path}]`, exitCode: 1 };
+          hash.update(block.subarray(0, n));
+          at += n;
+        }
+        digest = hash.digest("hex");
       }
-      if (end === offset && offset < bytes.length) return { output: `[offset splits a UTF-8 character: ${path}]`, exitCode: 1 };
-      return { output: JSON.stringify({ path, sha256: digest, offset, next_offset: end < bytes.length ? end : null, size: bytes.length, content: decoder.decode(bytes.subarray(offset, end)) }), exitCode: 0 };
-    }
-    const lines = content.split("\n");
-    const start = Number(args["start_line"] ?? 1);
-    const count = Number(args["max_lines"] ?? 200);
-    if (start > lines.length) return { output: `[start_line beyond EOF: ${path}]`, exitCode: 1 };
-    let selected = "";
-    let next: number | null = null;
-    for (let i = start - 1; i < Math.min(lines.length, start - 1 + count); i++) {
-      const part = (i === start - 1 ? "" : "\n") + lines[i]!;
-      if (Buffer.byteLength(selected + part) > 6000) { next = i + 1; break; }
-      selected += part;
-    }
-    if (next === null && start - 1 + count < lines.length) next = start + count;
-    if (next === start) return { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: null, size: bytes.length, content: "", note: "line exceeds 6000 bytes; use offset/max_bytes" }), exitCode: 0 };
-    return { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: next, size: bytes.length, content: selected }), exitCode: 0 };
+      let result: ToolResult;
+      if (args["start_line"] === undefined && args["max_lines"] === undefined) {
+        const offset = Number(args["offset"] ?? 0);
+        if (offset > size) return { output: `[offset beyond EOF: ${path}]`, exitCode: 1 };
+        const bytes = Buffer.alloc(Math.min(size - offset, Number(args["max_bytes"] ?? 4096)));
+        let loaded = 0;
+        while (loaded < bytes.length) {
+          const n = readSync(fd, bytes, loaded, bytes.length - loaded, offset + loaded);
+          if (n === 0) throw new Error("file changed during read");
+          loaded += n;
+        }
+        if (bytes.includes(0)) return { output: `[binary file: ${path}]`, exitCode: 1 };
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        let end = bytes.length;
+        while (end > 0) {
+          try { decoder.decode(bytes.subarray(0, end)); break; }
+          catch { end--; }
+        }
+        if (end === 0 && offset < size) return { output: `[offset splits a UTF-8 character or invalid UTF-8: ${path}]`, exitCode: 1 };
+        result = { output: JSON.stringify({ path, sha256: digest, offset, next_offset: offset + end < size ? offset + end : null, size, content: decoder.decode(bytes.subarray(0, end)) }), exitCode: 0 };
+      } else {
+        const start = Number(args["start_line"] ?? 1);
+        const count = Number(args["max_lines"] ?? 200);
+        const block = Buffer.allocUnsafe(64 * 1024);
+        const selected: Buffer[] = [];
+        let selectedBytes = 0;
+        let selectedLines = 0;
+        let line = 1;
+        let current: number[] = [];
+        let next: number | null = null;
+        let tooLong = false;
+        const finishLine = (hasNewline: boolean): boolean => {
+          if (line >= start) {
+            const extra = current.length + (selectedLines ? 1 : 0);
+            if (selectedBytes + extra > 6000) { next = line; tooLong = selectedLines === 0; return true; }
+            if (selectedLines) { selected.push(Buffer.from("\n")); selectedBytes++; }
+            selected.push(Buffer.from(current)); selectedBytes += current.length;
+            selectedLines++;
+            if (selectedLines >= count && hasNewline) { next = line + 1; return true; }
+          }
+          line++;
+          current = [];
+          return false;
+        };
+        let stopped = false;
+        for (let at = 0; at < size && !stopped;) {
+          const n = readSync(fd, block, 0, Math.min(block.length, size - at), at);
+          if (n === 0) throw new Error("file changed during read");
+          for (let i = 0; i < n; i++) {
+            const byte = block[i]!;
+            if (byte === 0) return { output: `[binary file: ${path}]`, exitCode: 1 };
+            if (byte === 10) { if (finishLine(true)) { stopped = true; break; } }
+            else if (line >= start && current.length <= 6000) current.push(byte);
+          }
+          at += n;
+        }
+        if (!stopped) finishLine(false);
+        if (selectedLines === 0 && !tooLong) return { output: `[start_line beyond EOF: ${path}]`, exitCode: 1 };
+        if (tooLong) result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: null, size, content: "", note: "line exceeds 6000 bytes; use offset/max_bytes" }), exitCode: 0 };
+        else {
+          const content = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(selected, selectedBytes));
+          result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: next, size, content }), exitCode: 0 };
+        }
+      }
+      const after = fstatSync(fd);
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino) return { output: `[read conflict: file changed during read: ${path}]`, exitCode: 1 };
+      return result;
+    } finally { closeSync(fd); }
   }
 
   private listDirectory(args: Record<string, string | number>): ToolResult {
@@ -590,7 +645,7 @@ export class ToolExecutor {
     const abs = this.safe(path);
     if (!existsSync(abs) || lstatSync(abs).isSymbolicLink() || !statSync(abs).isFile()) throw new Error("patch target must be a regular file");
     const stat = statSync(abs);
-    if (stat.size > FILE_READ_MAX_BYTES) throw new Error("patch target too large");
+    if (stat.size > FILE_PATCH_MAX_BYTES) throw new Error("patch target too large");
     const bytes = readFileSync(abs);
     if (bytes.includes(0)) throw new Error("binary patch target");
     const digest = createHash("sha256").update(bytes).digest("hex");

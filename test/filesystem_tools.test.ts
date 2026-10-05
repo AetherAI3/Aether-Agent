@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpWorkspace } from "./tmp_workspace.js";
 import { ToolExecutor } from "../src/core/tool_executor.js";
@@ -52,6 +52,30 @@ test("bounded line and byte reads expose a digest usable for an exact patch", ()
   assert.match(preview.output, /- "second"\n\+ "SECOND"/);
   assert.equal(exec.execute("patch_file", patch).exitCode, 0);
   assert.equal(readFileSync(join(dir, "é file.txt"), "utf8"), "first\nSECOND\nthird\n");
+}));
+
+test("reads stay bounded for sparse files and report continuations at UTF-8 and final-line boundaries", () => workspace((dir, exec) => {
+  const sparse = join(dir, "large.txt");
+  writeFileSync(sparse, "start");
+  truncateSync(sparse, 32 * 1024 * 1024);
+  const large = read(exec, "large.txt", { offset: 0, max_bytes: 4 });
+  assert.equal(large["content"], "star");
+  assert.equal(large["next_offset"], 4);
+  assert.equal(large["size"], 32 * 1024 * 1024);
+  assert.equal(large["sha256"], null, "oversized files cannot be patch targets");
+  writeFileSync(join(dir, "unicode.txt"), "a😀b");
+  assert.deepEqual([read(exec, "unicode.txt", { max_bytes: 4 })["content"], read(exec, "unicode.txt", { offset: 1, max_bytes: 4 })["content"]], ["a", "😀"]);
+  assert.match(exec.execute("read_file", { path: "unicode.txt", offset: 2, max_bytes: 4 }).output, /splits a UTF-8 character/);
+  writeFileSync(join(dir, "lines.txt"), "first\nlast");
+  assert.equal(read(exec, "lines.txt", { start_line: 1, max_lines: 1 })["next_start_line"], 2);
+  assert.equal(read(exec, "lines.txt", { start_line: 2, max_lines: 1 })["next_start_line"], null);
+  assert.match(exec.execute("read_file", { path: "lines.txt", start_line: 3 }).output, /beyond EOF/);
+  writeFileSync(join(dir, "empty.txt"), "");
+  assert.equal(read(exec, "empty.txt")["content"], "");
+  assert.equal(read(exec, "empty.txt", { start_line: 1 })["content"], "");
+  writeFileSync(join(dir, "binary.dat"), Buffer.from([65, 0, 66]));
+  assert.match(exec.execute("read_file", { path: "binary.dat" }).output, /binary file/);
+  assert.notEqual(exec.execute("read_file", { path: "missing.txt" }).exitCode, 0);
 }));
 
 test("stale, nonmatching, and ambiguous patches leave the file unchanged", () => workspace((dir, exec) => {
