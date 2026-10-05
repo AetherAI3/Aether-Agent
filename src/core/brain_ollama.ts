@@ -1,7 +1,7 @@
 // OllamaBrain — the fully-local brain, in TypeScript (no Python subprocess).
 //
 // It runs the same agentic chat+tool loop the headless Python brain does, but
-// inline: it calls Ollama (core/ollama.ts) with the 8 canonical tools, and on a
+// inline: it calls Ollama (core/ollama.ts) with the canonical tools, and on a
 // tool_call it emits a {type:"tool_call"} event and AWAITS the host's
 // tool_result via sendToolResult — mirroring LocalBrain's queue handoff so the
 // host loop (commands/code.ts hostLoop) drives it identically to local/cloud.
@@ -47,9 +47,9 @@ export interface OllamaBrainOptions {
 
 const DEFAULT_MAX_TURNS = 24;
 
-// The 8 canonical tools, advertised to the model as OpenAI function schemas. The
+// The canonical tools, advertised to the model as OpenAI function schemas. The
 // ONE implementation lives host-side in tool_executor.ts; this only describes
-// them so the model can request them. Names are pinned by TOOLS (protocol v3).
+// them so the model can request them. Names are pinned by TOOLS (protocol v4).
 const TOOL_SCHEMAS: readonly ToolSchema[] = ollamaToolSchemas();
 
 function systemPersona(tools: readonly ToolName[]): string {
@@ -334,7 +334,9 @@ function parseArgs(raw: string): Record<string, unknown> {
  */
 export function ollamaToolSchemas(tools: readonly ToolName[] = TOOLS): readonly ToolSchema[] {
   const summaries: Readonly<Record<ToolName, string>> = {
-    read_file: "Read a workspace file.",
+    read_file: "Read a bounded byte range (offset/max_bytes) or line range (start_line/max_lines) and return a SHA-256 digest for patch_file. Do not combine range modes.",
+    list_directory: "List one bounded page of a workspace directory. Use the returned cursor for the next page.",
+    patch_file: "Replace one exact range in a file using its read_file SHA-256 digest. A stale digest fails without writing.",
     write_file: "Write or overwrite a workspace file.",
     run_shell: "Run a shell command in the workspace.",
     run_tests: "Run the project's test command.",

@@ -56,7 +56,7 @@ on decode and back on encode.
 
 ## Tools (the ONE implementation — host-side)
 
-`read_file · write_file · run_shell · run_tests · repo_search · git_commit`
+`read_file · list_directory · patch_file · write_file · run_shell · run_tests · repo_search · git_commit`
 
 - One path-guard confines every path to `cwd` (traversal refused).
 - Output is capped and prefixed `[exit N]\n…` so the brain's grounding gate

@@ -127,6 +127,9 @@ test("dev session: create carries effort + capabilities; tool_call surfaces and 
     assert.equal(createBody["surface"], "aether_agent");
     assert.ok(Array.isArray(createBody["capabilities"]));
     assert.ok((createBody["capabilities"] as string[]).includes("run_shell"));
+    assert.ok((createBody["capabilities"] as string[]).includes("list_directory"));
+    assert.ok((createBody["capabilities"] as string[]).includes("patch_file"));
+    assert.equal(createBody["read_file_ranges"], true);
 
     const tc = out.find((e) => e.type === "tool_call");
     assert.ok(tc && tc.type === "tool_call");

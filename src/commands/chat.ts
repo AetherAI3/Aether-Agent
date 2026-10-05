@@ -771,6 +771,7 @@ export interface LocalTurnDeps {
   brain?: Brain;
   exec?: {
     executeAsync(name: string, args: Record<string, unknown>, options?: RunOptions): Promise<ToolResult>;
+    previewPatch?(args: Record<string, unknown>): ToolResult;
     readonly shellCwd?: string;
     readonly shellContext?: string;
     close?(): void;
@@ -810,6 +811,11 @@ export async function runLocalTurn(
     onPaint: deps.onPulsePaint,
   });
   const approveTool = async (name: string, args: Record<string, unknown>): Promise<boolean> => {
+    if (name === "patch_file" && exec.previewPatch) {
+      const preview = exec.previewPatch(args);
+      process.stderr.write(preview.output + "\n");
+      if (preview.exitCode !== 0) return true;
+    }
     const outcome = decideGate(name, ctx.cfg.permissionMode, ctx.cfg.autoApply, {
       yes: ctx.flags.yes,
       isTty: Boolean(process.stdin.isTTY),

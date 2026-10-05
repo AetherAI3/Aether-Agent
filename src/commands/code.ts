@@ -777,6 +777,11 @@ export async function cmdCode(
   // non-TTY (CI/pipe) an un-pre-approved call FAILS CLOSED rather than running
   // unattended. `--yes` or `permissionMode: skip` opt out.
   const gate: ToolGate = async ({ name, args }) => {
+    if (name === "patch_file") {
+      const preview = exec.previewPatch(args);
+      process.stderr.write(preview.output + "\n");
+      if (preview.exitCode !== 0) return true; // executor returns the same conflict to the brain
+    }
     const outcome = decideGate(name, ctx.cfg.permissionMode, ctx.cfg.autoApply, {
       yes: ctx.flags.yes,
       isTty: Boolean(process.stdin.isTTY),

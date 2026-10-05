@@ -8,7 +8,7 @@ bug.
 
 ---
 
-## 1. AetherCode ↔ Brain bridge event protocol  ·  `PROTOCOL_VERSION = 3`
+## 1. AetherCode ↔ Brain bridge event protocol  ·  `PROTOCOL_VERSION = 4`
 
 The event seam between the headless brain (decides) and the TS host (renders +
 executes). Full prose + rationale: [`BRIDGE_PROTOCOL.md`](./BRIDGE_PROTOCOL.md).
@@ -44,6 +44,7 @@ History:
   to 2 alongside the schema rev so the conformance fixture stays in lockstep
   across both repos.
 - **v3** — the `web_search`/`web_fetch` tools joined `TOOLS` (see Invariant 2).
+- **v4** — bounded `list_directory` and digest-checked `patch_file` joined `TOOLS`; `read_file` returns bounded content, range cursors, and a SHA-256 digest.
   Separately, and never recorded here until now: the workflow swarm frames —
   `workflow_start`, `phase_start`, `phase_done`, `agent_spawn`,
   `agent_progress`, `agent_done`, `workflow_done` (the CODEPRO/HIGH+-effort
@@ -104,7 +105,7 @@ History:
    the host replies, so replies are strictly ordered. A `tool_result` whose `id`
    does not match the outstanding call is a protocol violation → the brain emits
    `error` and aborts (it does NOT skip — skipping mis-pairs results to calls).
-2. **One tool implementation, host-side.** `read_file · write_file · run_shell ·
+2. **One tool implementation, host-side.** `read_file · list_directory · patch_file · write_file · run_shell ·
    run_tests · repo_search · git_commit · web_search · web_fetch` (the full
    canonical `TOOLS` set, `src/core/brain_protocol.ts`; this row previously
    listed only the first 6 — pre-existing drift, closed by this change). A

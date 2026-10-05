@@ -63,6 +63,7 @@ export interface DevSessionWireRequest {
   /** Tool names this host supports — the client owns the allowlist; the
    *  server intersects with its own known set and never sends anything else. */
   capabilities: string[];
+  read_file_ranges?: boolean;
   max_uvt?: number;
   repo?: Record<string, unknown>;
   protocol_version: number;
@@ -85,6 +86,7 @@ export function buildDevSessionRequest(args: BuildDevSessionArgs): DevSessionWir
     model: resolveHostedModel(args.model) || null,
     effort: args.effort?.trim() || null,
     capabilities: [...args.capabilities],
+    ...(args.capabilities.includes("read_file") ? { read_file_ranges: true } : {}),
     protocol_version: args.protocolVersion,
   };
   if (args.maxUvt && args.maxUvt > 0) req.max_uvt = args.maxUvt;
