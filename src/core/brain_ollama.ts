@@ -334,7 +334,7 @@ function parseArgs(raw: string): Record<string, unknown> {
  */
 export function ollamaToolSchemas(tools: readonly ToolName[] = TOOLS): readonly ToolSchema[] {
   const summaries: Readonly<Record<ToolName, string>> = {
-    read_file: "Read a bounded byte range (offset/max_bytes) or line range (start_line/max_lines). Pass the returned revision as expected_revision on every continuation and restart if stale. An initial unguarded read can return a SHA-256 digest for patch_file. Do not combine range modes.",
+    read_file: "Read a bounded byte range (offset/max_bytes) or line range (start_line/max_lines). On supported Linux filesystems, pass the returned revision as expected_revision on each continuation and restart if stale; other systems return revision_unsupported for guarded reads. An initial unguarded read can return a SHA-256 digest for patch_file. Do not combine range modes.",
     list_directory: "List one bounded page of a workspace directory. Use the returned cursor for the next page.",
     patch_file: "Replace one exact range in a file using its read_file SHA-256 digest. A stale digest fails without writing.",
     write_file: "Write or overwrite a workspace file.",

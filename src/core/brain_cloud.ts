@@ -241,7 +241,7 @@ export class CloudBrain implements Brain {
             effort: task.effort,
             capabilities: this.opts.localToolCapabilities ?? TOOLS,
             readFileRanges: true,
-            readFileRevisions: true,
+            readFileRevisions: process.platform === "linux",
             maxUvt: this.opts.maxUvt,
             protocolVersion: DEV_PROTOCOL_VERSION,
           }),
