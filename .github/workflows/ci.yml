@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   # A stalled hosted run must not hold the fallback runner queue.
-  group: ${{ github.workflow }}-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && '-self-hosted' || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -239,13 +239,14 @@ jobs:
               const agent = (tree.dependencies || {})['aether-agents'] || {};
               const ats = (agent.dependencies || {})['aether-ats-skills'] || {};
               const qr = (agent.dependencies || {})['aether-rc-qr'] || {};
+              const expectedVersion = require(process.env.GITHUB_WORKSPACE + '/package.json').version;
               const exactKeys = (value, expected) => {
                 const actual = Object.keys(value || {}).sort();
                 if (JSON.stringify(actual) !== JSON.stringify([...expected].sort())) {
                   throw new Error('unexpected dependency set: ' + JSON.stringify(actual));
                 }
               };
-              if (agent.version !== '0.4.0') throw new Error('unexpected aether-agents version');
+              if (agent.version !== expectedVersion) throw new Error('unexpected aether-agents version');
               if (ats.version !== '0.2.0') throw new Error('unexpected aether-ats-skills version');
               if (qr.version !== '0.1.0') throw new Error('unexpected aether-rc-qr version');
               exactKeys(agent.dependencies, ['aether-ats-skills', 'aether-rc-qr']);

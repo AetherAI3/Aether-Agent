@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-truth-${{ github.ref }}
+  group: release-truth-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:

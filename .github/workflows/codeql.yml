@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:

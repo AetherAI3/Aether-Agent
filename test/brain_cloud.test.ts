@@ -71,6 +71,46 @@ test("a clean stream still ends done ok:true", async () => {
   assert.ok(done && done.type === "done" && done.ok === true);
 });
 
+test("a bare failed terminal cannot be promoted to success", async () => {
+  const events = await runCloud([JSON.stringify({ type: "done", ok: false, uvt: 1 })]);
+  const done = events.find((event) => event.type === "done");
+  assert.ok(done?.type === "done");
+  assert.equal(done.ok, false);
+});
+
+test("an error without public text stays failed and carries safe support details", async () => {
+  const events = await runCloud([
+    JSON.stringify({ type: "error", reason: "provider secret", request_id: "req_fixture", error_code: "DESIGN_FAILED" }),
+    JSON.stringify({ type: "delta", text: "late output after terminal" }),
+    JSON.stringify({ type: "done", ok: true }),
+  ]);
+  const error = events.find((event) => event.type === "error");
+  const done = events.find((event) => event.type === "done");
+  assert.ok(error?.type === "error" && done?.type === "done");
+  assert.equal(error.requestId, "req_fixture");
+  assert.equal(error.errorCode, "DESIGN_FAILED");
+  assert.match(error.msg, /cloud request failed/);
+  assert.match(error.msg, /req_fixture/);
+  assert.doesNotMatch(error.msg, /provider secret/);
+  assert.equal(done.ok, false);
+  assert.equal(events.some((event) => event.type === "monologue"), false);
+});
+
+test("premature EOF never posts a new paid chat request", async () => {
+  const previous = globalThis.fetch;
+  const calls: string[] = [];
+  const fixture = sseFetch([JSON.stringify({ type: "delta", text: "partial" })]);
+  globalThis.fetch = (async (input, init) => { calls.push(String(input)); return fixture(input, init); }) as typeof globalThis.fetch;
+  try {
+    const events: BrainEvent[] = [];
+    const brain = new CloudBrain(new ApiClient("https://stub.test", tokens));
+    for await (const event of brain.run({ type: "task", text: "t", cwd: ".", poolGb: 5 })) events.push(event);
+    assert.equal(calls.filter((url) => url.endsWith("/agent/chat/stream")).length, 1);
+    assert.equal(calls.filter((url) => url.endsWith("/agent/chat")).length, 0);
+    assert.ok(events.some((event) => event.type === "done" && !event.ok));
+  } finally { globalThis.fetch = previous; }
+});
+
 // LOOP-06 round 3: the sibling gap to chat.ts's runCloudTurn — a stream that
 // ends after only `delta` frames (no `done`, no `error`) must not be
 // fabricated into a successful run either.

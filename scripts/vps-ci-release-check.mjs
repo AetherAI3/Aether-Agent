@@ -19,10 +19,12 @@ assert.deepEqual(packageManifest.bin, {
   aether: "dist/src/main.js",
   "aether-agent": "dist/src/main.js",
 });
-const runtimeDependency = { "aether-ats-skills": "0.2.0" };
+const runtimeDependency = { "aether-ats-skills": "0.2.0", "aether-rc-qr": "0.1.0" };
+const reviewedWorkspaces = ["packages/ats-skills", "packages/qrcode-terminal"];
+const reviewedBundles = ["aether-ats-skills", "aether-rc-qr"];
 assert.deepEqual(packageManifest.dependencies, runtimeDependency);
-assert.deepEqual(packageManifest.workspaces, ["packages/ats-skills"]);
-assert.deepEqual(packageManifest.bundledDependencies, ["aether-ats-skills"]);
+assert.deepEqual(packageManifest.workspaces, reviewedWorkspaces);
+assert.deepEqual(packageManifest.bundledDependencies, reviewedBundles);
 assert.deepEqual(packageManifest.optionalDependencies ?? {}, {});
 assert.deepEqual(packageManifest.peerDependencies ?? {}, {});
 
@@ -32,14 +34,21 @@ assert.equal(packageLock.version, packageManifest.version);
 assert.equal(lockRoot?.name, packageManifest.name);
 assert.equal(lockRoot?.version, packageManifest.version);
 assert.deepEqual(lockRoot?.dependencies, runtimeDependency);
-assert.deepEqual(lockRoot?.workspaces, ["packages/ats-skills"]);
+assert.deepEqual(lockRoot?.workspaces, reviewedWorkspaces);
+assert.deepEqual(lockRoot?.bundleDependencies, reviewedBundles);
 const atsManifest = await readJson("packages/ats-skills/package.json");
 assert.equal(atsManifest.name, "aether-ats-skills");
 assert.equal(atsManifest.version, "0.2.0");
 assert.deepEqual(atsManifest.dependencies, { "aether-browser": "0.2.2", "aether-context": "0.3.1" });
 assert.deepEqual(atsManifest.optionalDependencies ?? {}, {});
 assert.deepEqual(atsManifest.peerDependencies ?? {}, {});
-collectNpmBulkPayload(packageLock); // Validates the one local link and every registry-backed lock entry.
+const qrManifest = await readJson("packages/qrcode-terminal/package.json");
+assert.equal(qrManifest.name, "aether-rc-qr");
+assert.equal(qrManifest.version, "0.1.0");
+assert.deepEqual(qrManifest.dependencies ?? {}, {});
+assert.deepEqual(qrManifest.optionalDependencies ?? {}, {});
+assert.deepEqual(qrManifest.peerDependencies ?? {}, {});
+collectNpmBulkPayload(packageLock); // Validates both reviewed local links and every registry-backed lock entry.
 
 const typeScriptPin = packageManifest.devDependencies?.typescript;
 assert.match(typeScriptPin, /^\d+\.\d+\.\d+$/);
@@ -61,6 +70,7 @@ const forbiddenHooks = ["preinstall", "install", "postinstall", "prepare"];
 for (const forbiddenHook of forbiddenHooks) {
   assert.equal(packageManifest.scripts?.[forbiddenHook], undefined);
   assert.equal(atsManifest.scripts?.[forbiddenHook], undefined);
+  assert.equal(qrManifest.scripts?.[forbiddenHook], undefined);
 }
 
 const publishedFiles = new Set(packageManifest.files ?? []);
