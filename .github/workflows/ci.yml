@@ -230,7 +230,7 @@ jobs:
         shell: bash
 
   supply-chain:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, aether-agent-ci]
     timeout-minutes: 20
     steps:
       - name: Checkout repository
