@@ -48,7 +48,7 @@ export const EXEC_EXIT = {
   cancelled: 130,
 } as const;
 export type ExecPermission = "deny" | "read-only" | "workspace-write";
-export const EXEC_V1_TOOLS = ["read_file", "write_file", "repo_search"] as const;
+export const EXEC_V1_TOOLS = ["read_file", "list_directory", "patch_file", "write_file", "repo_search"] as const;
 export interface ExecOptions {
   permission: ExecPermission;
   allowedTools: readonly string[];
@@ -493,6 +493,10 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
       const correlation = event.type === "tool_call" && event.id ? event.id : writer.sessionId;
       writer.emit("agent_event", { event }, correlation);
       if (event.type === "tool_call") {
+        if (event.name === "patch_file") {
+          const preview = exec.previewPatch(event.args);
+          writer.emit("patch_preview", { output: preview.output, valid: preview.exitCode === 0 }, event.id);
+        }
         const decision = allowed(permission, event.name, declared);
         writer.emit("permission_decision", { tool: event.name, approved: decision.ok, reason: decision.reason }, event.id);
         const result = decision.ok
@@ -595,6 +599,9 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
   process.removeListener("SIGTERM", onSignal);
   process.stdin.removeListener("data", onStdin);
   process.stdin.removeListener("end", onStdinEnd);
+  // Attaching a data listener resumes stdin. Leave no flowing stream behind
+  // after the headless session, or an embedded runner can remain alive.
+  if (!process.stdin.isTTY) process.stdin.pause();
   return exitCode;
 }
 

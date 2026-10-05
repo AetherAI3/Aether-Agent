@@ -44,6 +44,19 @@ test("terminal controls and bidi controls render as inert visible escapes", () =
   assert.notEqual(terminalSafeReview("\\x1b"), terminalSafeReview("\x1b"));
 });
 
+test("patch approval prompt contains the exact affected diff", () => {
+  const prepared = prepareToolApproval("patch_file", {
+    path: "space é.txt", expected_sha256: "a".repeat(64), old_text: "before", new_text: "after",
+  });
+  assert.equal(prepared.ok, true);
+  if (!prepared.ok) return;
+  const preview = '--- "space é.txt"\n+++ "space é.txt"\n@@ line 1, column 1 @@\n- "before"\n+ "after"';
+  const review = formatToolApprovalReview("patch_file", prepared.args, "/cwd", "/root", preview);
+  assert.match(review, /Affected diff/);
+  assert.ok(review.includes('- "before"\n+ "after"'));
+  assert.ok(review.indexOf("Affected diff") < review.indexOf("Run this exact tool call"));
+});
+
 test("shared gate shows the whole command and denial does not execute", async () => {
   const prepared = prepareToolApproval("run_shell", { command: longCommand });
   assert.equal(prepared.ok, true);

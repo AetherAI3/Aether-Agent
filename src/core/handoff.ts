@@ -96,7 +96,7 @@ function clip(text: string, max = MAX_HIGHLIGHT_CHARS): string {
 /** True when this event is the host writing a file — the ONE definition of
  *  "the run changed something", shared with cmdCode's live blast-radius set. */
 export function wroteFile(ev: BrainEvent): string | null {
-  if (ev.type !== "tool_call" || ev.name !== "write_file") return null;
+  if (ev.type !== "tool_call" || (ev.name !== "write_file" && ev.name !== "patch_file")) return null;
   const path = ev.args["path"];
   return typeof path === "string" && path ? path : null;
 }

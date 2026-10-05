@@ -45,6 +45,7 @@ export function formatToolApprovalReview(
   args: ValidatedToolArgs,
   shellCwd: string,
   fileRoot: string,
+  patchPreview?: string,
 ): string {
   const field = name === "run_shell" || name === "run_tests"
     ? "command"
@@ -53,7 +54,10 @@ export function formatToolApprovalReview(
   const lines = typeof detail === "string" && detail.length > 0
     ? terminalSafeReview(detail).split("\n").map((line, index) => `  ${index + 1} | ${line}`).join("\n")
     : "  (no command configured)";
-  return `\nModel-requested tool approval\nTool: ${name}\nShell cwd: ${terminalSafeReview(shellCwd, false)}\nFile root: ${terminalSafeReview(fileRoot, false)}\n${field} (numbered rows preserve line breaks; controls and backslashes are escaped):\n${lines}\nRun this exact tool call? [y/N] `;
+  const diff = name === "patch_file" && patchPreview
+    ? `\nAffected diff (escaped for terminal safety):\n${terminalSafeReview(patchPreview)}\n`
+    : "";
+  return `\nModel-requested tool approval\nTool: ${name}\nShell cwd: ${terminalSafeReview(shellCwd, false)}\nFile root: ${terminalSafeReview(fileRoot, false)}\n${field} (numbered rows preserve line breaks; controls and backslashes are escaped):\n${lines}${diff}\nRun this exact tool call? [y/N] `;
 }
 
 export interface ToolApprovalRequest {
@@ -65,6 +69,7 @@ export interface ToolApprovalRequest {
   isTty: boolean;
   shellCwd: string;
   fileRoot: string;
+  patchPreview?: string;
   confirm: (review: string) => Promise<boolean>;
   onDeny: () => void;
 }
@@ -80,6 +85,6 @@ export async function requestToolApproval(request: ToolApprovalRequest): Promise
     return false;
   }
   return request.confirm(formatToolApprovalReview(
-    request.name, request.args, request.shellCwd, request.fileRoot,
+    request.name, request.args, request.shellCwd, request.fileRoot, request.patchPreview,
   ));
 }

@@ -38,6 +38,8 @@ export function isPermissionName(value: string): value is PermissionName {
  */
 export const TOOL_PERMISSIONS: Readonly<Record<ToolName, PermissionName>> = {
   read_file: "workspace.read",
+  list_directory: "workspace.read",
+  patch_file: "workspace.write",
   repo_search: "workspace.read",
   write_file: "workspace.write",
   run_shell: "shell.execute",

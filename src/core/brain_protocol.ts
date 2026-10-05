@@ -11,7 +11,7 @@
 // Bump on ANY breaking change to the message shapes below. The Python mirror
 // (aether_agent/protocol.py) MUST carry the same number; the conformance fixture
 // (test/fixtures/bridge_conformance.json) pins both. Canonical: docs/CONTRACTS.md.
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const MAX_MONOLOGUE_DEPTH = 32;
 
 // --- agent context packet (host -> brain, additive + OPTIONAL) -------------
@@ -116,11 +116,13 @@ export interface RoutingDriftFrame {
   fatal: boolean;
 }
 
-/** Optional byte range for read_file tool_call args on both bridge transports. */
+/** Bounded byte or line range for read_file tool_call args on both bridge transports. */
 export interface ReadFileArgs {
   path: string;
   offset?: number;
   max_bytes?: number;
+  start_line?: number;
+  max_lines?: number;
   expected_revision?: string;
 }
 
@@ -206,6 +208,8 @@ export type HostCommand =
 // Canonical tool names — the ONE implementation lives in tool_executor.ts.
 export const TOOLS = [
   "read_file",
+  "list_directory",
+  "patch_file",
   "write_file",
   "run_shell",
   "run_tests",

@@ -63,7 +63,6 @@ export interface DevSessionWireRequest {
   /** Tool names this host supports — the client owns the allowlist; the
    *  server intersects with its own known set and never sends anything else. */
   capabilities: string[];
-  /** Advertise bounded read_file byte ranges only when this host supports them. */
   read_file_ranges?: boolean;
   /** Advertise expected_revision support independently of older range support. */
   read_file_revisions?: boolean;

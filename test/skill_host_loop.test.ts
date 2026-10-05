@@ -624,7 +624,7 @@ test("the loaded skill's digest and trust state are in the header, not just its 
   assert.match(header, new RegExp(id.replace("/", "\\/") + "@1\\.0\\.0"));
   assert.ok(header.includes(sha256.slice(0, 12)), "the digest the run actually loaded is shown");
   assert.match(header, /trust trusted/);
-  assert.match(header, /read_file · repo_search {2}— 2 of 8 host tools, enforced for every tool this host executes/);
+  assert.match(header, /read_file · repo_search {2}— 2 of 10 host tools, enforced for every tool this host executes/);
 });
 
 test("the packaged built-in skills still load and narrow for real", () => {

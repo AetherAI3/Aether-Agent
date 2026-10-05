@@ -188,8 +188,7 @@ test("ToolExecutor writes then reads a file in the workspace", () => {
     assert.match(w.output, /\[wrote a\.txt/);
     assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "hello");
     const r = ex.execute("read_file", { path: "a.txt" });
-    assert.match(r.output, /range=0\.\.5 total_bytes=5 complete=true truncated=false/);
-    assert.match(r.output, /\nhello\n\[\/read_file\]$/);
+    assert.equal(JSON.parse(r.output).content, "hello");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -373,8 +372,8 @@ test("two sequential tool calls: each result pairs to its own id, in order", asy
       brain.pairs.map((p) => p.id),
       ["A", "B"],
     );
-    assert.match(brain.pairs[0]?.output ?? "", /\nAAA\n\[\/read_file\]$/); // A's result is a.txt, not b.txt
-    assert.match(brain.pairs[1]?.output ?? "", /\nBBB\n\[\/read_file\]$/);
+    assert.equal(JSON.parse(brain.pairs[0]!.output).content, "AAA"); // A's result is a.txt, not b.txt
+    assert.equal(JSON.parse(brain.pairs[1]!.output).content, "BBB");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -432,15 +431,17 @@ test("PROTOCOL_VERSION matches the shared fixture", () => {
   assert.equal(fx.protocol_version, PROTOCOL_VERSION);
 });
 
-test("PROTOCOL_VERSION is 3 (web tools landed; mirror of aether_agent.protocol)", () => {
-  assert.equal(PROTOCOL_VERSION, 3);
+test("PROTOCOL_VERSION is 4 (filesystem tools landed)", () => {
+  assert.equal(PROTOCOL_VERSION, 4);
 });
 
-test("TOOLS is the canonical 8-tool set including the web tools", () => {
+test("TOOLS is the canonical 10-tool set including filesystem and web tools", () => {
   assert.deepEqual(
     [...TOOLS],
     [
       "read_file",
+      "list_directory",
+      "patch_file",
       "write_file",
       "run_shell",
       "run_tests",
