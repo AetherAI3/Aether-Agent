@@ -1,6 +1,8 @@
-// Exact purpose=doctor request and scripted engine frames from AETHER-CLOUD
-// commit 66eb07505684af2482669aede9af5da5ccfac04e. Keep this fixture aligned
-// with lib/agent_dev/synthetic.py and tests/api/test_agent_dev_session_routes.py.
+// Scripted doctor engine frames from AETHER-CLOUD commit
+// 66eb07505684af2482669aede9af5da5ccfac04e. The request also reflects
+// the client filesystem capability extensions introduced for issue #250.
+// Keep the frame fixture aligned with lib/agent_dev/synthetic.py and
+// tests/api/test_agent_dev_session_routes.py.
 
 export const CLOUD_DOCTOR_CONTRACT_COMMIT = "66eb07505684af2482669aede9af5da5ccfac04e";
 export const CLOUD_DOCTOR_PROBE_CONTENT = "aether doctor live probe";
@@ -13,6 +15,8 @@ export function cloudDoctorCreateRequest(runId: string): Record<string, unknown>
     effort: null,
     capabilities: [
       "read_file",
+      "list_directory",
+      "patch_file",
       "write_file",
       "run_shell",
       "run_tests",
@@ -21,6 +25,7 @@ export function cloudDoctorCreateRequest(runId: string): Record<string, unknown>
       "web_search",
       "web_fetch",
     ],
+    read_file_ranges: true,
     protocol_version: 1,
     purpose: "doctor",
     max_uvt: 0,
