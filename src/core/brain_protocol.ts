@@ -154,7 +154,7 @@ export type BrainEvent =
   // ok is derived from a real final test run; remaining = failing tests when not ok;
   // reason ∈ "" | "stalled" | "no-progress" | "max-turns" | "unverified".
   | { type: "done"; ok: boolean; result: string; remaining: number; reason: string }
-  | { type: "error"; msg: string }
+  | { type: "error"; msg: string; errorCode?: string; requestId?: string }
   // memory bridge — QOPC memory frames forwarded as events
   | {
       type: "memory";

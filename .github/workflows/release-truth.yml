@@ -13,12 +13,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-truth-${{ github.ref }}
+  group: release-truth-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:
   watchdog:
-    runs-on: ubuntu-latest
+    # Registry verification may use a trusted VPS; package publication stays in release.yml.
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - name: Checkout repository

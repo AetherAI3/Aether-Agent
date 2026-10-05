@@ -146,8 +146,8 @@ function normalizeFrameBody(obj: Record<string, unknown>): StreamFrameBody | nul
       return {
         type: "error",
         msg: streamErrorMessage(obj),
-        errorCode: strOrUndef(obj["error_code"] ?? obj["errorCode"] ?? obj["code"]),
-        refId: strOrUndef(obj["ref_id"] ?? obj["refId"]),
+        errorCode: safeSupportIdentifier(obj["error_code"] ?? obj["errorCode"] ?? obj["code"]),
+        refId: safeSupportIdentifier(obj["request_id"] ?? obj["ref_id"] ?? obj["refId"]),
       };
     case "session":
       return {
@@ -367,6 +367,10 @@ function numOrUndef(v: unknown): number | undefined {
 }
 function strOrUndef(v: unknown): string | undefined {
   return v == null ? undefined : String(v);
+}
+
+function safeSupportIdentifier(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(value) ? value : undefined;
 }
 
 const LEGACY_PUBLIC_STREAM_ERRORS = new Set([
