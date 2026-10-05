@@ -27,8 +27,7 @@ jobs:
           - os: ubuntu-latest
             self_hosted_runner: '["self-hosted","Linux","X64","aether-agent-ci"]'
           - os: windows-latest
-            self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-ci"]'
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON(matrix.self_hosted_runner) || matrix.os }}
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -132,8 +131,7 @@ jobs:
           - os: ubuntu-latest
             self_hosted_runner: '["self-hosted","Linux","X64","aether-agent-ci"]'
           - os: windows-latest
-            self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-ci"]'
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON(matrix.self_hosted_runner) || matrix.os }}
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
