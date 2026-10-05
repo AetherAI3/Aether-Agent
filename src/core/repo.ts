@@ -48,9 +48,37 @@ export function ghAvailable(): boolean {
   return r.status === 0;
 }
 
-/** Local mirror dir for a repo: ~/.aether-agent/repos/<owner>-<name>. */
-export function localMirrorDir(spec: RepoSpec): string {
-  return join(homedir(), ".aether-agent", "repos", `${spec.owner}-${spec.name}`);
+/**
+ * Encode each segment separately so punctuation and case remain distinct on
+ * both case-sensitive and case-insensitive filesystems. The prefix also keeps
+ * Windows device names and trailing dots out of path components.
+ */
+function mirrorSegment(segment: string): string {
+  return `x${Buffer.from(segment, "utf8").toString("hex")}`;
+}
+
+/** Local mirror dir for a new repo: ~/.aether-agent/repos/v2/<owner>/<name>. */
+export function localMirrorDir(spec: RepoSpec, reposDir = join(homedir(), ".aether-agent", "repos")): string {
+  return join(reposDir, "v2", mirrorSegment(spec.owner), mirrorSegment(spec.name));
+}
+
+/** Keep an existing flat mirror in place only when its origin identifies this repo. */
+function mirrorDirFor(spec: RepoSpec, run: Runner, reposDir: string): string {
+  const legacy = join(reposDir, `${spec.owner}-${spec.name}`);
+  if (!existsSync(join(legacy, ".git"))) {
+    return localMirrorDir(spec, reposDir);
+  }
+  const remote = run("git", ["-C", legacy, "remote", "get-url", "origin"]);
+  if (remote.status !== 0) {
+    throw new Error(`could not validate the origin of local mirror at ${legacy}: ${remote.stderr.trim() || "git remote get-url origin failed"}`);
+  }
+  let actual: string;
+  try {
+    actual = parseRepoSpec(remote.stdout.trim()).full;
+  } catch {
+    throw new Error(`local mirror at ${legacy} does not point at ${spec.full} — its origin is "${remote.stdout.trim()}"`);
+  }
+  return actual === spec.full ? legacy : localMirrorDir(spec, reposDir);
 }
 
 /** gh/git clone argv for a repo into `dir`. Pure (testable). */
@@ -74,8 +102,12 @@ export interface RepoCheckout {
  * its dir. Reuses an existing mirror. Throws with an actionable message on a
  * clone failure (private repo + no auth is the common case).
  */
-export function ensureLocalClone(spec: RepoSpec, run: Runner = defaultRunner()): RepoCheckout {
-  const dir = localMirrorDir(spec);
+export function ensureLocalClone(
+  spec: RepoSpec,
+  run: Runner = defaultRunner(),
+  reposDir = join(homedir(), ".aether-agent", "repos"),
+): RepoCheckout {
+  const dir = mirrorDirFor(spec, run, reposDir);
   // A mirror that already exists is validated and fetched before anything
   // branches off it. Reusing it on the strength of its path alone is how a
   // task silently starts from a days-old tip.

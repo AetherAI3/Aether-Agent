@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { parseRepoSpec, cloneArgs, prCreateHint, refreshMirror } from "../src/core/repo.js";
+import { parseRepoSpec, cloneArgs, ensureLocalClone, localMirrorDir, prCreateHint, refreshMirror } from "../src/core/repo.js";
 import { defaultRunner, worktreeAddArgs, type Runner, type RunResult } from "../src/core/worktree.js";
 
 test("parseRepoSpec accepts owner/name", () => {
@@ -48,6 +48,76 @@ test("cloneArgs uses gh when available, git otherwise", () => {
 test("prCreateHint targets the repo + branch", () => {
   const hint = prCreateHint(parseRepoSpec("octocat/hello-world"), "aether/fix-1");
   assert.match(hint, /gh pr create -R octocat\/hello-world --head aether\/fix-1 --fill/);
+});
+
+test("new mirror paths keep owner and name distinct across filesystem conventions", () => {
+  const root = join(tmpdir(), "mirror-paths");
+  const pairs = ["a-b/c", "a/b-c", "Case/repo", "case/repo", "a./repo", "a/repo."];
+  const paths = pairs.map((pair) => localMirrorDir(parseRepoSpec(pair), root));
+  assert.equal(new Set(paths.map((path) => path.toLowerCase())).size, pairs.length);
+  for (const path of paths) {
+    const parts = path.slice(root.length + 1).split(/[\\/]/);
+    assert.equal(parts[0], "v2");
+    assert.equal(parts.length, 3);
+    assert.match(parts[1]!, /^x[0-9a-f]+$/);
+    assert.match(parts[2]!, /^x[0-9a-f]+$/);
+    assert.ok(parts.every((part) => part.length < 255));
+  }
+});
+
+test("colliding legacy names select their own mirrors in both access orders", (t) => {
+  for (const [firstName, secondName] of [["a-b/c", "a/b-c"], ["a/b-c", "a-b/c"]]) {
+    const root = mkdtempSync(join(tmpdir(), "aether-repo-collision-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const first = parseRepoSpec(firstName!);
+    const second = parseRepoSpec(secondName!);
+    const legacy = join(root, "a-b-c");
+    const distinct = localMirrorDir(second, root);
+    mkdirSync(join(legacy, ".git"), { recursive: true });
+    mkdirSync(join(distinct, ".git"), { recursive: true });
+    writeFileSync(join(legacy, "local-work.txt"), "preserve me\n");
+    const origins = new Map([[legacy, first.full], [distinct, second.full]]);
+    const run: Runner = (_cmd, args) => {
+      if (args.includes("get-url")) return OK(`https://github.com/${origins.get(args[1]!)}.git\n`);
+      if (args.includes("ls-remote")) return { status: 1, stdout: "", stderr: "offline" };
+      throw new Error(`unexpected git command: ${args.join(" ")}`);
+    };
+    assert.equal(ensureLocalClone(first, run, root).dir, legacy);
+    assert.equal(ensureLocalClone(second, run, root).dir, distinct);
+    assert.equal(ensureLocalClone(first, run, root).cloned, false);
+    assert.equal(readFileSync(join(legacy, "local-work.txt"), "utf8"), "preserve me\n");
+  }
+});
+
+test("a legacy mirror for the same repo is reused in place", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aether-repo-legacy-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const spec = parseRepoSpec("owner/name");
+  const legacy = join(root, "owner-name");
+  mkdirSync(join(legacy, ".git"), { recursive: true });
+  const run: Runner = (_cmd, args) => args.includes("get-url")
+    ? OK("git@github.com:owner/name.git\n")
+    : { status: 1, stdout: "", stderr: "offline" };
+  const result = ensureLocalClone(spec, run, root);
+  assert.equal(result.dir, legacy);
+  assert.equal(result.cloned, false);
+  assert.equal(result.freshness.state, "unknown");
+  assert.equal(existsSync(localMirrorDir(spec, root)), false);
+});
+
+test("a wrong origin at the new mirror path is refused", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aether-repo-wrong-origin-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const spec = parseRepoSpec("a/b-c");
+  const dir = localMirrorDir(spec, root);
+  mkdirSync(join(dir, ".git"), { recursive: true });
+  writeFileSync(join(dir, "local-work.txt"), "preserve me\n");
+  const run: Runner = (_cmd, args) => {
+    assert.ok(args.includes("get-url"), "wrong-origin mirror must not be fetched");
+    return OK("https://github.com/a-b/c.git\n");
+  };
+  assert.throws(() => ensureLocalClone(spec, run, root), /does not point at a\/b-c/);
+  assert.equal(readFileSync(join(dir, "local-work.txt"), "utf8"), "preserve me\n");
 });
 
 // ── mirror freshness (SC-A2) ────────────────────────────────────────────────
