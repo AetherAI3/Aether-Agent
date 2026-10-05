@@ -23,10 +23,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            self_hosted_runner: '["self-hosted","Linux","X64","aether-agent-ci"]'
+          - os: windows-latest
+            self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-ci"]'
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -44,6 +46,7 @@ jobs:
 
       - name: Upload exact-source evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           name: aether-exact-head-test-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: aether-exact-head-source.json
@@ -99,6 +102,7 @@ jobs:
 
       - name: Upload ATS execution parity evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           name: aether-ats-execution-parity-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ats-execution-parity.json
@@ -124,10 +128,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            self_hosted_runner: '["self-hosted","Linux","X64","aether-agent-ci"]'
+          - os: windows-latest
+            self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-ci"]'
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -230,7 +236,7 @@ jobs:
         shell: bash
 
   supply-chain:
-    runs-on: [self-hosted, Linux, X64, aether-agent-ci]
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -248,6 +254,7 @@ jobs:
 
       - name: Upload exact-source evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           name: aether-exact-head-supply-chain-${{ github.event.pull_request.head.sha || github.sha }}
           path: aether-exact-head-source.json
@@ -313,6 +320,7 @@ jobs:
       - name: Upload dependency-audit evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           name: aether-dependency-audit-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
@@ -344,6 +352,7 @@ jobs:
 
       - name: Upload SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           name: aether-agents-sbom-${{ github.event.pull_request.head.sha || github.sha }}
           path: aether-agents.cdx.json
@@ -352,7 +361,7 @@ jobs:
 
   pypi-launcher:
     name: PyPI launcher
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - name: Checkout repository
@@ -370,6 +379,7 @@ jobs:
 
       - name: Upload exact-source evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           name: aether-exact-head-pypi-launcher-${{ github.event.pull_request.head.sha || github.sha }}
           path: aether-exact-head-source.json
