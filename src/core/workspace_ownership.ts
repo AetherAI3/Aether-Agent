@@ -15,10 +15,16 @@ export class WorkspaceOwnership {
   private readonly owned = new Set<string>();
   private usable = true;
 
-  constructor(private readonly root: string) {
-    this.runner = new SpawnGitRunner(root);
+  private readonly root: string;
+
+  constructor(root: string) {
+    // Windows TEMP can use an 8.3 profile alias while Git reports its long
+    // name. Native realpath expands that alias on both sides, so equivalent
+    // workspace paths remain owned without accepting files outside the root.
+    this.root = realpathSync.native(root);
+    this.runner = new SpawnGitRunner(this.root);
     const repo = this.runner.run(["rev-parse", "--show-toplevel"]);
-    this.repoRoot = repo.ok ? repo.stdout.trim() : root;
+    this.repoRoot = repo.ok ? realpathSync.native(repo.stdout.trim()) : this.root;
     this.last = this.capture();
     for (const path of this.last.keys()) this.excluded.add(path);
   }
@@ -35,7 +41,7 @@ export class WorkspaceOwnership {
         let value: string;
         if (stat.isSymbolicLink()) value = "link:" + readlinkSync(abs);
         else if (stat.isFile()) {
-          const physical = realpathSync(abs);
+          const physical = realpathSync.native(abs);
           if (!physical.startsWith(this.root + sep)) { this.usable = false; continue; }
           value = createHash("sha256").update(readFileSync(abs)).digest("hex");
         } else { this.usable = false; continue; }

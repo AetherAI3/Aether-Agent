@@ -64,6 +64,8 @@ export interface DevSessionWireRequest {
    *  server intersects with its own known set and never sends anything else. */
   capabilities: string[];
   read_file_ranges?: boolean;
+  /** Advertise expected_revision support independently of older range support. */
+  read_file_revisions?: boolean;
   max_uvt?: number;
   repo?: Record<string, unknown>;
   protocol_version: number;
@@ -75,6 +77,7 @@ export interface BuildDevSessionArgs {
   effort?: string;
   capabilities: readonly string[];
   readFileRanges?: boolean;
+  readFileRevisions?: boolean;
   maxUvt?: number;
   repo?: Record<string, unknown>;
   protocolVersion: number;
@@ -91,6 +94,7 @@ export function buildDevSessionRequest(args: BuildDevSessionArgs): DevSessionWir
   };
   if (args.maxUvt && args.maxUvt > 0) req.max_uvt = args.maxUvt;
   if (args.readFileRanges) req.read_file_ranges = true;
+  if (args.readFileRevisions) req.read_file_revisions = true;
   if (args.repo) req.repo = args.repo;
   return req;
 }

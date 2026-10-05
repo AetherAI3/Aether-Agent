@@ -25,6 +25,7 @@ test("validators accept every canonical tool shape", () => {
   const calls: Array<[string, Record<string, unknown>]> = [
     ["read_file", { path: "a.ts" }],
     ["read_file", { path: "a.ts", offset: 4096, max_bytes: 1024 }],
+    ["read_file", { path: "a.ts", offset: 4096, expected_revision: "r1_example" }],
     ["write_file", { path: "a.ts", content: "" }],
     ["run_shell", { command: "git status" }],
     ["run_tests", {}],
@@ -55,6 +56,10 @@ test("validators reject unknown, malformed, oversized, and extra arguments", () 
   assert.deepEqual(validateToolCall("read_file", { path: "" }), {
     ok: false,
     error: "path must not be empty",
+  });
+  assert.deepEqual(validateToolCall("read_file", { path: "x", expected_revision: "" }), {
+    ok: false,
+    error: "expected_revision must not be empty",
   });
   assert.match(
     (validateToolCall("write_file", { path: "x", content: "x".repeat(1024 * 1024 + 1) }) as { error: string }).error,

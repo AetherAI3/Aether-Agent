@@ -129,6 +129,22 @@ History:
    manifest's `finalStatus` mirrors it (`ok` only on a verified green;
    `unverified` when `task.test_cmd`=""). `remaining` = failing tests when not ok.
 
+### Bounded file-read revision guards
+
+`read_file` reads files up to 16 MiB into one bounded buffer. UTF-8 validation,
+SHA-256, and returned byte or line ranges use that same buffer. Its opaque
+`revision` binds opened-handle identity and metadata to the content digest;
+timestamps alone cannot identify same-tick rewrites.
+
+On Linux, an `expected_revision` continuation recomputes this bounded snapshot
+and refuses a different revision with `stale_revision`. Successful bounded
+reads return the actual `sha256` and `validation_scope: "whole_file"`, including
+guarded continuations. Guarded reads on other platforms or above 16 MiB return
+`revision_unsupported` before content I/O. Larger files retain unguarded bounded
+byte paging with `sha256: null` and `validation_scope: "returned_range"`.
+Opened-handle containment, symlink checks, observed read-conflict checks, and
+the output budget still apply.
+
 ---
 
 ## 2. ATS trading contracts (Spec 1, Gate 1.0)  ·  frozen

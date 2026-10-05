@@ -32,7 +32,7 @@ const stringArg = (
 export const TOOL_DEFINITIONS: Readonly<Record<ToolName, ToolDefinition>> = {
   read_file: {
     sideEffect: "read",
-    args: { path: stringArg(4096), start_line: { type: "integer", required: false, min: 1, max: 1_000_000 }, max_lines: { type: "integer", required: false, min: 1, max: 200 }, offset: { type: "integer", required: false, min: 0, max: Number.MAX_SAFE_INTEGER }, max_bytes: { type: "integer", required: false, min: 4, max: 4096 } },
+    args: { path: stringArg(4096), start_line: { type: "integer", required: false, min: 1, max: 1_000_000 }, max_lines: { type: "integer", required: false, min: 1, max: 200 }, offset: { type: "integer", required: false, min: 0, max: Number.MAX_SAFE_INTEGER }, max_bytes: { type: "integer", required: false, min: 4, max: 4096 }, expected_revision: stringArg(128, false) },
   },
   list_directory: {
     sideEffect: "read",
