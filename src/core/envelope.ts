@@ -63,6 +63,8 @@ export interface DevSessionWireRequest {
   /** Tool names this host supports — the client owns the allowlist; the
    *  server intersects with its own known set and never sends anything else. */
   capabilities: string[];
+  /** Advertise bounded read_file byte ranges only when this host supports them. */
+  read_file_ranges?: boolean;
   max_uvt?: number;
   repo?: Record<string, unknown>;
   protocol_version: number;
@@ -73,6 +75,7 @@ export interface BuildDevSessionArgs {
   model?: string;
   effort?: string;
   capabilities: readonly string[];
+  readFileRanges?: boolean;
   maxUvt?: number;
   repo?: Record<string, unknown>;
   protocolVersion: number;
@@ -88,6 +91,7 @@ export function buildDevSessionRequest(args: BuildDevSessionArgs): DevSessionWir
     protocol_version: args.protocolVersion,
   };
   if (args.maxUvt && args.maxUvt > 0) req.max_uvt = args.maxUvt;
+  if (args.readFileRanges) req.read_file_ranges = true;
   if (args.repo) req.repo = args.repo;
   return req;
 }
