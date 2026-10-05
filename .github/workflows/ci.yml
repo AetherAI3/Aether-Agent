@@ -144,7 +144,7 @@ jobs:
     needs: build-and-test
     # Keep package smoke tests available when only an upstream artifact upload
     # failed. They report their own result and never make build-and-test green.
-    if: ${{ always() && needs['build-and-test'].result != 'cancelled' }}
+    if: ${{ !cancelled() && needs['build-and-test'].result != 'cancelled' }}
     strategy:
       fail-fast: false
       matrix:
