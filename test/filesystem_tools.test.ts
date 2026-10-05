@@ -63,6 +63,7 @@ test("reads stay bounded for sparse files and report continuations at UTF-8 and 
   assert.equal(large["next_offset"], 4);
   assert.equal(large["size"], 32 * 1024 * 1024);
   assert.equal(large["sha256"], null, "oversized files cannot be patch targets");
+  assert.equal(large["validation_scope"], "returned_range", "bytes outside the requested range were not checked for binary content");
   writeFileSync(join(dir, "unicode.txt"), "a😀b");
   assert.deepEqual([read(exec, "unicode.txt", { max_bytes: 4 })["content"], read(exec, "unicode.txt", { offset: 1, max_bytes: 4 })["content"]], ["a", "😀"]);
   assert.match(exec.execute("read_file", { path: "unicode.txt", offset: 2, max_bytes: 4 }).output, /splits a UTF-8 character/);

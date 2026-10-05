@@ -544,7 +544,7 @@ export class ToolExecutor {
           catch { end--; }
         }
         if (end === 0 && offset < size) return { output: `[offset splits a UTF-8 character or invalid UTF-8: ${path}]`, exitCode: 1 };
-        result = { output: JSON.stringify({ path, sha256: digest, offset, next_offset: offset + end < size ? offset + end : null, size, content: decoder.decode(bytes.subarray(0, end)) }), exitCode: 0 };
+        result = { output: JSON.stringify({ path, sha256: digest, offset, next_offset: offset + end < size ? offset + end : null, size, validation_scope: digest === null ? "returned_range" : "whole_file", content: decoder.decode(bytes.subarray(0, end)) }), exitCode: 0 };
       } else {
         const start = Number(args["start_line"] ?? 1);
         const count = Number(args["max_lines"] ?? 200);
@@ -588,10 +588,10 @@ export class ToolExecutor {
         }
         if (!stopped) finishLine(false);
         if (selectedLines === 0 && !tooLong) return { output: `[start_line beyond EOF: ${path}]`, exitCode: 1 };
-        if (tooLong) result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: null, size, content: "", note: "line exceeds 6000 bytes; use offset/max_bytes" }), exitCode: 0 };
+        if (tooLong) result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: null, size, validation_scope: digest === null ? "returned_range" : "whole_file", content: "", note: "line exceeds 6000 bytes; use offset/max_bytes" }), exitCode: 0 };
         else {
           const content = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(selected, selectedBytes));
-          result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: next, size, content }), exitCode: 0 };
+          result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: next, size, validation_scope: digest === null ? "returned_range" : "whole_file", content }), exitCode: 0 };
         }
       }
       const after = fstatSync(fd);
