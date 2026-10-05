@@ -1,6 +1,8 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { closeSync, ftruncateSync, openSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { ToolExecutor } from "../src/core/tool_executor.js";
 import { tmpWorkspace } from "./tmp_workspace.js";
@@ -82,7 +84,8 @@ test("guarded byte and line ranges keep one revision or fail closed", () => work
   const second = JSON.parse(byteResult.output) as Record<string, unknown>;
   assert.equal(second["content"], "efgh\n");
   assert.equal(second["next_offset"], 10);
-  assert.equal(second["sha256"], null, "guarded continuation must not hash the whole file again");
+  assert.equal(second["sha256"], first["sha256"], "guarded ranges carry the actual bounded snapshot digest");
+  assert.equal(second["validation_scope"], "whole_file");
   assert.equal(revision(second), token);
   assert.equal(lineResult.exitCode, 0, lineResult.output);
   const line = JSON.parse(lineResult.output) as Record<string, unknown>;
@@ -106,6 +109,79 @@ test("guarded ranges reject same-size rewrite, append, truncate, and atomic repl
     assert.equal(result.exitCode, 1, name);
     assert.match(result.output, process.platform === "linux" ? /stale_revision/ : /revision_unsupported/, name);
     assert.doesNotMatch(result.output, /efgh/, name);
+  }
+}));
+
+test("guarded reads reject changed bytes even when opened-handle metadata is identical", { skip: process.platform !== "linux" }, () => workspace((dir, executor) => {
+  const path = join(dir, "same-tick.txt");
+  writeFileSync(path, "abcdefghijkl");
+  const metadata = fs.statSync(path, { bigint: true });
+  const stat = mock.method(fs, "fstatSync", () => metadata);
+  syncBuiltinESMExports();
+  try {
+    const first = read(executor, { path: "same-tick.txt", max_bytes: 4 });
+    const token = revision(first);
+    // Change a different page: unchanged requested bytes are insufficient proof.
+    writeFileSync(path, "abcdXXXXijkl");
+    const result = executor.execute("read_file", { path: "same-tick.txt", offset: 8, expected_revision: token });
+    assert.equal(result.exitCode, 1, result.output);
+    assert.match(result.output, /stale_revision/);
+    assert.doesNotMatch(result.output, /ijkl/);
+  } finally {
+    stat.mock.restore();
+    syncBuiltinESMExports();
+  }
+}));
+
+test("bounded reads return the bytes from their hashed snapshot", () => workspace((dir, executor) => {
+  const path = join(dir, "snapshot.txt");
+  writeFileSync(path, "abcdefghijkl");
+  const metadata = fs.statSync(path, { bigint: true });
+  const originalRead = fs.readSync;
+  let contentReads = 0;
+  const stat = mock.method(fs, "fstatSync", () => metadata);
+  const sourceRead = mock.method(fs, "readSync", (...args: Parameters<typeof fs.readSync>) => {
+    const n = originalRead(...args);
+    contentReads++;
+    if (contentReads === 1) writeFileSync(path, "XXXXXXXXXXXX");
+    return n;
+  });
+  syncBuiltinESMExports();
+  try {
+    const first = read(executor, { path: "snapshot.txt", max_bytes: 4 });
+    assert.equal(first["content"], "abcd");
+    assert.equal(contentReads, 1, "range bytes must come from the validated snapshot");
+    assert.equal(first["validation_scope"], "whole_file");
+  } finally {
+    sourceRead.mock.restore();
+    stat.mock.restore();
+    syncBuiltinESMExports();
+  }
+}));
+
+test("large guarded reads refuse before reading content while unguarded pages stay bounded", () => workspace((dir, executor) => {
+  const path = join(dir, "large-range.txt");
+  const fd = openSync(path, "w");
+  try { ftruncateSync(fd, 16 * 1024 * 1024 + 1); }
+  finally { closeSync(fd); }
+  const originalRead = fs.readSync;
+  let contentBytes = 0;
+  const sourceRead = mock.method(fs, "readSync", (...args: Parameters<typeof fs.readSync>) => {
+    const n = originalRead(...args);
+    contentBytes += n;
+    return n;
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = executor.execute("read_file", { path: "large-range.txt", expected_revision: "r1_" + "a".repeat(43) });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.output, /revision_unsupported/);
+    assert.equal(contentBytes, 0);
+    assert.match(executor.execute("read_file", { path: "large-range.txt", max_bytes: 4 }).output, /binary file/);
+    assert.ok(contentBytes <= 5, "unguarded byte pages must not scan the large file");
+  } finally {
+    sourceRead.mock.restore();
+    syncBuiltinESMExports();
   }
 }));
 
