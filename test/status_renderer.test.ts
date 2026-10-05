@@ -51,3 +51,21 @@ test("hostile progress metrics are clamped before status rendering", () => {
     sr.composeLine();
   });
 });
+
+test("a confirmation keeps the status line from repainting over the review", () => {
+  const sink = new StringSink({ isTTY: true, colorEnabled: false });
+  const sr = new StatusRenderer({ sink, now: () => 0, ownsProcess: false });
+  sr.start();
+  const resume = sr.pauseForPrompt();
+  const before = sink.buffer;
+  sr.setVerb("Changed while waiting", "");
+  sr.setHeartbeat("!");
+  assert.equal(sink.buffer, before, "status changes must not overwrite the open prompt");
+  resume();
+  assert.match(sink.buffer.slice(before.length), /Changed while waiting/);
+  const lateResume = sr.pauseForPrompt();
+  sr.end();
+  const afterEnd = sink.buffer;
+  lateResume();
+  assert.equal(sink.buffer, afterEnd, "late prompt cleanup must not repaint after teardown");
+});
