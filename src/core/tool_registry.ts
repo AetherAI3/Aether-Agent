@@ -32,7 +32,11 @@ const stringArg = (
 export const TOOL_DEFINITIONS: Readonly<Record<ToolName, ToolDefinition>> = {
   read_file: {
     sideEffect: "read",
-    args: { path: stringArg(4096) },
+    args: {
+      path: stringArg(4096),
+      offset: { type: "integer", required: false, min: 0, max: Number.MAX_SAFE_INTEGER },
+      max_bytes: { type: "integer", required: false, min: 4, max: 4096 },
+    },
   },
   write_file: {
     sideEffect: "write",

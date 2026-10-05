@@ -7,7 +7,7 @@
 // regardless of which side originally ran it.
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, constants as fsConstants, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, constants as fsConstants, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { BoundedOutput } from "./bounded_output.js";
@@ -20,6 +20,7 @@ import { ShellSession } from "./shell_session.js";
 import { WorkspaceOwnership } from "./workspace_ownership.js";
 
 const MAX_OUTPUT = 8000;
+const READ_DEFAULT_BYTES = 4096;
 // CONTRACTS.md invariant 5: an unset test_cmd means "no ground truth to assert" —
 // it must default to "" (unverifiable), never a real command. brain_protocol.ts's
 // encodeCommand was fixed to this in cac0399; this sibling default is the executor
@@ -400,7 +401,7 @@ export class ToolExecutor {
     try {
       switch (name as ToolName) {
         case "read_file":
-          return this.readFile(String(args["path"] ?? ""));
+          return this.readFile(String(args["path"] ?? ""), Number(args["offset"] ?? 0), Number(args["max_bytes"] ?? READ_DEFAULT_BYTES));
         case "write_file":
           return this.writeFile(String(args["path"] ?? ""), String(args["content"] ?? ""));
         case "run_shell":
@@ -493,12 +494,77 @@ export class ToolExecutor {
     return this.executeSync(name, args);
   }
 
-  private readFile(path: string): ToolResult {
+  private readFile(path: string, offset: number, maxBytes: number): ToolResult {
     const abs = this.safe(path);
-    if (!existsSync(abs) || !statSync(abs).isFile()) {
+    const pathLabel = JSON.stringify(path);
+    // Reserve room for metadata and the end marker. A long (or heavily
+    // escaped) path must never make the returned tool output unbounded.
+    const outputBudget = MAX_OUTPUT - pathLabel.length - 512;
+    if (outputBudget < 4) return { output: "[read_file path too long to report within output limit]", exitCode: 1 };
+    if (!existsSync(abs)) {
       return { output: `[no such file: ${path}]`, exitCode: 1 };
     }
-    return { output: readFileSync(abs, "utf8").slice(0, MAX_OUTPUT), exitCode: 0 };
+    // The existing safe() guard checks the resolved path, including symlinks.
+    // Read at most the requested bytes; even a sparse multi-gigabyte file stays cheap.
+    const fd = openSync(abs, fsConstants.O_RDONLY);
+    try {
+      const initial = fstatSync(fd);
+      if (!initial.isFile()) return { output: `[not a regular file: ${path}]`, exitCode: 1 };
+      if (offset > initial.size) return { output: `[read_file offset ${offset} exceeds file size ${initial.size}: ${path}]`, exitCode: 1 };
+
+      if (offset < initial.size) {
+        const first = Buffer.allocUnsafe(1);
+        if (readSync(fd, first, 0, 1, offset) !== 1) {
+          return { output: `[read_file changed while reading: ${path}; retry]`, exitCode: 1 };
+        }
+        if ((first[0]! & 0xc0) === 0x80) {
+          return { output: `[read_file offset ${offset} is inside a UTF-8 character: ${path}]`, exitCode: 1 };
+        }
+      }
+
+      const bytes = Buffer.allocUnsafe(Math.min(maxBytes, outputBudget, initial.size - offset));
+      let count = 0;
+      while (count < bytes.length) {
+        const n = readSync(fd, bytes, count, bytes.length - count, offset + count);
+        if (n === 0) break;
+        count += n;
+      }
+      const current = fstatSync(fd);
+      if (current.size !== initial.size || count !== bytes.length) {
+        return { output: `[read_file changed while reading: ${path}; retry]`, exitCode: 1 };
+      }
+      if (bytes.subarray(0, count).some((byte) => byte === 0 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 127)) {
+        return { output: `[read_file unsupported binary content (control byte) at ${path}; range ${offset}..${offset + count} of ${initial.size} bytes]`, exitCode: 1 };
+      }
+
+      // Streaming decode accepts an incomplete trailing character while still
+      // rejecting malformed bytes. The encoded length is the exact byte cursor
+      // for the valid prefix, including an optional UTF-8 BOM.
+      let content: string;
+      try {
+        const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+        content = decoder.decode(bytes, { stream: true });
+        if (offset + count === initial.size) content += decoder.decode();
+      }
+      catch {
+        return { output: `[read_file unsupported or invalid UTF-8 content at ${path}; range ${offset}..${offset + count} of ${initial.size} bytes]`, exitCode: 1 };
+      }
+      const end = Buffer.byteLength(content, "utf8");
+      const nextOffset = offset + end;
+      if (nextOffset === offset && offset < initial.size) {
+        return { output: `[read_file could not return a complete UTF-8 character at ${path}; increase max_bytes]`, exitCode: 1 };
+      }
+      const before = Buffer.allocUnsafe(1);
+      const startsMidLine = offset > 0 && readSync(fd, before, 0, 1, offset - 1) === 1 && before[0] !== 10;
+      const endsMidLine = nextOffset < initial.size && end > 0 && bytes[end - 1] !== 10;
+      const complete = offset === 0 && nextOffset === initial.size;
+      return {
+        output: `[read_file path=${pathLabel} range=${offset}..${nextOffset} total_bytes=${initial.size} complete=${complete} truncated=${nextOffset < initial.size} next_offset=${nextOffset < initial.size ? nextOffset : "none"} starts_mid_line=${startsMidLine} ends_mid_line=${endsMidLine} utf8_checked=returned_range]\n${content}\n[/read_file]`,
+        exitCode: 0,
+      };
+    } finally {
+      closeSync(fd);
+    }
   }
 
   private writeFile(path: string, content: string): ToolResult {

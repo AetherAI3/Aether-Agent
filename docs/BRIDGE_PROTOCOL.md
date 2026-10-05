@@ -59,8 +59,19 @@ on decode and back on encode.
 `read_file · write_file · run_shell · run_tests · repo_search · git_commit`
 
 - One path-guard confines every path to `cwd` (traversal refused).
-- Output is capped and prefixed `[exit N]\n…` so the brain's grounding gate
-  (`tests_pass` / `parse_fail_count`) reads the same shape for local and cloud.
+- `read_file` accepts `path` and optional byte `offset` (default 0) and
+  `max_bytes` (4–4096, default 4096). Its result reports the actual byte range,
+  total size, `complete`, `truncated`, `next_offset`, and line-boundary flags.
+  A long path may reduce the returned byte count to keep the tool output below
+  its cap. Continue at `next_offset` when truncated. An offset inside a UTF-8 character,
+  binary content, or invalid UTF-8 is rejected. UTF-8 validation covers the
+  returned range; unread bytes are not certified as text. A tail range can have
+  `truncated=false` while `complete=false` because earlier bytes were omitted.
+  Hosted dev sessions include `read_file_ranges: true` on create when the host
+  supports these arguments; older hosts retain the path-only model schema.
+- Tool output is bounded. Shell and test output includes `[exit N]`; file reads
+  include explicit range and continuation metadata. The host sends the same
+  result shape to local and cloud brains.
 
 ## The loop
 

@@ -240,6 +240,7 @@ export class CloudBrain implements Brain {
             model: task.model,
             effort: task.effort,
             capabilities: this.opts.localToolCapabilities ?? TOOLS,
+            readFileRanges: true,
             maxUvt: this.opts.maxUvt,
             protocolVersion: DEV_PROTOCOL_VERSION,
           }),
