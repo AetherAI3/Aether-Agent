@@ -36,6 +36,7 @@ export const TOOL_DEFINITIONS: Readonly<Record<ToolName, ToolDefinition>> = {
       path: stringArg(4096),
       offset: { type: "integer", required: false, min: 0, max: Number.MAX_SAFE_INTEGER },
       max_bytes: { type: "integer", required: false, min: 4, max: 4096 },
+      expected_revision: stringArg(128, false),
     },
   },
   write_file: {

@@ -7,7 +7,9 @@
 // regardless of which side originally ran it.
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, constants as fsConstants, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import type { BigIntStats } from "node:fs";
+import { closeSync, constants as fsConstants, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { BoundedOutput } from "./bounded_output.js";
@@ -21,6 +23,14 @@ import { WorkspaceOwnership } from "./workspace_ownership.js";
 
 const MAX_OUTPUT = 8000;
 const READ_DEFAULT_BYTES = 4096;
+// Linux local filesystems with nanosecond change metadata. Network and unknown
+// filesystems are deliberately excluded from guarded continuation.
+const REVISION_FS_TYPES = new Set([0xef53n, 0x58465342n, 0x9123683en, 0x01021994n, 0x794c7630n]);
+
+function fileRevision(stat: BigIntStats): string {
+  const fields = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.birthtimeNs];
+  return "r1_" + createHash("sha256").update(fields.map(String).join(":"), "utf8").digest("base64url");
+}
 // CONTRACTS.md invariant 5: an unset test_cmd means "no ground truth to assert" —
 // it must default to "" (unverifiable), never a real command. brain_protocol.ts's
 // encodeCommand was fixed to this in cac0399; this sibling default is the executor
@@ -401,7 +411,7 @@ export class ToolExecutor {
     try {
       switch (name as ToolName) {
         case "read_file":
-          return this.readFile(String(args["path"] ?? ""), Number(args["offset"] ?? 0), Number(args["max_bytes"] ?? READ_DEFAULT_BYTES));
+          return this.readFile(String(args["path"] ?? ""), Number(args["offset"] ?? 0), Number(args["max_bytes"] ?? READ_DEFAULT_BYTES), args["expected_revision"] as string | undefined);
         case "write_file":
           return this.writeFile(String(args["path"] ?? ""), String(args["content"] ?? ""));
         case "run_shell":
@@ -494,7 +504,7 @@ export class ToolExecutor {
     return this.executeSync(name, args);
   }
 
-  private readFile(path: string, offset: number, maxBytes: number): ToolResult {
+  private readFile(path: string, offset: number, maxBytes: number, expectedRevision?: string): ToolResult {
     const abs = this.safe(path);
     const pathLabel = JSON.stringify(path);
     // Reserve room for metadata and the end marker. A long (or heavily
@@ -506,13 +516,41 @@ export class ToolExecutor {
     }
     // The existing safe() guard checks the resolved path, including symlinks.
     // Read at most the requested bytes; even a sparse multi-gigabyte file stays cheap.
-    const fd = openSync(abs, fsConstants.O_RDONLY);
+    const fd = openSync(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
     try {
-      const initial = fstatSync(fd);
+      const initial = fstatSync(fd, { bigint: true });
       if (!initial.isFile()) return { output: `[not a regular file: ${path}]`, exitCode: 1 };
-      if (offset > initial.size) return { output: `[read_file offset ${offset} exceeds file size ${initial.size}: ${path}]`, exitCode: 1 };
+      // The Linux proc link names the actual opened object, including through
+      // parent symlinks. On other hosts, check the path again and require it to
+      // still name this handle; guarded continuation is unavailable there.
+      if (process.platform === "linux") {
+        const openedPath = readlinkSync(`/proc/self/fd/${fd}`).replace(/ \(deleted\)$/, "");
+        if (openedPath !== this.root && !openedPath.startsWith(this.root + sep)) {
+          return { output: `[read_file opened outside workspace: ${path}]`, exitCode: 1 };
+        }
+      } else {
+        this.safe(path);
+        const named = statSync(abs, { bigint: true });
+        if (named.dev !== initial.dev || named.ino !== initial.ino) {
+          return { output: `[read_file path changed while opening: ${path}; retry]`, exitCode: 1 };
+        }
+      }
+      const revision = fileRevision(initial);
+      if (expectedRevision !== undefined) {
+        let supported = false;
+        if (process.platform === "linux" && initial.dev !== 0n && initial.ino !== 0n) {
+          try {
+            supported = REVISION_FS_TYPES.has(statfsSync(`/proc/self/fd/${fd}`, { bigint: true }).type);
+          } catch { /* procfs or filesystem metadata unavailable */ }
+        }
+        if (!supported) return { output: `[read_file revision_unsupported: guarded continuation is unavailable on this filesystem; ${path}]`, exitCode: 1 };
+        if (expectedRevision !== revision) return { output: `[read_file stale_revision: ${path}; restart from offset 0]`, exitCode: 1 };
+      }
+      const totalBytes = Number(initial.size);
+      if (!Number.isSafeInteger(totalBytes)) return { output: `[read_file file size exceeds supported range: ${path}]`, exitCode: 1 };
+      if (offset > totalBytes) return { output: `[read_file offset ${offset} exceeds file size ${totalBytes}: ${path}]`, exitCode: 1 };
 
-      if (offset < initial.size) {
+      if (offset < totalBytes) {
         const first = Buffer.allocUnsafe(1);
         if (readSync(fd, first, 0, 1, offset) !== 1) {
           return { output: `[read_file changed while reading: ${path}; retry]`, exitCode: 1 };
@@ -522,19 +560,19 @@ export class ToolExecutor {
         }
       }
 
-      const bytes = Buffer.allocUnsafe(Math.min(maxBytes, outputBudget, initial.size - offset));
+      const bytes = Buffer.allocUnsafe(Math.min(maxBytes, outputBudget, totalBytes - offset));
       let count = 0;
       while (count < bytes.length) {
         const n = readSync(fd, bytes, count, bytes.length - count, offset + count);
         if (n === 0) break;
         count += n;
       }
-      const current = fstatSync(fd);
-      if (current.size !== initial.size || count !== bytes.length) {
+      const current = fstatSync(fd, { bigint: true });
+      if (fileRevision(current) !== revision || count !== bytes.length) {
         return { output: `[read_file changed while reading: ${path}; retry]`, exitCode: 1 };
       }
       if (bytes.subarray(0, count).some((byte) => byte === 0 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 127)) {
-        return { output: `[read_file unsupported binary content (control byte) at ${path}; range ${offset}..${offset + count} of ${initial.size} bytes]`, exitCode: 1 };
+        return { output: `[read_file unsupported binary content (control byte) at ${path}; range ${offset}..${offset + count} of ${totalBytes} bytes]`, exitCode: 1 };
       }
 
       // Streaming decode accepts an incomplete trailing character while still
@@ -544,22 +582,25 @@ export class ToolExecutor {
       try {
         const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
         content = decoder.decode(bytes, { stream: true });
-        if (offset + count === initial.size) content += decoder.decode();
+        if (offset + count === totalBytes) content += decoder.decode();
       }
       catch {
-        return { output: `[read_file unsupported or invalid UTF-8 content at ${path}; range ${offset}..${offset + count} of ${initial.size} bytes]`, exitCode: 1 };
+        return { output: `[read_file unsupported or invalid UTF-8 content at ${path}; range ${offset}..${offset + count} of ${totalBytes} bytes]`, exitCode: 1 };
       }
       const end = Buffer.byteLength(content, "utf8");
       const nextOffset = offset + end;
-      if (nextOffset === offset && offset < initial.size) {
+      if (nextOffset === offset && offset < totalBytes) {
         return { output: `[read_file could not return a complete UTF-8 character at ${path}; increase max_bytes]`, exitCode: 1 };
       }
       const before = Buffer.allocUnsafe(1);
       const startsMidLine = offset > 0 && readSync(fd, before, 0, 1, offset - 1) === 1 && before[0] !== 10;
-      const endsMidLine = nextOffset < initial.size && end > 0 && bytes[end - 1] !== 10;
-      const complete = offset === 0 && nextOffset === initial.size;
+      const endsMidLine = nextOffset < totalBytes && end > 0 && bytes[end - 1] !== 10;
+      if (fileRevision(fstatSync(fd, { bigint: true })) !== revision) {
+        return { output: `[read_file changed while reading: ${path}; retry]`, exitCode: 1 };
+      }
+      const complete = offset === 0 && nextOffset === totalBytes;
       return {
-        output: `[read_file path=${pathLabel} range=${offset}..${nextOffset} total_bytes=${initial.size} complete=${complete} truncated=${nextOffset < initial.size} next_offset=${nextOffset < initial.size ? nextOffset : "none"} starts_mid_line=${startsMidLine} ends_mid_line=${endsMidLine} utf8_checked=returned_range]\n${content}\n[/read_file]`,
+        output: `[read_file path=${pathLabel} range=${offset}..${nextOffset} total_bytes=${totalBytes} complete=${complete} truncated=${nextOffset < totalBytes} next_offset=${nextOffset < totalBytes ? nextOffset : "none"} starts_mid_line=${startsMidLine} ends_mid_line=${endsMidLine} utf8_checked=returned_range revision=${revision}]\n${content}\n[/read_file]`,
         exitCode: 0,
       };
     } finally {

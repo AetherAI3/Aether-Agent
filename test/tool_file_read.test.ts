@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { closeSync, ftruncateSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, ftruncateSync, openSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ToolExecutor } from "../src/core/tool_executor.js";
 import { tmpWorkspace } from "./tmp_workspace.js";
@@ -9,6 +9,16 @@ function workspace(run: (dir: string, executor: ToolExecutor) => void): void {
   const dir = tmpWorkspace("aether-read-file-");
   try { run(dir, new ToolExecutor(dir)); }
   finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+function revision(output: string): string {
+  const token = /\brevision=(r1_[A-Za-z0-9_-]+)\]/.exec(output)?.[1];
+  assert.ok(token, "successful read must return a revision");
+  return token;
+}
+
+function guarded(executor: ToolExecutor, path: string, token: string) {
+  return executor.execute("read_file", { path, offset: 4, max_bytes: 4, expected_revision: token });
 }
 
 test("read_file bounds a large sparse file and states its continuation", () => workspace((dir, executor) => {
@@ -26,6 +36,7 @@ test("read_file bounds a large sparse file and states its continuation", () => w
   assert.equal(first.exitCode, 0);
   assert.match(first.output, /range=0\.\.4096 total_bytes=16384 complete=false truncated=true next_offset=4096/);
   assert.match(first.output, /ends_mid_line=true/);
+  revision(first.output);
   assert.ok(first.output.length < 5000);
 }));
 
@@ -46,6 +57,47 @@ test("read_file identifies an empty file as complete", () => workspace((dir, exe
   const result = executor.execute("read_file", { path: "empty.txt" });
   assert.equal(result.exitCode, 0);
   assert.match(result.output, /range=0\.\.0 total_bytes=0 complete=true truncated=false next_offset=none/);
+  revision(result.output);
+}));
+
+test("read_file guarded continuation either reads one revision or fails closed on this platform", () => workspace((dir, executor) => {
+  const path = join(dir, "ranges.txt");
+  writeFileSync(path, "abcdefghijkl");
+  const first = executor.execute("read_file", { path: "ranges.txt", max_bytes: 4 });
+  const token = revision(first.output);
+  const second = guarded(executor, "ranges.txt", token);
+  if (process.platform !== "linux") {
+    assert.equal(second.exitCode, 1);
+    assert.match(second.output, /revision_unsupported/);
+    assert.doesNotMatch(second.output, /efgh/);
+    return;
+  }
+  assert.equal(second.exitCode, 0);
+  assert.equal(revision(second.output), token);
+  assert.match(second.output, /range=4\.\.8 total_bytes=12 complete=false truncated=true next_offset=8/);
+  const third = executor.execute("read_file", { path: "ranges.txt", offset: 8, expected_revision: token });
+  assert.equal(third.exitCode, 0);
+  assert.equal(revision(third.output), token);
+  assert.match(third.output, /range=8\.\.12 total_bytes=12 complete=false truncated=false next_offset=none/);
+}));
+
+test("read_file rejects changed, appended, truncated, and replaced guarded ranges", () => workspace((dir, executor) => {
+  const path = join(dir, "changing.txt");
+  const cases: Array<[string, () => void]> = [
+    ["same-size rewrite", () => writeFileSync(path, "XXXXXXXXXXXX")],
+    ["append", () => writeFileSync(path, "abcdefghijklmnop")],
+    ["truncate", () => writeFileSync(path, "abcdef")],
+    ["atomic replacement", () => { writeFileSync(join(dir, "replacement.txt"), "YYYYYYYYYYYY"); renameSync(join(dir, "replacement.txt"), path); }],
+  ];
+  for (const [name, mutate] of cases) {
+    writeFileSync(path, "abcdefghijkl");
+    const token = revision(executor.execute("read_file", { path: "changing.txt", max_bytes: 4 }).output);
+    mutate();
+    const result = guarded(executor, "changing.txt", token);
+    assert.equal(result.exitCode, 1, name);
+    assert.match(result.output, process.platform === "linux" ? /stale_revision/ : /revision_unsupported/, name);
+    assert.doesNotMatch(result.output, /\[\/read_file\]/, name);
+  }
 }));
 
 test("read_file rejects binary and malformed UTF-8", () => workspace((dir, executor) => {
