@@ -41,6 +41,15 @@ test("normalizeFrame error uses contract keys msg/error_code/ref_id", () => {
   assert.deepEqual(f, { type: "error", msg: "boom", errorCode: "E42", refId: "r1" });
 });
 
+test("request_id support metadata is preserved and terminal escape text is rejected", () => {
+  assert.deepEqual(normalizeFrame({ type: "error", msg: "failed", error_code: "E_SAFE", request_id: "req_one" }), {
+    type: "error", msg: "failed", errorCode: "E_SAFE", refId: "req_one",
+  });
+  const frame = normalizeFrame({ type: "error", msg: "failed", request_id: "req\u001b[2J", error_code: "secret\ntext" });
+  assert.ok(frame?.type === "error");
+  assert.equal(frame.refId, undefined); assert.equal(frame.errorCode, undefined);
+});
+
 test("normalizeFrame accepts canonical and fixed legacy public error text only", () => {
   const base = { type: "error", reason: "internal detail" };
   assert.deepEqual(normalizeFrame({ ...base, msg: "primary", error: "private provider exception" }), {
