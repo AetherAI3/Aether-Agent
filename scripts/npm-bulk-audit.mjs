@@ -12,14 +12,46 @@ const NPM_PACKAGE_NAME = /^(?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*$
 const BASE64_DIGEST = /^[A-Za-z0-9+/]+={0,2}$/u;
 const NPM_SEVERITIES = Object.freeze(["info", "low", "moderate", "high", "critical"]);
 const MAX_REQUEST_BYTES = 1_000_000;
-// This source package is bundled with the CLI, not fetched from a registry.
-// Keep the exception pinned; its runtime dependencies still require registry
+// These reviewed source packages are bundled with the CLI, not fetched from a registry.
+// Keep both exceptions pinned; ATS runtime dependencies still require registry
 // tarballs, sha512 integrity and inclusion in the advisory request below.
 const ATS_NAME = "aether-ats-skills";
 const ATS_LOCATION = `node_modules/${ATS_NAME}`;
 const ATS_TARGET = "packages/ats-skills";
 const ATS_VERSION = "0.2.0";
 const ATS_DEPENDENCIES = Object.freeze({ "aether-browser": "0.2.2", "aether-context": "0.3.1" });
+const QR_NAME = "aether-rc-qr";
+const QR_LOCATION = `node_modules/${QR_NAME}`;
+const QR_TARGET = "packages/qrcode-terminal";
+const QR_VERSION = "0.1.0";
+
+function validateBundledRoot(packages) {
+  const root = packages[""];
+  return isRecord(root)
+    && hasExactKeys(root.dependencies, [ATS_NAME, QR_NAME])
+    && root.dependencies[ATS_NAME] === ATS_VERSION
+    && root.dependencies[QR_NAME] === QR_VERSION
+    && Array.isArray(root.workspaces)
+    && root.workspaces.length === 2
+    && root.workspaces[0] === ATS_TARGET && root.workspaces[1] === QR_TARGET
+    && Array.isArray(root.bundleDependencies)
+    && root.bundleDependencies.length === 2
+    && root.bundleDependencies[0] === ATS_NAME && root.bundleDependencies[1] === QR_NAME;
+}
+
+function validateBundledQrLink(packages, metadata) {
+  const target = packages[QR_TARGET];
+  if (!validateBundledRoot(packages)
+      || !hasExactKeys(metadata, ["resolved", "link"])
+      || metadata.link !== true || metadata.resolved !== QR_TARGET
+      || !isRecord(target) || target.name !== QR_NAME || target.version !== QR_VERSION
+      || Object.hasOwn(target, "link") || Object.hasOwn(target, "resolved")
+      || (Object.hasOwn(target, "dependencies") && !hasExactKeys(target.dependencies, []))
+      || ["optionalDependencies", "peerDependencies", "devDependencies", "bundleDependencies", "bundledDependencies"].some(
+        (key) => Object.hasOwn(target, key))) {
+    throw new Error("bundled QR link must match the pinned root dependency, bundle and target metadata");
+  }
+}
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -60,21 +92,12 @@ function validateBundledAtsLink(packages, metadata) {
   const reject = () => {
     throw new Error("bundled ATS link must match the pinned root dependency, bundle and target metadata");
   };
-  const root = packages[""];
   const target = packages[ATS_TARGET];
   if (
     !hasExactKeys(metadata, ["resolved", "link"]) ||
     metadata.link !== true ||
     metadata.resolved !== ATS_TARGET ||
-    !isRecord(root) ||
-    !isRecord(root.dependencies) ||
-    root.dependencies[ATS_NAME] !== ATS_VERSION ||
-    !Array.isArray(root.workspaces) ||
-    root.workspaces.length !== 1 ||
-    root.workspaces[0] !== ATS_TARGET ||
-    !Array.isArray(root.bundleDependencies) ||
-    root.bundleDependencies.length !== 1 ||
-    root.bundleDependencies[0] !== ATS_NAME ||
+    !validateBundledRoot(packages) ||
     !isRecord(target) ||
     target.name !== ATS_NAME ||
     target.version !== ATS_VERSION ||
@@ -116,6 +139,11 @@ export function collectNpmBulkPayload(lockfile) {
     throw new Error("package-lock.json must use lockfileVersion 2 or 3");
   }
   assertRecord(lockfile.packages, "package-lock.json packages");
+  const rootDependencies = lockfile.packages[""]?.dependencies;
+  if (isRecord(rootDependencies) && (Object.hasOwn(rootDependencies, ATS_NAME) || Object.hasOwn(rootDependencies, QR_NAME))) {
+    validateBundledAtsLink(lockfile.packages, lockfile.packages[ATS_LOCATION]);
+    validateBundledQrLink(lockfile.packages, lockfile.packages[QR_LOCATION]);
+  }
 
   const versionsByName = new Map();
   let nodeModulesEntries = 0;
@@ -126,8 +154,9 @@ export function collectNpmBulkPayload(lockfile) {
     assertRecord(metadata, `locked package entry ${location}`);
 
     if (Object.hasOwn(metadata, "link")) {
-      if (location !== ATS_LOCATION) throw new Error(`unsupported local package link: ${location}`);
-      validateBundledAtsLink(lockfile.packages, metadata);
+      if (location === ATS_LOCATION) validateBundledAtsLink(lockfile.packages, metadata);
+      else if (location === QR_LOCATION) validateBundledQrLink(lockfile.packages, metadata);
+      else throw new Error(`unsupported local package link: ${location}`);
       continue;
     }
 
