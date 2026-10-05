@@ -123,6 +123,7 @@ export interface ReadFileArgs {
   max_bytes?: number;
   start_line?: number;
   max_lines?: number;
+  expected_revision?: string;
 }
 
 export interface WorkflowDoneFrame {

@@ -63,14 +63,31 @@ on decode and back on encode.
   default 4096) or line `start_line`/`max_lines` (1–200, default 200). Its JSON
   result reports content, file size, and an explicit continuation (`next_offset`
   or `next_start_line`). Byte results also report the returned range,
-  `complete`, `truncated`, and line-boundary flags. A long path or heavily
+  `complete`, `truncated`, and line-boundary flags. Every successful result
+  includes an opaque `revision`. Send it unchanged as `expected_revision` with
+  each later byte or line range. A changed file returns exit code 1 with
+  `stale_revision` and no content; restart from the beginning. A long path or heavily
   escaped content may reduce the returned byte count to keep output bounded.
   An offset inside a UTF-8 character, binary content, or invalid UTF-8 is
-  rejected. Patchable files up to 16 MiB have a whole-file `sha256` and
-  `validation_scope: whole_file`; larger files return `sha256: null` and only
-  validate the returned range. A tail byte range can have `truncated: false`
+  rejected. An initial unguarded read of a patchable file up to 16 MiB has a
+  whole-file `sha256` and `validation_scope: whole_file`. Guarded continuations
+  skip the whole-file digest to keep the revision check bounded, returning
+  `sha256: null` and `validation_scope: returned_range`; larger files do the
+  same. A tail byte range can have `truncated: false`
   while `complete: false` because earlier bytes were omitted. Hosted dev
-  sessions explicitly advertise `read_file_ranges: true` when supported.
+  sessions explicitly advertise `read_file_ranges: true` and
+  `read_file_revisions: true` when supported.
+
+  The revision is a digest of the opened file's device, identity, size, and
+  nanosecond change timestamps, not a content hash or persistent snapshot.
+  Guarded continuation is supported on Linux local ext-family, XFS, Btrfs,
+  tmpfs, and overlay filesystems. Other systems return `revision_unsupported`
+  with exit code 1 and no content. Windows can report unchanged timestamps
+  across an immediate same-size rewrite. Concurrent writes that restore all
+  tracked metadata, timestamp manipulation, and unusual filesystem behavior
+  can evade a metadata revision; use a filesystem snapshot for stronger
+  guarantees. All revision comparisons use the opened handle, and Linux also
+  verifies that handle stays inside the workspace.
 - Tool output is bounded. Shell and test output includes `[exit N]`; file reads
   include explicit range and continuation metadata. The host sends the same
   result shape to local and cloud brains.
