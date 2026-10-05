@@ -46,7 +46,7 @@ import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js"
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
 import { ModelOutputBudget } from "../core/model_output_budget.js";
-import { decideGate } from "../core/autonomy.js";
+import { prepareToolApproval, requestToolApproval } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SessionContext } from "../core/session_resume.js";
 import type { SkillSessionProvenance } from "../core/skills/skill_session.js";
@@ -777,21 +777,16 @@ export async function cmdCode(
   // non-TTY (CI/pipe) an un-pre-approved call FAILS CLOSED rather than running
   // unattended. `--yes` or `permissionMode: skip` opt out.
   const gate: ToolGate = async ({ name, args }) => {
-    const outcome = decideGate(name, ctx.cfg.permissionMode, ctx.cfg.autoApply, {
-      yes: ctx.flags.yes,
-      isTty: Boolean(process.stdin.isTTY),
-    });
-    if (outcome === "allow") return true;
-    if (outcome === "deny") {
-      process.stderr.write(
+    return requestToolApproval({
+      name, args: args as Record<string, string | number>,
+      permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
+      yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
+      shellCwd: exec.shellCwd, fileRoot: cwd, confirm: ctx.confirm,
+      onDeny: () => process.stderr.write(
         `✗ blocked ${name} — permission mode "${ctx.cfg.permissionMode}" needs confirmation but there is no TTY.\n` +
           `  re-run with --yes, or set a less strict mode: aether config set permissionMode skip\n`,
-      );
-      return false;
-    }
-    const detail = String(args["command"] ?? args["path"] ?? args["message"] ?? "");
-    const shown = detail.length > 200 ? detail.slice(0, 197) + "…" : detail;
-    return ctx.confirm(`\n⚠ ${name}${shown ? ` ${shown}` : ""} [cwd: ${sanitizeServerText(exec.shellCwd)}; file root: ${sanitizeServerText(cwd)}] — run it? [y/N] `);
+      ),
+    });
   };
 
   // Presentation fork — TTY (and not --json/--quiet) gets the live animated
@@ -1199,10 +1194,20 @@ export async function hostLoop(
             modelOutput.reset();
             break;
           }
+          const prepared = prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
+          if (!prepared.ok) {
+            const denied: ToolResult = { output: `[tool ${ev.name} rejected: ${prepared.error}]`, exitCode: 1 };
+            onToolResult?.(ev.id, denied);
+            brain.sendToolResult(ev.id, denied);
+            lastMeaningfulAt = Date.now();
+            modelSegmentStartedAt = lastMeaningfulAt;
+            modelOutput.reset();
+            break;
+          }
           const approvalContext = exec.shellContext;
           const approved = gate
             ? await boundedCodeOperation(
-                () => gate({ name: ev.name, args: ev.args }),
+                () => gate({ name: ev.name, args: prepared.args }),
                 timeoutMs,
                 lastMeaningfulAt,
                 signal,
@@ -1213,12 +1218,13 @@ export async function hostLoop(
           const remaining = remainingCodeProgressMs(timeoutMs, lastMeaningfulAt);
           const runOptions: RunOptions = {
             expectedShellContext: approvalContext,
+            expectedToolCall: prepared.binding,
             ...(signal ? { signal } : {}),
             ...(timeoutMs > 0 ? { timeoutMs: Math.max(1, remaining) } : {}),
           };
           const result: ToolResult = approved
             ? await boundedCodeOperation(
-                () => exec.executeAsync(ev.name, ev.args, runOptions),
+                () => exec.executeAsync(ev.name, prepared.args, runOptions),
                 timeoutMs,
                 lastMeaningfulAt,
                 signal,
