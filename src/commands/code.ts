@@ -770,6 +770,7 @@ export async function cmdCode(
 
   const interactive = Boolean(opts.interactive) && Boolean(process.stdin.isTTY);
   const onToolResult = (id: string, result: ToolResult): void => log?.toolResult(id, result, nowIso());
+  let confirmToolReview = ctx.confirm;
 
   // Permission gate: every brain-emitted mutating/shell tool call is approved
   // here before the host runs it. Honors the configured permission mode + auto-
@@ -781,7 +782,7 @@ export async function cmdCode(
       name, args: args as Record<string, string | number>,
       permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
       yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
-      shellCwd: exec.shellCwd, fileRoot: cwd, confirm: ctx.confirm,
+      shellCwd: exec.shellCwd, fileRoot: cwd, confirm: confirmToolReview,
       onDeny: () => process.stderr.write(
         `✗ blocked ${name} — permission mode "${ctx.cfg.permissionMode}" needs confirmation but there is no TTY.\n` +
           `  re-run with --yes, or set a less strict mode: aether config set permissionMode skip\n`,
@@ -823,6 +824,11 @@ export async function cmdCode(
   if (animated) {
     const sr = new StatusRenderer({ mode: brainKind === "local" ? "local" : "api", ownsProcess: false });
     sr.start();
+    confirmToolReview = async (review) => {
+      const resume = sr.pauseForPrompt();
+      try { return await ctx.confirm(review); }
+      finally { resume(); }
+    };
     replay((line) => sr.log(line));
     const anim = new AnimationController({
       onFrame: (_stage, art) => sr.setAnim(art),
