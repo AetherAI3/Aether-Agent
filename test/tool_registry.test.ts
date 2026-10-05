@@ -24,6 +24,7 @@ test("typed tool definitions cover the frozen protocol exactly", () => {
 test("validators accept every canonical tool shape", () => {
   const calls: Array<[string, Record<string, unknown>]> = [
     ["read_file", { path: "a.ts" }],
+    ["read_file", { path: "a.ts", offset: 4096, max_bytes: 1024 }],
     ["write_file", { path: "a.ts", content: "" }],
     ["run_shell", { command: "git status" }],
     ["run_tests", {}],

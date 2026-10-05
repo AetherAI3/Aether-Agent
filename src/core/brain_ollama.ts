@@ -334,7 +334,7 @@ function parseArgs(raw: string): Record<string, unknown> {
  */
 export function ollamaToolSchemas(tools: readonly ToolName[] = TOOLS): readonly ToolSchema[] {
   const summaries: Readonly<Record<ToolName, string>> = {
-    read_file: "Read a workspace file.",
+    read_file: "Read up to 4096 bytes of a workspace file. Use offset and max_bytes to continue; the result reports the returned byte range, total size, and whether more remains.",
     write_file: "Write or overwrite a workspace file.",
     run_shell: "Run a shell command in the workspace.",
     run_tests: "Run the project's test command.",

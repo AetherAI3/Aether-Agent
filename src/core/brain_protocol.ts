@@ -116,6 +116,13 @@ export interface RoutingDriftFrame {
   fatal: boolean;
 }
 
+/** Optional byte range for read_file tool_call args on both bridge transports. */
+export interface ReadFileArgs {
+  path: string;
+  offset?: number;
+  max_bytes?: number;
+}
+
 export interface WorkflowDoneFrame {
   type: "workflow_done";
   synthesis: string;

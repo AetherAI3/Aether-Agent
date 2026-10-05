@@ -188,7 +188,8 @@ test("ToolExecutor writes then reads a file in the workspace", () => {
     assert.match(w.output, /\[wrote a\.txt/);
     assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "hello");
     const r = ex.execute("read_file", { path: "a.txt" });
-    assert.equal(r.output, "hello");
+    assert.match(r.output, /range=0\.\.5 total_bytes=5 complete=true truncated=false/);
+    assert.match(r.output, /\nhello\n\[\/read_file\]$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -372,8 +373,8 @@ test("two sequential tool calls: each result pairs to its own id, in order", asy
       brain.pairs.map((p) => p.id),
       ["A", "B"],
     );
-    assert.equal(brain.pairs[0]?.output, "AAA"); // A's result is a.txt, not b.txt
-    assert.equal(brain.pairs[1]?.output, "BBB");
+    assert.match(brain.pairs[0]?.output ?? "", /\nAAA\n\[\/read_file\]$/); // A's result is a.txt, not b.txt
+    assert.match(brain.pairs[1]?.output ?? "", /\nBBB\n\[\/read_file\]$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
