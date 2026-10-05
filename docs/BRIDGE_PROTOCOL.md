@@ -63,12 +63,26 @@ on decode and back on encode.
   `max_bytes` (4–4096, default 4096). Its result reports the actual byte range,
   total size, `complete`, `truncated`, `next_offset`, and line-boundary flags.
   A long path may reduce the returned byte count to keep the tool output below
-  its cap. Continue at `next_offset` when truncated. An offset inside a UTF-8 character,
+  its cap. Every successful result also has an opaque `revision` token. For a
+  multi-range read, pass that token unchanged as `expected_revision` along with
+  `next_offset` on every later call. A mismatch returns exit code 1 with
+  `stale_revision` and no content; restart at offset 0. An offset inside a UTF-8 character,
   binary content, or invalid UTF-8 is rejected. UTF-8 validation covers the
   returned range; unread bytes are not certified as text. A tail range can have
   `truncated=false` while `complete=false` because earlier bytes were omitted.
-  Hosted dev sessions include `read_file_ranges: true` on create when the host
-  supports these arguments; older hosts retain the path-only model schema.
+  The token is a bounded-cost digest of the opened file's device, identity,
+  size, and nanosecond change timestamps. It is not a content hash or a
+  persistent snapshot. Guarded continuation is supported on Linux local
+  ext-family, XFS, Btrfs, tmpfs, and overlay filesystems. Other systems return
+  `revision_unsupported` with exit code 1 and no content for a guarded call.
+  In particular, Windows can report identical timestamps across an immediate
+  same-size rewrite. Concurrent writes that restore all tracked metadata,
+  timestamp manipulation, and unusual filesystem behavior can evade a metadata
+  revision; callers needing stronger guarantees must use a filesystem snapshot.
+  All revision comparisons use the opened handle, and Linux verifies that
+  handle remains inside the workspace. Hosted dev sessions include
+  `read_file_ranges: true` and `read_file_revisions: true` on create when the
+  host supports these arguments; older hosts retain their previous schema.
 - Tool output is bounded. Shell and test output includes `[exit N]`; file reads
   include explicit range and continuation metadata. The host sends the same
   result shape to local and cloud brains.

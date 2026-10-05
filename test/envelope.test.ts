@@ -6,6 +6,8 @@ test("dev-session request advertises range reads only for a capable host", () =>
   const base = { task: "inspect", capabilities: ["read_file"], protocolVersion: 1 };
   assert.equal(buildDevSessionRequest(base).read_file_ranges, undefined);
   assert.equal(buildDevSessionRequest({ ...base, readFileRanges: true }).read_file_ranges, true);
+  assert.equal(buildDevSessionRequest(base).read_file_revisions, undefined);
+  assert.equal(buildDevSessionRequest({ ...base, readFileRevisions: true }).read_file_revisions, true);
 });
 
 test("buildChatRequest nulls empty model/agent and defaults to auto", () => {

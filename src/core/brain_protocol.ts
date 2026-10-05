@@ -121,6 +121,7 @@ export interface ReadFileArgs {
   path: string;
   offset?: number;
   max_bytes?: number;
+  expected_revision?: string;
 }
 
 export interface WorkflowDoneFrame {
