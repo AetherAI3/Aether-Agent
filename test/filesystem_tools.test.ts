@@ -96,6 +96,17 @@ test("stale, nonmatching, and ambiguous patches leave the file unchanged", () =>
   assert.deepEqual(readdirSync(dir), ["same.txt"]);
 }));
 
+test("patching a UTF-8 BOM file preserves bytes outside the matched hunk", () => workspace((dir, exec) => {
+  const path = join(dir, "bom.txt");
+  writeFileSync(path, "\uFEFFfirst\ntarget\n", "utf8");
+  const firstPage = read(exec, "bom.txt", { max_bytes: 4 });
+  assert.equal(firstPage["content"], "\uFEFFf");
+  assert.equal(firstPage["next_offset"], 4);
+  const patch = { path: "bom.txt", expected_sha256: firstPage["sha256"], old_text: "target", new_text: "changed" };
+  assert.equal(exec.execute("patch_file", patch).exitCode, 0);
+  assert.deepEqual(readFileSync(path), Buffer.from("\uFEFFfirst\nchanged\n", "utf8"));
+}));
+
 test("patches work at both file boundaries, preserve mode, and refuse symlinks", () => workspace((dir, exec) => {
   const path = join(dir, "bounds.txt");
   writeFileSync(path, "middle\n");

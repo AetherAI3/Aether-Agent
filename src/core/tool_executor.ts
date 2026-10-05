@@ -518,7 +518,7 @@ export class ToolExecutor {
       let digest: string | null = null;
       if (size <= FILE_PATCH_MAX_BYTES) {
         const hash = createHash("sha256");
-        const utf8 = new TextDecoder("utf-8", { fatal: true });
+        const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
         const block = Buffer.allocUnsafe(64 * 1024);
         for (let at = 0; at < size;) {
           const n = readSync(fd, block, 0, Math.min(block.length, size - at), at);
@@ -554,7 +554,7 @@ export class ToolExecutor {
         if (bytes.some((byte) => byte === 0 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 127)) {
           return { output: `[binary file: ${path}]`, exitCode: 1 };
         }
-        const decoder = new TextDecoder("utf-8", { fatal: true });
+        const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
         let end = bytes.length;
         while (end > 0) {
           try { decoder.decode(bytes.subarray(0, end)); break; }
@@ -627,7 +627,7 @@ export class ToolExecutor {
         if (selectedLines === 0 && !tooLong) return { output: `[start_line beyond EOF: ${path}]`, exitCode: 1 };
         if (tooLong) result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: null, size, validation_scope: digest === null ? "returned_range" : "whole_file", content: "", note: "line exceeds 6000 bytes; use offset/max_bytes" }), exitCode: 0 };
         else {
-          const content = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(selected, selectedBytes));
+          const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(selected, selectedBytes));
           result = { output: JSON.stringify({ path, sha256: digest, start_line: start, next_start_line: next, size, validation_scope: digest === null ? "returned_range" : "whole_file", content }), exitCode: 0 };
         }
       }
@@ -706,7 +706,7 @@ export class ToolExecutor {
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (!/^[a-f0-9]{64}$/.test(String(args["expected_sha256"]))) throw new Error("expected_sha256 must be lowercase SHA-256");
     if (digest !== args["expected_sha256"]) throw new Error(`conflict: file changed since read (current sha256 ${digest})`);
-    const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
     const oldText = String(args["old_text"]);
     const newText = String(args["new_text"]);
     if (oldText === newText) throw new Error("patch has no change");
