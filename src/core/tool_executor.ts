@@ -8,7 +8,8 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, opendirSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import type { Dirent } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { BoundedOutput } from "./bounded_output.js";
@@ -606,8 +607,15 @@ export class ToolExecutor {
     if (!existsSync(abs) || lstatSync(abs).isSymbolicLink() || !statSync(abs).isDirectory()) {
       return { output: `[no such directory: ${path}]`, exitCode: 1 };
     }
-    const entries = readdirSync(abs, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    if (entries.length > DIRECTORY_MAX_ENTRIES) return { output: "[directory exceeds 10000-entry listing limit]", exitCode: 1 };
+    const directory = opendirSync(abs);
+    const entries: Dirent[] = [];
+    try {
+      for (let entry = directory.readSync(); entry !== null; entry = directory.readSync()) {
+        entries.push(entry);
+        if (entries.length > DIRECTORY_MAX_ENTRIES) return { output: "[directory exceeds 10000-entry listing limit]", exitCode: 1 };
+      }
+    } finally { directory.closeSync(); }
+    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     const version = createHash("sha256").update(entries.map((e) => {
       const item = lstatSync(resolve(abs, e.name));
       return `${e.name}\0${e.isDirectory() ? "d" : e.isFile() ? "f" : e.isSymbolicLink() ? "l" : "o"}\0${item.size}\0${item.mtimeMs}\n`;
