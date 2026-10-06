@@ -103,15 +103,23 @@ function byKind(cat: CatalogResponse, kind: Kind): CatalogItem[] {
   return cat.models.filter((m) => m.kind === kind);
 }
 
+export function splitSlashCommand(line: string): { cmd: string; arg: string } {
+  const input = line.slice(1).trim();
+  const separator = input.search(/\s/u);
+  const cmd = (separator < 0 ? input : input.slice(0, separator)).toLowerCase();
+  // Keep the argument text intact. /ship parses quoting and may contain a
+  // literal newline in a quoted PR body; splitting here would corrupt it.
+  const arg = separator < 0 ? "" : input.slice(separator).trim();
+  return { cmd, arg };
+}
+
 export async function handleSlash(
   ctx: AppContext,
   line: string,
   out: Writable,
   signal?: AbortSignal,
 ): Promise<SlashResult> {
-  const parts = line.slice(1).trim().split(/\s+/);
-  const cmd = (parts[0] ?? "").toLowerCase();
-  const arg = parts.slice(1).join(" ");
+  const { cmd, arg } = splitSlashCommand(line);
 
   switch (cmd) {
     case "terminal":
@@ -231,7 +239,7 @@ export async function handleSlash(
       break;
     }
     case "agent-create": {
-      await cmdManagedAgents(ctx, ["create", ...parts.slice(1)], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
+      await cmdManagedAgents(ctx, ["create", ...(arg ? arg.split(/\s+/u) : [])], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
       break;
     }
     case "doctor": {

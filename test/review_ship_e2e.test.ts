@@ -15,6 +15,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +26,9 @@ import type { RunResult, Runner } from "../src/core/worktree.js";
 import { defaultRunner } from "../src/core/worktree.js";
 import { readRepoState } from "../src/core/review_state.js";
 import { runReview, type ReviewDeps } from "../src/commands/review.js";
-import { runShip, type ShipDeps } from "../src/commands/ship.js";
+import { parseShipSlashArgs, runShip, shipSlash, type ShipDeps } from "../src/commands/ship.js";
+import { CLI_PARSE_OPTIONS } from "../src/commands/cli_registry.js";
+import { splitSlashCommand } from "../src/commands/slash.js";
 import { spawnAsyncRun } from "../src/commands/review_counts.js";
 import { TEMP_ROOT } from "./tmp_workspace.js";
 
@@ -152,6 +155,98 @@ const remoteBranches = (remote: string): string[] =>
     .map((line) => line.trim())
     .filter(Boolean)
     .sort();
+
+test("/ship rejects malformed or unsupported input before any git, push, PR, or confirmation call", async () => {
+  const cases: Array<[string, RegExp]> = [
+    ["--title", /--title needs a value/],
+    ["--title --base main", /--title needs a value/],
+    ['--title "unterminated', /unterminated quote/],
+    ["--title hello\\", /trailing escape/],
+    ["--body-file proposal.md", /unsupported option: --body-file/],
+    ["--title first --title second", /duplicate option: --title/],
+    ["--json --json", /duplicate option: --json/],
+    ["--title good stray", /unexpected argument: stray/],
+    ["--title=", /--title needs a value/],
+    ["--yes=true", /--yes does not take a value/],
+  ];
+  for (const [arg, message] of cases) {
+    const out = sink();
+    let calls = 0;
+    let prompts = 0;
+    const deps: ShipDeps = {
+      run: () => { calls++; throw new Error("git or gh must not run"); },
+      cwd: "unused",
+      out: out.out,
+      io: { tty: true, note: () => {}, question: async () => { prompts++; return "y"; } },
+    };
+    await shipSlash(ctx, out.out, arg, deps);
+    assert.match(out.text(), message, arg);
+    assert.match(out.text(), /usage: \/ship/, arg);
+    assert.equal(calls, 0, arg);
+    assert.equal(prompts, 0, arg);
+  }
+});
+
+test("/ship handles escaped spaces, equals values, and help without running Git", async () => {
+  assert.deepEqual(parseShipSlashArgs('--title=Fix\\ auth\\ and\\ model\\ picker --base="main"'), {
+    yes: false, json: false, title: "Fix auth and model picker", base: "main",
+  });
+  assert.deepEqual(parseShipSlashArgs('--title "C:\\work\\file $(id)"'), {
+    yes: false, json: false, title: "C:\\work\\file $(id)",
+  });
+  const out = sink();
+  await shipSlash(ctx, out.out, "--help", {
+    run: () => { throw new Error("Git must not run for help"); },
+    cwd: "unused", out: out.out, io: io([]),
+  });
+  assert.match(out.text(), /--title.*--body.*--base.*--approve.*--yes.*--json/);
+  assert.equal(out.text().includes("--body-file"), false);
+});
+
+test("/ship and CLI preserve the same quoted Unicode, newlines, and literal shell-looking argv", async () => {
+  const fixture = repoFixture();
+  try {
+    writeFileSync(join(fixture.repo, "kept.ts"), "changed\n");
+    git(fixture.repo, "commit", "-am", "fix: source");
+    const title = 'Fix auth and model picker — "safe" $(whoami) `whoami`';
+    const body = "line one\nline two ☃ $HOME $(id) `id`";
+    const slashArg = '--title "Fix auth and model picker — \\"safe\\" $(whoami) `whoami`" ' +
+      "--body 'line one\nline two ☃ $HOME $(id) `id`' --base main";
+    assert.deepEqual(splitSlashCommand(`/ship ${slashArg}`), { cmd: "ship", arg: slashArg });
+    const cli = parseArgs({
+      args: ["ship", "--title", title, "--body", body, "--base", "main", "--approve", "publish"],
+      allowPositionals: true,
+      strict: true,
+      options: CLI_PARSE_OPTIONS,
+    });
+    assert.deepEqual(cli.positionals, ["ship"]);
+    assert.equal(cli.values["title"], title);
+    assert.equal(cli.values["body"], body);
+    const parsed = parseShipSlashArgs(slashArg);
+    assert.notEqual(parsed, "help");
+    assert.equal((parsed as { title?: string }).title, cli.values["title"]);
+    assert.equal((parsed as { body?: string }).body, cli.values["body"]);
+
+    const { run, calls } = railRunner(okGh);
+    const preview = sink();
+    await shipSlash(ctx, preview.out, `${slashArg} --json`, shipDeps(fixture, run, preview.out));
+    const planned = JSON.parse(preview.text()) as { commands: Array<{ cmd: string; args: string[] }> };
+    const plannedGh = planned.commands.find((command) => command.cmd === "gh")!.args;
+    assert.equal(plannedGh[plannedGh.indexOf("--title") + 1], title);
+    assert.equal(plannedGh[plannedGh.indexOf("--body") + 1], body);
+    assert.equal(calls.some((call) => call[0] === "gh" || call.includes("push")), false);
+
+    const published = sink();
+    await shipSlash(ctx, published.out, `${slashArg} --approve publish`, shipDeps(fixture, run, published.out));
+    const created = calls.find((call) => call[0] === "gh" && call[1] === "pr" && call[2] === "create");
+    assert.ok(created, published.text());
+    assert.deepEqual(created.slice(1), plannedGh);
+    assert.match(published.text(), /Fix auth and model picker/);
+    assert.match(published.text(), /PR opened:/);
+  } finally {
+    fixture.cleanup();
+  }
+});
 
 // ── the whole rail ──────────────────────────────────────────────────────────
 
