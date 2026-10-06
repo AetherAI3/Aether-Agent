@@ -122,6 +122,8 @@ interface Harness {
   path: string;
   ctx: AppContext;
   sent: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  /** Every append body exactly as it was handed to the transport, including attempts that failed. */
+  wire: string[];
   appendCalls: () => number;
   setOffline(value: boolean): void;
   /** Hold every append until the promise settles: a broker that never answers. */
@@ -141,6 +143,7 @@ function harness(options: { session?: boolean; revokePending?: boolean } = {}): 
     saveOutbox(path, record);
   }
   const sent: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
+  const wire: string[] = [];
   let appends = 0;
   let offline = false;
   let hold: Promise<void> | null = null;
@@ -163,6 +166,7 @@ function harness(options: { session?: boolean; revokePending?: boolean } = {}): 
       }
       assert.equal(endpoint, `/remote/sessions/${SESSION}/host/events`);
       appends += 1;
+      wire.push(JSON.stringify(body));
       if (hold) await hold;
       if (offline) throw new Error("broker offline");
       const events = (body as { events: Array<{
@@ -179,6 +183,7 @@ function harness(options: { session?: boolean; revokePending?: boolean } = {}): 
     path,
     ctx: { flags: { cwd: root }, api } as unknown as AppContext,
     sent,
+    wire,
     appendCalls: () => appends,
     setOffline(value) { offline = value; },
     setHold(value) { hold = value; },
@@ -213,13 +218,33 @@ async function execute(h: Harness, argv: string[]): Promise<{ code: number; enve
   return { code, envelope: JSON.parse(chunks[0]!) as Record<string, unknown> };
 }
 
+/**
+ * Nothing private reaches what can leave this machine: every append body the
+ * broker was handed, whole, and the outbox record whose queued events become
+ * the next bodies.
+ *
+ * The record's own `project_root` is the one field exempt from the scan, and
+ * only because it is local bookkeeping: loadOutbox needs it to re-relativize
+ * paths after a restart, and flushOutbox never sends it (device_id and events
+ * only). It is asserted to be exactly that rather than scanned as text, which
+ * failed on Linux for the harness's own field and was vacuous on Windows,
+ * where JSON escapes the root's backslashes so a raw-path search never matches.
+ */
 function assertNoLeak(h: Harness): void {
-  const wire = JSON.stringify(h.sent);
-  const disk = existsSync(h.path) ? readFileSync(h.path, "utf8") : "";
-  for (const text of [wire, disk]) {
-    for (const forbidden of [BODY_CANARY, TOKEN_CANARY, "user_private_actor", "feat/private-branch",
-      "queued", "html_url", "someone", "workflow_path", ".github/workflows", "?token", h.root]) {
-      assert.ok(!text.includes(forbidden), `${forbidden} must not reach the outbox or the wire`);
+  const forbidden = [BODY_CANARY, TOKEN_CANARY, "user_private_actor", "feat/private-branch",
+    "queued", "html_url", "someone", "workflow_path", ".github/workflows", "?token",
+    // The project root both raw and as JSON text spells it on every platform.
+    h.root, JSON.stringify(h.root).slice(1, -1)];
+  const scanned = [...h.wire];
+  if (existsSync(h.path)) {
+    const { project_root: localRoot, ...record } = JSON.parse(readFileSync(h.path, "utf8")) as Record<string, unknown>;
+    assert.equal(localRoot, h.root, "the outbox keeps its project root as local bookkeeping");
+    scanned.push(JSON.stringify(record));
+  }
+  for (const body of h.wire) assert.ok(!body.includes("project_root"), "the project root field never travels");
+  for (const text of scanned) {
+    for (const value of forbidden) {
+      assert.ok(!text.includes(value), `${value} must not reach the outbox or the wire`);
     }
   }
 }
