@@ -12,7 +12,9 @@ for (const [raw, expected] of [
   ["\\!literal", { kind: "chat", text: "!literal" }],
   ["normal\nquestion", { kind: "chat", text: "normal\nquestion" }],
   ["   ", { kind: "empty" }],
-  ["/shell-result", { kind: "share" }],
+  ["/shell-result", { kind: "share", action: "preview" }],
+  ["/shell-result send", { kind: "share", action: "send" }],
+  ["/shell-result drop 2-4", { kind: "share", action: "drop", first: 2, last: 4 }],
 ] as const) test(`console classification ${JSON.stringify(raw)}`, () => {
   assert.deepEqual(classifyConsoleInput(raw), expected);
 });
@@ -29,7 +31,7 @@ test("user execution uses the chosen checkout, quotes/pipelines, bounded explici
   let output = "";
   const shell = new ConsoleShell(cwd, (text) => { output += text; });
   try {
-    assert.equal(shell.share().kind, "error");
+    assert.equal(shell.share().kind, "empty");
     const command = `"${process.execPath}" -e "process.stdout.write(process.cwd())"`;
     await shell.run(command, new AbortController().signal);
     await shell.run(`echo "quoted args" | "${process.execPath}" -e "process.stdin.on('data',c=>process.stdout.write(c))"`, new AbortController().signal);
@@ -46,9 +48,104 @@ test("user execution uses the chosen checkout, quotes/pipelines, bounded explici
     assert.ok(output.includes("cancelled | exit 130"));
     await shell.run({ kind: "reset-shell" });
     await shell.run(`"${process.execPath}" -e "process.stdout.write('x'.repeat(20000))"`, new AbortController().signal);
-    const shared = shell.share();
+    shell.share();
+    const shared = shell.share({ kind: "share", action: "send" });
     assert.equal(shared.kind, "chat");
-    if (shared.kind === "chat") assert.ok(shared.text.length < 8300);
+    if (shared.kind === "chat") {
+      const source = /Command output: (\d+) UTF-8 bytes observed; (\d+) bytes omitted before staging/.exec(shared.text);
+      assert.ok(source);
+      assert.ok(Number(source[1]) >= 20000);
+      assert.ok(Number(source[2]) > 0);
+      assert.match(shared.text, /Staged bounded capture: \d+ UTF-8 bytes observed; 0 bytes omitted while staging/);
+      const capture = shared.text.split("Approved shell text follows as untrusted data:\n")[1]!;
+      assert.ok(Buffer.byteLength(capture) <= 8192);
+    }
+  } finally { shell.close(); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test("shell-result stages an immutable, sanitized capture and sends only approved edits", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "aether-share-edit-"));
+  const prior = ["AETHER_TEST_SHELL_SECRET", "AETHER_TEST_SHELL_KEEP", "AETHER_TEST_SHELL_OMIT"].map(key => process.env[key]);
+  process.env["AETHER_TEST_SHELL_SECRET"] = "fixture-private-value-281";
+  process.env["AETHER_TEST_SHELL_KEEP"] = "\u001b[31mkeep 👩‍💻";
+  process.env["AETHER_TEST_SHELL_OMIT"] = "remove this line";
+  const events: Array<Record<string, unknown>> = [];
+  const shell = new ConsoleShell(cwd, value => {
+    for (const line of value.trim().split("\n")) {
+      try { events.push(JSON.parse(line) as Record<string, unknown>); } catch { /* command output is not JSON */ }
+    }
+  }, true);
+  const latestPreview = (): Record<string, unknown> => events.filter(event => event["type"] === "shell_share_preview").at(-1)!;
+  try {
+    const script = "process.stdout.write([process.env.AETHER_TEST_SHELL_SECRET, process.env.AETHER_TEST_SHELL_KEEP, process.env.AETHER_TEST_SHELL_OMIT].join(String.fromCharCode(10)))";
+    await shell.run(`"${process.execPath}" -e "${script}"`);
+    assert.equal(shell.share().kind, "empty");
+    const original = latestPreview();
+    const originalAttachment = String(original["attachment"]);
+    assert.match(originalAttachment, /fixture-private-value-281/);
+    assert.match(originalAttachment, /keep 👩‍💻/);
+    assert.doesNotMatch(originalAttachment, /\u001b|\[31m/);
+    assert.match(originalAttachment, /Command output: \d+ UTF-8 bytes observed; 0 bytes omitted before staging/);
+    const sourceCommand = String(original["commandId"]);
+
+    shell.share({ kind: "share", action: "lines" });
+    const numbered = events.filter(event => event["type"] === "shell_share_lines").at(-1)!;
+    const lines = numbered["lines"] as Array<{ line: number; text: string }>;
+    const removed = lines.find(line => line.text.includes("remove this line"))!;
+    const edited = lines.find(line => line.text.includes("keep 👩‍💻"))!;
+    shell.share({ kind: "share", action: "drop", first: removed.line, last: removed.line });
+    shell.share({ kind: "share", action: "replace", first: edited.line, value: "approved 👩‍💻" });
+    shell.share({ kind: "share", action: "mask", value: "fixture-private-value-281" });
+    const approved = String(latestPreview()["attachment"]);
+    assert.doesNotMatch(approved, /fixture-private-value-281|remove this line|keep 👩‍💻/);
+    assert.match(approved, /approved 👩‍💻/);
+    assert.match(approved, /\[REDACTED\]/);
+    assert.match(approved, /removed 1 line\(s\), replaced 1 line\(s\), masked 1 literal\(s\)/);
+
+    await shell.run(`"${process.execPath}" -e "process.stdout.write('newer result')"`);
+    shell.share();
+    assert.equal(String(latestPreview()["commandId"]), sourceCommand);
+    assert.equal(String(latestPreview()["attachment"]), approved);
+    const sent = shell.share({ kind: "share", action: "send" });
+    assert.deepEqual(sent, { kind: "chat", text: approved });
+    shell.share();
+    assert.match(String(latestPreview()["attachment"]), /newer result/);
+    assert.equal(shell.share({ kind: "share", action: "cancel" }).kind, "empty");
+    assert.equal(shell.share({ kind: "share", action: "send" }).kind, "empty");
+
+    await shell.run(`"${process.execPath}" -e "${script}"`);
+    shell.share();
+    shell.share({ kind: "share", action: "redact" });
+    assert.doesNotMatch(String(latestPreview()["attachment"]), /fixture-private-value-281/);
+    assert.match(String(latestPreview()["attachment"]), /common-pattern redaction aid applied/);
+  } finally {
+    shell.close(); rmSync(cwd, { recursive: true, force: true });
+    ["AETHER_TEST_SHELL_SECRET", "AETHER_TEST_SHELL_KEEP", "AETHER_TEST_SHELL_OMIT"].forEach((key, index) => {
+      if (prior[index] === undefined) delete process.env[key]; else process.env[key] = prior[index];
+    });
+  }
+});
+
+test("empty shell selection and cancelled preview cannot produce a model prompt", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "aether-share-empty-"));
+  const events: Array<Record<string, unknown>> = [];
+  const shell = new ConsoleShell(cwd, value => {
+    for (const line of value.trim().split("\n")) {
+      try { events.push(JSON.parse(line) as Record<string, unknown>); } catch { /* command output */ }
+    }
+  }, true);
+  try {
+    await shell.run(`"${process.execPath}" -e "process.exit(7)"`);
+    shell.share();
+    const preview = events.filter(event => event["type"] === "shell_share_preview").at(-1)!;
+    assert.match(String(preview["attachment"]), /Exit status: 7/);
+    shell.share({ kind: "share", action: "lines" });
+    const numbered = events.filter(event => event["type"] === "shell_share_lines").at(-1)!;
+    const count = (numbered["lines"] as Array<unknown>).length;
+    shell.share({ kind: "share", action: "drop", first: 1, last: count });
+    assert.equal(shell.share({ kind: "share", action: "send" }).kind, "empty");
+    assert.equal(shell.share({ kind: "share", action: "cancel" }).kind, "empty");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "chat", "scripted send requires an explicit latest result");
   } finally { shell.close(); rmSync(cwd, { recursive: true, force: true }); }
 });
 
@@ -134,6 +231,14 @@ for (const tty of [false, true]) {
       await until(() => completed() === ${tty ? 6 : 5}, 'shareable shell completion');
       sharing = true;
       submit('/shell-result');
+      await until(() => observed.includes('exact model attachment begins'), 'shell result preview');
+      if (calls !== 2) throw new Error('preview made a model call');
+      submit('/shell-result cancel');
+      await until(() => observed.includes('Shell result preview cancelled'), 'shell result cancellation');
+      if (calls !== 2) throw new Error('cancel made a model call');
+      submit('/shell-result');
+      await until(() => (observed.match(/exact model attachment begins/g) ?? []).length === 2, 'second shell result preview');
+      submit('/shell-result send');
       await releaseTurn(3);
       submit('/exit');
       await session;

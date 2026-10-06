@@ -199,6 +199,7 @@ export class ShellSession {
         options.signal?.removeEventListener("abort", abort);
         cleanupOut(); cleanupErr();
         result.output += output.render();
+        result.capture = { observedBytes: output.observedBytes, omittedBytes: output.omittedBytes };
         fd.off("data", onControl);
         this.failActive = null;
         emit(state, result.exitCode);

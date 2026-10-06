@@ -68,6 +68,8 @@ export interface RunOptions {
 export interface ToolResult {
   output: string;
   exitCode: number;
+  /** Command pipe capture only; absent for refusals and non-shell tools. */
+  capture?: { observedBytes: number; omittedBytes: number };
 }
 
 /** Chosen by the local host when it creates an executor, never by a tool call. */
@@ -369,16 +371,17 @@ export class ToolExecutor {
       // test summary arriving with the exit is not lost.
       child.on("close", (code, sig) => {
         const body = output.render();
+        const capture = { observedBytes: output.observedBytes, omittedBytes: output.omittedBytes };
         if (verdict === "timeout") {
-          finish({ output: `[timeout after ${Math.round(timeoutMs / 1000)}s]\n${body}`, exitCode: 124 });
+          finish({ output: `[timeout after ${Math.round(timeoutMs / 1000)}s]\n${body}`, exitCode: 124, capture });
           return;
         }
         if (verdict === "aborted") {
-          finish({ output: `[aborted]\n${body}`, exitCode: 130 });
+          finish({ output: `[aborted]\n${body}`, exitCode: 130, capture });
           return;
         }
         const exit = code ?? (sig ? 1 : 1);
-        finish({ output: `[exit ${exit}]\n${body}`, exitCode: exit });
+        finish({ output: `[exit ${exit}]\n${body}`, exitCode: exit, capture });
       });
     });
   }

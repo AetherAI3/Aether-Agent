@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:c9524e6cca9e6dc684b59996bcd16fdab2b5a0a0a8007ff3be2b8bff5d7cdc8e -->
+<!-- manifest-digest: sha256:528c55f5f15ba474ef4fb931cea11a1f1275bd261aa7503c08bd9ad09b230e51 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -485,7 +485,7 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 #### `/shell-result`
 
-explicitly share the last local shell result with chat \(bounded\)
+preview and edit a bounded local shell result before sharing it
 
 Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.shell-result`
 
