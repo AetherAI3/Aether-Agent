@@ -135,7 +135,7 @@ export class ConsoleShell {
     const visible = streamed ? result.output.split("\n", 1)[0]! : result.output;
     this.write(this.json ? JSON.stringify({ type: "shell_result", sessionId: this.session.id, ...result }) + "\n" : sanitizeServerText(visible) + "\n");
     // A normal nonzero exit returns to chat and may drain later submissions.
-    return result.exitCode === 130 ? "aborted" : this.session.state === "lost" ? "failed" : "completed";
+    return result.exitCode === 130 ? "aborted" : (this.session.state === "lost" || this.session.id !== captureSession) ? "failed" : "completed";
   }
   private shareNotice(message: string, code: string): void {
     this.write(this.json ? JSON.stringify({ type: "shell_share", code, message }) + "\n" : message + "\n");
@@ -151,9 +151,9 @@ export class ConsoleShell {
       return typeof sent === "string" ? { kind: "error", message: sent } : sent;
     }
     if (input.action === "cancel") {
-      this.attachmentPreview.cancel();
+      const cancelled = this.attachmentPreview.cancel();
       this.scriptSendAvailable = false;
-      this.shareNotice("Shell preview cancelled; nothing sent.", "cancelled");
+      this.shareNotice(cancelled ? "Shell preview cancelled; nothing sent." : "No unsent shell preview. Use /queue list to inspect any already-submitted attachment.", "cancelled");
       return { kind: "empty" };
     }
     let preview = this.attachmentPreview.preview(this.result);

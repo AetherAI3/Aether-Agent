@@ -4290,9 +4290,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "<task>",
-    "summary": "queue a task (runs when current finishes)",
-    "detailedHelp": "/queue <task>\nqueue a task (runs when current finishes)",
+    "args": "[<task> | list | edit <id> <msg> | remove <id> | clear | send <id> | run]",
+    "summary": "inspect and manage bounded, typed pending console entries",
+    "detailedHelp": "/queue [<task> | list | edit <id> <msg> | remove <id> | clear | send <id> | run]\nTTY: manage pending entries locally while streaming. Active entries are immutable. Shell edits need !command; edited shell-shares require explicit send. Bound: 32 entries and 64 KiB. Failure/cancel discards pending IDs. Pipes execute sequentially without an editable queue.",
     "section": "Steering",
     "hidden": false,
     "permissionClass": "unknown",
@@ -4314,13 +4314,13 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "queue",
-      "usage": "/queue <task>",
+      "usage": "/queue [<task> | list | edit <id> <msg> | remove <id> | clear | send <id> | run]",
       "visible": true,
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
+      "disposition": "changed",
+      "note": "Bounded typed pending queue with local management, explicit edited-attachment approval, and discard disposition."
     }
   },
   {

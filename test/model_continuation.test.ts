@@ -264,11 +264,13 @@ test("raw console cancellation restores a draft typed while the model catalog lo
     await until(() => output.slice(output.lastIndexOf("Model switch cancelled")).includes(" draft"));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(modelCalls, 0);
-    submit(""); // explicitly send the restored draft as a new turn
+    submit(""); // Submit the restored draft behind the older pending entry.
+    assert.equal(modelCalls, 0);
+    submit("/queue run"); // Explicitly resume the paused FIFO after cancelling the switch.
     await until(() => modelCalls === 2);
-    assert.match(bodies[0]!, /unsent draft/);
+    assert.match(bodies[0]!, /queued follow-up/);
     assert.doesNotMatch(bodies[0]!, /Accepted console continuation brief/);
-    assert.match(bodies[1]!, /queued follow-up/);
+    assert.match(bodies[1]!, /unsent draft/);
     await until(() => output.includes("turn_outcome"));
     submit("/exit");
     assert.equal(await running, 0);

@@ -77,6 +77,43 @@ tools. Online account-agent and ATS chats remain separate surfaces.
   review again to retry. Later chat prompts do not automatically include it.
   Ordinary chat history still honors `AETHER_NO_HISTORY=1`.
 
+## Manage pending console entries
+
+TTY type-ahead and `/queue <task>` use a strict memory-only FIFO with stable
+local IDs such as `q3`. `/queue` or `/queue list` displays the running entry
+as immutable, then every pending entry's ID, type, approval state and text.
+List text is terminal-escaped for safe inspection. Shell commands remain user
+shell actions; listing, editing or queueing them never turns them into chat.
+
+- `/queue edit <id> <replacement>` edits a pending entry in place. Shell edits
+  require `!command`; a chat cannot become a shell/slash action. Active entries
+  and shell resets cannot be edited. Invalid edits leave the entry unchanged
+- `/queue remove <id>` discards only that pending entry; `/queue clear` discards
+  all pending entries. Both are local and neither interrupts the active turn
+- `/queue edit <id> <replacement body>` on a shell-share keeps the original
+  capture binding but revokes its old Send approval. The new exact preview is
+  shown. Use `/queue send <id>` after reviewing it; an empty selection cannot
+  be sent. FIFO pauses at an unapproved head rather than skipping it
+- After removing a paused head, `/queue run` explicitly resumes ready pending
+  entries. List/edit/remove/clear never launch a model or process by themselves
+- The bound is 32 pending entries and 64 KiB of UTF-8 serialized input, including
+  retained capture provenance. Enqueue and edits enforce both limits; oversized
+  edits preserve the previous entry. New rejected submissions are not queued
+- Cancellation, turn/slash failure, auth-new, shell state loss, checkout/session
+  changes and exit discard pending work and display the discarded IDs/types and
+  remaining count. Discarded IDs never silently restart after auth repair or
+  shell reset. A separately saved failed active chat still follows explicit
+  authentication-repair controls; it does not contain the discarded queue
+- Terminal handoff is refused while entries remain pending; run or clear them
+  first so an old queued command cannot inherit a reconciled terminal checkout
+- Queue management and queued shell text are excluded from ordinary history.
+  Typing ahead is preserved while the active operation finishes or fails
+
+Pipe/non-TTY mode remains sequential: it finishes one input line before reading
+the next. It has no editable pending queue; queue-management commands print
+local guidance and never invoke a model. Use TTY mode for responsive management
+while streaming. Explicit shell-preview commands work in both modes.
+
 ## Interactive Linux terminal
 
 Use `/terminal <command>` in the local coding console when a program needs

@@ -84,7 +84,8 @@ export class ShellAttachmentPreview {
     }
     return this.edit(this.pending.body);
   }
-  cancel(): void { this.pending = null; }
+  cancel(): boolean { const existed = this.pending !== null; this.pending = null; return existed; }
+
   send(): ShellAttachment | string {
     const pending = this.pending;
     this.pending = null;
