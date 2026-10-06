@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:15c07b93fbb6e49fac31bce9d9f19f8c8e4ce36a36011f13a721c90ac6de535c -->
+<!-- manifest-digest: sha256:c9524e6cca9e6dc684b59996bcd16fdab2b5a0a0a8007ff3be2b8bff5d7cdc8e -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -325,15 +325,15 @@ Permission: `account` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 #### `/models`
 
-interactive model picker
+list installed Ollama models locally or account models when hosted
 
-Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.models` · Requires: `aether.catalogue`
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.models` · Requires: `aether.catalogue`, `ollama.local`
 
-#### `/model <n|id>`
+#### `/model <tag|n|id>`
 
 choose a model, then continue this task or start fresh
 
-Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.model` · Requires: `aether.catalogue`
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.model` · Requires: `aether.catalogue`, `ollama.local`
 
 #### `/switch <subcommand>`
 

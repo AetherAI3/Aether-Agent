@@ -39,7 +39,7 @@ export interface SessionContext {
 export interface SessionManifest {
   sessionId: string;
   task: string;
-  /** Resolved model id; local sessions use the `ollama:` namespace. */
+  /** Resolved model id; local sessions use the `ollama/` namespace. */
   model: string;
   brain: "local" | "cloud";
   started: string;

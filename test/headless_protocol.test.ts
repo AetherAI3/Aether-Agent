@@ -71,7 +71,7 @@ test("exec resolves absent models from local config then the safe Ollama default
   const savedBrain = new FakeBrain([successfulEvent]);
   const saved = await runModelSelection(savedCtx, savedBrain);
   assert.equal(saved.code, 0);
-  assert.equal(saved.frames[0]?.["model"], "ollama:gemma3:4b");
+  assert.equal(saved.frames[0]?.["model"], "ollama/gemma3:4b");
   assert.equal(savedBrain.tasks[0]?.model, "gemma3:4b");
 
   const defaultCtx = context(root);
@@ -80,7 +80,7 @@ test("exec resolves absent models from local config then the safe Ollama default
   const defaultBrain = new FakeBrain([successfulEvent]);
   const fallback = await runModelSelection(defaultCtx, defaultBrain);
   assert.equal(fallback.code, 0);
-  assert.equal(fallback.frames[0]?.["model"], `ollama:${DEFAULT_OLLAMA_MODEL}`);
+  assert.equal(fallback.frames[0]?.["model"], `ollama/${DEFAULT_OLLAMA_MODEL}`);
   assert.equal(defaultBrain.tasks[0]?.model, DEFAULT_OLLAMA_MODEL);
 });
 
@@ -91,7 +91,7 @@ test("exec reports a namespaced Ollama id but sends only the normalized tag to t
   const brain = new FakeBrain([successfulEvent]);
   const run = await runModelSelection(ctx, brain);
   assert.equal(run.code, 0);
-  assert.equal(run.frames[0]?.["model"], "ollama:qwen2.5-coder:14b");
+  assert.equal(run.frames[0]?.["model"], "ollama/qwen2.5-coder:14b");
   assert.equal(brain.tasks[0]?.model, "qwen2.5-coder:14b");
 });
 

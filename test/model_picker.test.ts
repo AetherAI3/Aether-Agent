@@ -448,7 +448,8 @@ test("pickModel filter Esc restores the previous list; Ctrl+C cancels and restor
 function fakeModelCtx(): AppContext {
   return {
     flags: { yes: false, json: false, audit: false, cwd: "." },
-    cfg: { defaultModel: "haiku", baseUrl: "x" },
+    cfg: { defaultModel: "haiku", baseUrl: "x", backend: "cloud" },
+    tokens: { get: async () => "hosted-token" },
     api: { getJson: async () => ({ tier: "pro", default: "haiku", models: [item({ id: "opus" })] }) },
     confirm: async () => false,
   } as unknown as AppContext;

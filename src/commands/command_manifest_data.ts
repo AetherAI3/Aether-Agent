@@ -3065,15 +3065,16 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "summary": "interactive model picker",
-    "detailedHelp": "/models\ninteractive model picker",
+    "summary": "list installed Ollama models locally or account models when hosted",
+    "detailedHelp": "/models\nLocal sessions list only models installed at OLLAMA_HOST, with no hosted account call or pull. Hosted sessions list the account-scoped Aether catalogue. Non-TTY and JSON sessions show stable IDs for /model <tag|n|id>.",
     "section": "Session",
     "hidden": false,
     "permissionClass": "unknown",
     "availability": {
       "state": "runtime-dependent",
       "capabilityRequirements": [
-        "aether.catalogue"
+        "aether.catalogue",
+        "ollama.local"
       ]
     },
     "telemetryName": "slash.models",
@@ -3095,8 +3096,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
+      "disposition": "changed",
+      "note": "Local console sessions now discover installed Ollama models without hosted catalogue access."
     }
   },
   {
@@ -3106,16 +3107,17 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "<n|id>",
+    "args": "<tag|n|id>",
     "summary": "choose a model, then continue this task or start fresh",
-    "detailedHelp": "/model <n|id> also accepts ollama:tag. At the idle console, review the task brief and choose /switch continue, /switch fresh, or /switch cancel.",
+    "detailedHelp": "/model <tag|n|id> validates a local tag against installed models at OLLAMA_HOST, or a hosted ID against the account catalogue. Local IDs use ollama/<tag>; legacy ollama:<tag> input remains accepted. At the idle console, review the task brief and choose /switch continue, /switch fresh, or /switch cancel.",
     "section": "Session",
     "hidden": false,
     "permissionClass": "unknown",
     "availability": {
       "state": "runtime-dependent",
       "capabilityRequirements": [
-        "aether.catalogue"
+        "aether.catalogue",
+        "ollama.local"
       ]
     },
     "telemetryName": "slash.model",
@@ -3132,13 +3134,13 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "model",
-      "usage": "/model <n|id>",
+      "usage": "/model <tag|n|id>",
       "visible": true,
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
+      "disposition": "changed",
+      "note": "Local model selection now validates an installed Ollama tag and uses canonical ollama/<tag> IDs."
     }
   },
   {

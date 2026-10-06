@@ -53,7 +53,7 @@ export interface Handoff {
   sessionId: string;
   /** The task the prior run was given. */
   task: string;
-  /** Resolved model id (`ollama:<tag>` locally; "" for hosted auto-routing). */
+  /** Resolved model id (`ollama/<tag>` locally; "" for hosted auto-routing). */
   model: string;
   brain: "local" | "cloud";
   started: string;

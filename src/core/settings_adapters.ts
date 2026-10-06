@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { AetherCiSettingsFile, registerAetherCiSettings } from "./aether_ci_settings.js";
 import type { AppContext } from "./context.js";
 import { configPath, DEFAULT_CONFIG, saveConfig } from "./config.js";
-import { isLocalModelId, localModelId, normalizeOllamaTag } from "./local_ollama.js";
+import { isLocalModelId, localModelId, normalizeOllamaTag, ollamaTagFromId } from "./local_ollama.js";
 import { DEFAULT_OLLAMA_HOST, normalizeOllamaHost } from "./ollama.js";
 import { LocalMcpStore, type McpStoreInspection } from "./mcp_store.js";
 import { discoverSkills } from "./skills/skill_discovery.js";
@@ -184,7 +184,7 @@ function hostedModelValidator(value: unknown): ValidationResult<string> {
   if (typeof value !== "string") return failure("type.string", "expected a hosted model id");
   const model = value.trim();
   if (isLocalModelId(model)) {
-    return failure("model.local_namespace", "hosted model must not use the ollama: namespace");
+    return failure("model.local_namespace", "hosted model must not use the ollama/ namespace");
   }
   if (model.length > 200 || /[\u0000-\u001f\u007f]/.test(model)) {
     return failure("model.invalid", "hosted model id is invalid");
@@ -195,7 +195,7 @@ function hostedModelValidator(value: unknown): ValidationResult<string> {
 function localModelValidator(value: unknown): ValidationResult<string> {
   if (typeof value !== "string") return failure("type.string", "expected an Ollama model id");
   if (!value.trim()) return { ok: true, value: "" };
-  const raw = value.trim().startsWith("ollama:") ? value.trim().slice("ollama:".length) : value;
+  const raw = isLocalModelId(value) ? ollamaTagFromId(value) ?? "" : value;
   try {
     return { ok: true, value: localModelId(normalizeOllamaTag(raw)) };
   } catch (error) {
