@@ -4,11 +4,13 @@
 import type { Writable } from "node:stream";
 import type { AppContext } from "../core/context.js";
 import {
-  goalsForWorkspace, getGoalForWorkspace, getActiveGoal, newGoal, newPhase, newTask,
+  goalsForWorkspace, getGoalForWorkspace, getActiveGoal, newPhase,
   upsertGoal, startGoal, completePhase,
   setPhaseNote, type Goal,
 } from "../core/goals.js";
+import { acceptedGoal, draftGoalPlan, renumberPhases, validateGoalDraft } from "../core/goal_planning.js";
 import { renderGoalChain, renderPhaseDetail } from "../ui/goal_chain.js";
+import { resolve } from "node:path";
 
 const cols = () => process.stdout.columns || 100;
 
@@ -16,62 +18,84 @@ function resolveGoal(cwd: string, id?: string): Goal | undefined {
   return id ? getGoalForWorkspace(id, cwd) : getActiveGoal(cwd) ?? goalsForWorkspace(cwd)[0];
 }
 
-// ── LLM-powered goal decomposition ────────────────────────────────────
-// Heuristic today; later wired to POST /project/decompose (task_graph.py).
+// Drafts are deliberately kept out of the goal store until /goal save.
+const drafts = new Map<string, Goal>();
+const draftKey = (cwd: string) => resolve(cwd);
+const draftFor = (cwd: string) => drafts.get(draftKey(cwd));
+const safe = (value: string) => value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
 
-function decomposeGoal(description: string, cwd: string): Goal {
-  const goal = newGoal(description, cwd);
-  const lower = description.toLowerCase();
-
-  const isFullStack = lower.includes("full") || lower.includes("stack") ||
-    (lower.includes("front") && lower.includes("back"));
-  const isApi = lower.includes("api") || lower.includes("backend") || lower.includes("server");
-  const isFrontend = lower.includes("front") || lower.includes("ui") || lower.includes("react") || lower.includes("vue");
-  const isApp = lower.includes("app") || isFullStack;
-  const hasTests = lower.includes("test") || lower.includes("e2e") || lower.includes("qa");
-  const hasDeploy = lower.includes("deploy") || lower.includes("docker") || lower.includes("ship");
-
-  if (isApp || isFullStack) {
-    goal.phases.push(populatePhase(1, "Planning & Setup", "Project scaffold, deps, config, repo setup",
-      ["Initialize project structure", "Install dependencies", "Configure tooling"]));
-    goal.phases.push(populatePhase(2, "Backend / API", "Data models, API endpoints, auth, business logic",
-      ["Design data models/schema", "Implement API endpoints", "Add authentication"]));
-    goal.phases.push(populatePhase(3, "Frontend UI", "Components, pages, state management, styling",
-      ["Build UI components", "Wire up state/API calls", "Style and polish"]));
-  } else if (isApi || isFrontend) {
-    goal.phases.push(populatePhase(1, "Setup & Foundation", "Project init, config, core structure",
-      ["Initialize project", "Configure build tools", "Set up core modules"]));
-    goal.phases.push(populatePhase(2, isApi ? "API Implementation" : "UI Implementation",
-      isApi ? "Endpoints, middleware, error handling" : "Components, routing, state",
-      ["Build core feature", "Handle edge cases", "Add error handling"]));
+function showPlan(out: Writable, goal: Goal): void {
+  const plan = goal.plan;
+  out.write(`\n${!plan ? "Legacy saved goal" : plan.state === "accepted" ? "Saved plan" : "Unsaved draft"}: ${safe(goal.title)}\n`);
+  if (plan) {
+    out.write(`Source: ${plan.source}; stack: ${safe(plan.stack.join(", ") || "unknown")}\n`);
+    out.write(`Relevant files: ${safe(plan.relevantFiles.join(", ") || "none identified")}\n`);
+    out.write(`Available checks: ${safe(plan.checks.join(", ") || "none identified")}\n`);
+    for (const item of plan.instructions) out.write(`Repository instruction: ${safe(item)}\n`);
+    for (const item of plan.constraints) out.write(`Constraint: ${safe(item)}\n`);
+    for (const item of plan.assumptions) out.write(`Assumption: ${safe(item)}\n`);
+    out.write(`Verification: ${plan.verification.state === "known" ? safe(plan.verification.check ?? "") : "unresolved; choose a check before claiming completion"}\n`);
   }
-
-  if (hasTests) {
-    goal.phases.push(populatePhase(goal.phases.length + 1, "Testing", "Unit, integration, and E2E tests",
-      ["Write unit tests", "Add integration tests", "Run E2E tests"]));
+  for (const [index, phase] of goal.phases.entries()) {
+    out.write(`${index + 1}. ${safe(phase.title)}\n`);
+    if (phase.description) out.write(`   ${safe(phase.description)}\n`);
+    for (const criterion of phase.completionCriteria ?? []) out.write(`   Done when: ${safe(criterion)}\n`);
+    if (phase.userNote) out.write(`   Note: ${safe(phase.userNote)}\n`);
   }
-  if (hasDeploy) {
-    goal.phases.push(populatePhase(goal.phases.length + 1, "Deployment", "Containerization, CI/CD, production release",
-      ["Create Dockerfile", "Set up CI pipeline", "Deploy to production"]));
-  }
-
-  // Default: at least one phase
-  if (goal.phases.length === 0) {
-    goal.phases.push(populatePhase(1, "Implementation", description,
-      ["Break down approach", "Implement core logic", "Verify and document"]));
-  }
-
-  goal.selectedPhaseId = goal.phases[0]!.id;
-  return goal;
+  out.write("Drafted and accepted plans do not execute work.\n\n");
 }
 
-function populatePhase(idx: number, title: string, description: string, taskTitles: string[]) {
-  const phase = newPhase(idx, title, description);
-  phase.tasks = taskTitles.map(newTask);
-  return phase;
+function phaseAt(goal: Goal, ordinal: string) {
+  const n = Number(ordinal);
+  return Number.isInteger(n) && n >= 1 ? goal.phases[n - 1] : undefined;
+}
+
+function modifyDraft(cwd: string, out: Writable, subcmd: string, rest: string): boolean {
+  const goal = draftFor(cwd);
+  if (!goal) { out.write("no draft. create one with /goal <objective> or reopen with /goal edit [id].\n"); return false; }
+  const [action, ...words] = rest.trim().split(/\s+/);
+  const args = words.join(" ");
+  if (subcmd === "phase") {
+    if (action === "add" && args) {
+      const phase = newPhase(goal.phases.length + 1, args, "");
+      phase.completionCriteria = [];
+      goal.phases.push(phase);
+    } else if (action === "remove" && phaseAt(goal, args) && goal.phases.length > 1) {
+      goal.phases.splice(Number(args) - 1, 1);
+    } else if (action === "move") {
+      const [from, to] = args.split(/\s+/).map(Number);
+      if (!from || !to || !phaseAt(goal, String(from)) || !phaseAt(goal, String(to))) { out.write("usage: /goal phase move <from> <to>\n"); return false; }
+      goal.phases.splice(to - 1, 0, goal.phases.splice(from - 1, 1)[0]!);
+    } else if ((action === "title" || action === "describe") && args) {
+      const [ordinal, ...text] = args.split(/\s+/);
+      const phase = phaseAt(goal, ordinal ?? "");
+      if (!phase || !text.length) { out.write(`usage: /goal phase ${action} <number> <text>\n`); return false; }
+      if (action === "title") phase.title = text.join(" ");
+      else phase.description = text.join(" ");
+    } else { out.write("usage: /goal phase <add|remove|move|title|describe> ...\n"); return false; }
+    renumberPhases(goal);
+  } else if (subcmd === "criteria" || subcmd === "note") {
+    const [ordinal, ...text] = rest.trim().split(/\s+/);
+    const phase = phaseAt(goal, ordinal ?? "");
+    if (!phase || !text.length) { out.write(`usage: /goal ${subcmd} <number> <text>\n`); return false; }
+    if (subcmd === "note") phase.userNote = text.join(" ");
+    else phase.completionCriteria = text.join(" ").split(";").map(x => x.trim()).filter(Boolean);
+  }
+  drafts.set(draftKey(cwd), goal);
+  showPlan(out, goal);
+  return true;
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────
+
+/** Natural objective text is the default; only these explicit words are commands. */
+export async function handleGoalInput(ctx: AppContext, out: Writable, input: string): Promise<void> {
+  const [first, ...remaining] = input.trim().split(/\s+/);
+  const commands = new Set(["draft", "edit", "phase", "criteria", "save", "discard", "start", "pause", "resume", "cancel", "complete", "note", "view"]);
+  const command = first?.toLowerCase() ?? "";
+  if (commands.has(command)) await handleGoal(ctx, out, command, remaining.join(" "));
+  else await handleGoal(ctx, out, "", input);
+}
 
 export async function handleGoal(
   ctx: AppContext, out: Writable, subcmd: string, rest: string,
@@ -80,31 +104,61 @@ export async function handleGoal(
 
   switch (subcmd) {
     case "": {
-      // /goal <description> — create a new goal
       if (!rest.trim()) {
-        out.write("usage: /goal <description of what you want to build>\n");
-        out.write("  e.g. /goal build a full-stack todo app with auth\n");
+        const draft = draftFor(ctx.flags.cwd);
+        if (draft) showPlan(out, draft);
+        else out.write("usage: /goal <objective> (draft a plan); /goal save to accept it\n");
         return;
       }
-      const goal = decomposeGoal(rest.trim(), ctx.flags.cwd);
-
-      // Show the plan
-      out.write("\n");
-      for (const l of renderGoalChain(goal, c)) out.write("  " + l + "\n");
-      for (const l of renderPhaseDetail(goal, c)) out.write("  " + l + "\n");
-      out.write("\n");
-
-      // Ask to save
-      const ok = ctx.flags.yes || (await ctx.confirm(`Save this ${goal.phases.length}-phase plan? [y/N] `));
-      if (!ok) {
-        out.write("discarded.\n");
-        return;
-      }
-      upsertGoal(goal);
-      out.write(`Goal saved: ${goal.id}\n`);
-      out.write("Start it with: /goal start\n");
+      const goal = await draftGoalPlan(rest.trim(), ctx.flags.cwd);
+      drafts.set(draftKey(ctx.flags.cwd), goal);
+      showPlan(out, goal);
+      out.write("Edit with /goal phase, /goal criteria, or /goal note; accept with /goal save.\n");
       break;
     }
+
+    case "draft": {
+      if (rest.trim()) return handleGoal(ctx, out, "", rest);
+      const draft = draftFor(ctx.flags.cwd);
+      if (draft) showPlan(out, draft);
+      else out.write("no draft. use /goal <objective>.\n");
+      break;
+    }
+
+    case "edit": {
+      const original = resolveGoal(ctx.flags.cwd, rest.trim());
+      if (!original) { out.write("no saved goal found.\n"); return; }
+      const draft = structuredClone(original);
+      draft.plan = { state: "draft", source: "manual", stack: original.plan?.stack ?? [], relevantFiles: original.plan?.relevantFiles ?? [], checks: original.plan?.checks ?? [], instructions: original.plan?.instructions ?? [], assumptions: original.plan?.assumptions ?? ["This saved goal predates the plan contract; review its phases and criteria."], constraints: original.plan?.constraints ?? [], verification: original.plan?.verification ?? { state: "unresolved", check: null } };
+      drafts.set(draftKey(ctx.flags.cwd), draft);
+      showPlan(out, draft);
+      break;
+    }
+
+    case "phase":
+    case "criteria":
+      modifyDraft(ctx.flags.cwd, out, subcmd, rest);
+      break;
+
+    case "save": {
+      const draft = draftFor(ctx.flags.cwd);
+      if (!draft) { out.write("no draft to save.\n"); return; }
+      const issues = validateGoalDraft(draft);
+      if (issues.length) { out.write(`cannot save: ${issues.join("; ")}\n`); return; }
+      showPlan(out, draft);
+      const ok = ctx.flags.yes || await ctx.confirm(`Save this ${draft.phases.length}-phase plan? [y/N] `);
+      if (!ok) { out.write("draft kept; no saved plan changed.\n"); return; }
+      const saved = acceptedGoal(draft);
+      upsertGoal(saved);
+      drafts.delete(draftKey(ctx.flags.cwd));
+      out.write(`Plan accepted and saved: ${saved.id}. Reopen with /goal edit ${saved.id}.\n`);
+      break;
+    }
+
+    case "discard":
+      drafts.delete(draftKey(ctx.flags.cwd));
+      out.write("draft discarded; saved goals unchanged.\n");
+      break;
 
     case "start": {
       const id = rest.trim();
@@ -160,6 +214,7 @@ export async function handleGoal(
     }
 
     case "note": {
+      if (draftFor(ctx.flags.cwd)) { modifyDraft(ctx.flags.cwd, out, "note", rest); return; }
       const parts = rest.trim().split(/\s+(.*)/s);
       const phaseId = parts[0] ?? "";
       const note = parts[1] ?? "";
@@ -179,13 +234,14 @@ export async function handleGoal(
       out.write("\n");
       for (const l of renderGoalChain(goal, c)) out.write("  " + l + "\n");
       for (const l of renderPhaseDetail(goal, c)) out.write("  " + l + "\n");
+      showPlan(out, goal);
       out.write("\n");
       break;
     }
 
     default:
       out.write(`unknown /goal subcommand: ${subcmd}\n`);
-      out.write("try: /goal <desc>, /goal start, /goal pause, /goal note <phase> <text>, /goal view\n");
+      out.write("try: /goal <objective>, /goal phase ..., /goal criteria ..., /goal save, /goal view\n");
   }
 }
 
@@ -201,12 +257,13 @@ export async function handleGoals(
     if (!goal) { out.write(`no goal found: ${rest.trim()}\n`); return; }
     for (const l of renderGoalChain(goal, c)) out.write("  " + l + "\n");
     for (const l of renderPhaseDetail(goal, c)) out.write("  " + l + "\n");
+    showPlan(out, goal);
     return;
   }
 
   if (goals.length === 0) {
     out.write("(no goals yet)\n");
-    out.write("create one: /goal build a full-stack todo app\n");
+    out.write("draft one: /goal <objective>\n");
     return;
   }
 
@@ -222,14 +279,21 @@ export async function handleGoals(
 
 export function goalHelp(): string {
   return [
-    "/goal <desc>      create a new goal (agent plans phases)",
+    "/goal <objective> draft a repository-grounded plan; no work runs",
+    "/goal draft       show the unsaved draft",
+    "/goal phase <add|remove|move|title|describe> ...  edit draft phases",
+    "/goal criteria <number> <text; text>  set completion criteria",
+    "/goal note <number> <text>  set a draft phase note",
+    "/goal save        accept and save the reviewed draft",
+    "/goal edit [id]   reopen a saved plan for editing",
+    "/goal discard     discard the unsaved draft",
     "/goals            list saved goals",
     "/goal view [id]   show goal chain + phase detail",
-    "/goal start [id]  start working on a goal",
+    "/goal start [id]  mark a saved goal running (does not execute work)",
     "/goal pause       pause the active goal",
     "/goal resume      resume a paused goal",
     "/goal cancel      cancel the active goal",
-    "/goal note <phase> <text>   add a note to a phase",
+    "/goal note <phase-id> <text>   add a note to a saved goal when no draft is open",
     "/goal complete <phase>      mark a phase as complete",
   ].join("\n");
 }

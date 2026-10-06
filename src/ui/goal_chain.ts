@@ -100,7 +100,7 @@ export function renderGoalChain(goal: Goal, cols: number): string[] {
   }
 
   lines.push("");
-  lines.push(muted("  ←/→ select phase   Enter edit note   /goal start   /goal pause   /goals list"));
+  lines.push(muted("  /goal edit [id]   /goal start   /goal pause   /goals list"));
 
   return lines;
 }
