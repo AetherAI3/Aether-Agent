@@ -258,6 +258,8 @@ export const SHELL_RUNTIME_HANDLERS: Array<Pick<DispatchedCommand, "name" | "loa
         cmdShip(ctx, argv, {
           title: flags.str("title"),
           body: flags.str("body"),
+          draft: flags.bool("pr-draft"),
+          draftFile: flags.str("draft-file"),
           base: flags.str("base"),
           approve: flags.str("approve"),
           yes: ctx.flags.yes,
