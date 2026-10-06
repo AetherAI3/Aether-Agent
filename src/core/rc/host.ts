@@ -368,6 +368,142 @@ export async function heartbeatHost(
   }
 }
 
+// ── session status (#226) ───────────────────────────────────────────────────
+
+/** The Cloud's owner-scoped GET /remote/sessions/{id}/status contract. */
+export const RC_SESSION_STATUS_SCHEMA = "aether.remote_session_status.v1";
+
+/** How long `rc status`, `rc exposure` and `rc viewers` wait for the Cloud. */
+export const RC_STATUS_TIMEOUT_MS = 3_000;
+
+/** Every state the Cloud may report. Anything else does not verify. */
+export const RC_CLOUD_SESSION_STATES = [
+  "pending_host",
+  "live",
+  "host_reconnecting",
+  "host_offline",
+  "revoked",
+  "expired",
+  "closed",
+] as const;
+export type RcCloudSessionState = (typeof RC_CLOUD_SESSION_STATES)[number];
+
+/** A verified Cloud answer. Only these fields survive; nothing else is kept. */
+export interface RcSessionStatus {
+  state: RcCloudSessionState;
+  expires_at: string;
+  revoked_at: string | null;
+  last_seq: number;
+  host_last_heartbeat_at: string | null;
+  observer_count: number;
+  observer_cap: number;
+}
+
+/** Why the Cloud's view is unknown. Stable tokens: JSON output carries them. */
+export type RcStatusUnknownReason =
+  | "timeout"
+  | "unreachable"
+  | "route_absent"
+  | "disabled"
+  | "not_authorized"
+  | "rate_limited"
+  | "invalid_response"
+  | "broker_error";
+
+/**
+ * The Cloud's view of a session: verified, absent for this account, or
+ * unknown with a reason. There is deliberately no "assume the local file"
+ * branch — a caller that cannot ask the Cloud must say it does not know.
+ */
+export type RcStatusReading =
+  | { kind: "known"; status: RcSessionStatus }
+  | { kind: "not_found" }
+  | { kind: "unknown"; reason: RcStatusUnknownReason };
+
+/** ISO-8601 UTC with a Z suffix, as the Cloud emits; anything else is unverified. */
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+
+function isIsoUtc(value: unknown): value is string {
+  return typeof value === "string" && ISO_UTC.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Verify a status body, or return null. Every field is printed to a terminal
+ * or written as JSON, so each must have exactly the shape the contract names:
+ * a broker-authored string never reaches the operator unverified.
+ */
+export function parseSessionStatus(body: unknown, sessionId: string): RcSessionStatus | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const raw = body as Record<string, unknown>;
+  if (raw["schema_version"] !== RC_SESSION_STATUS_SCHEMA || raw["session_id"] !== sessionId) return null;
+  const state = raw["state"];
+  if (typeof state !== "string" || !(RC_CLOUD_SESSION_STATES as readonly string[]).includes(state)) return null;
+  const { expires_at, revoked_at, last_seq, host_last_heartbeat_at, observer_count, observer_cap } = raw;
+  if (!isIsoUtc(expires_at)) return null;
+  if (revoked_at !== null && !isIsoUtc(revoked_at)) return null;
+  if (host_last_heartbeat_at !== null && !isIsoUtc(host_last_heartbeat_at)) return null;
+  if (!isCount(last_seq) || !isCount(observer_count) || !isCount(observer_cap)) return null;
+  return {
+    state: state as RcCloudSessionState,
+    expires_at,
+    revoked_at,
+    last_seq,
+    host_last_heartbeat_at,
+    observer_count,
+    observer_cap,
+  };
+}
+
+/** Classify a failed status read. Only the Cloud's own discriminators count. */
+function statusFailure(error: unknown): RcStatusReading {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === "RequestTimeoutError" || name === "TimeoutError") return { kind: "unknown", reason: "timeout" };
+  const status = statusOf(error);
+  const detail = detailText(error);
+  if (status === null) return { kind: "unknown", reason: "unreachable" };
+  // Two different 404s: a missing or foreign session (one answer for both, so
+  // nothing leaks whether it exists) versus a deployment without the route.
+  if (status === 404 && detail === "session not found") return { kind: "not_found" };
+  if (status === 404 && detail === "Not Found") return { kind: "unknown", reason: "route_absent" };
+  if (status === 403 && detail === "remote sessions disabled") return { kind: "unknown", reason: "disabled" };
+  if (status === 401 || status === 403) return { kind: "unknown", reason: "not_authorized" };
+  if (status === 429) return { kind: "unknown", reason: "rate_limited" };
+  return { kind: "unknown", reason: "broker_error" };
+}
+
+/**
+ * Ask the Cloud for the session's authoritative state. Never throws, and
+ * never waits past `timeoutMs`: the transport's own bound is backed by an
+ * unref'd local deadline, so a broker that never answers reads as unknown.
+ */
+export async function fetchSessionStatus(
+  deps: RcHostDeps,
+  sessionId: string,
+  timeoutMs: number = RC_STATUS_TIMEOUT_MS,
+): Promise<RcStatusReading> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error("status timed out"), { name: "TimeoutError" })), timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    const body = await Promise.race([
+      deps.api.getJson<unknown>(sessionPath(sessionId, "/status"), deps.signal, timeoutMs),
+      deadline,
+    ]);
+    const status = parseSessionStatus(body, sessionId);
+    return status ? { kind: "known", status } : { kind: "unknown", reason: "invalid_response" };
+  } catch (error) {
+    return statusFailure(error);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Send one bounded batch and advance the cursor only if the answer proves it.
  *

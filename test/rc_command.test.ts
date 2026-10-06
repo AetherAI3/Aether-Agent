@@ -37,7 +37,6 @@ function view(over: Partial<RcStatusView> = {}): RcStatusView {
     running: true,
     browser: "BROWSER_READY",
     connector: "connected",
-    last_receipt: "2026-09-07T00:00:00.000Z",
     device_id: "dev-1",
     device_name: "laptop",
     session_id: "rs_" + "e".repeat(32),
@@ -49,13 +48,25 @@ function view(over: Partial<RcStatusView> = {}): RcStatusView {
       dirty_file_count: 3,
     },
     state: "active",
-    expires_at: "2026-09-08T00:00:00.000Z",
-    observers: 2,
+    cloud: {
+      kind: "known",
+      status: {
+        state: "live",
+        expires_at: "2026-09-08T00:00:00.000Z",
+        revoked_at: null,
+        last_seq: 12,
+        host_last_heartbeat_at: "2026-09-07T00:00:00.000Z",
+        observer_count: 2,
+        observer_cap: 8,
+      },
+    },
     pending: 4,
     acked: 12,
     dropped: 0,
     quarantined: 0,
     revoke_pending: false,
+    exposed: [...producerCoverage().produced],
+    exposure_confirmed: true,
     ...over,
   };
 }
@@ -197,14 +208,14 @@ test("exposure names the categories that are never shared", () => {
 
 test("status shows the counters an operator needs to spot a gap", () => {
   const text = renderStatus(view({ pending: 7, acked: 40, dropped: 3, quarantined: 2 }));
-  assert.match(text, /Outbox\s+7 pending \/ 2 quarantined/);
-  assert.match(text, /dropped\s+3/);
+  assert.match(text, /Outbox\s+7 queued \/ 3 dropped \/ 2 quarantined/);
+  assert.match(text, /Last receipt\s+seq 40 \(Cloud last seq 12\)/);
 });
 
 test("an unreachable broker reports unknown observers, never zero", () => {
   // Reporting that nobody is watching when we simply could not ask is the one
   // wrong answer this screen can give.
-  const text = renderStatus(view({ observers: null }));
+  const text = renderStatus(view({ cloud: { kind: "unknown", reason: "unreachable" } }));
   assert.match(text, /observers\s+unknown \(broker unreachable\)/);
   assert.doesNotMatch(text, /observers\s+0/);
 });
@@ -217,7 +228,7 @@ test("an unconfirmed revoke is stated, with the fact that it will not resume", (
 
 test("status renders with nothing running and invents no session", () => {
   const text = renderStatus(
-    view({ running: false, session_id: null, project_ref: null, repo: null, observers: null }),
+    view({ running: false, session_id: null, project_ref: null, repo: null, cloud: { kind: "unchecked" }, exposed: [] }),
   );
   assert.match(text, /state\s+off/);
   assert.match(text, /session\s+—/);

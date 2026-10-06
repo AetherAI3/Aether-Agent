@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +33,7 @@ import {
   subagentFinishedEvent,
   testsEvent,
 } from "../src/core/rc/producers.js";
+import * as producers from "../src/core/rc/producers.js";
 import { createOutbox, enqueueEvent } from "../src/core/rc/outbox.js";
 import { rcDisplayPayloadKeys } from "../src/core/rc/redaction.js";
 import { VIEWER_EVENT_TYPES } from "../src/core/rc/viewer_profile.js";
@@ -253,11 +254,86 @@ test("any type still deferred names the subsystem it waits on", () => {
   }
 });
 
+/**
+ * The adapter(s) whose output carries each viewer type. An adapter existing is
+ * not a producer: "N / M available" counts only types production code emits.
+ */
+const ADAPTERS: Readonly<Record<string, readonly string[]>> = {
+  session: ["sessionOpenedEvent"],
+  presence: ["hostPresenceEvent"],
+  plan: ["mapBrainEventToRc"],
+  tool_activity: ["mapBrainEventToRc"],
+  done: ["mapBrainEventToRc"],
+  error: ["mapBrainEventToRc"],
+  subagent: ["subagentEvent", "subagentStartedEvent", "subagentFinishedEvent"],
+  diff_summary: ["diffSummaryEvent"],
+  tests: ["testsEvent"],
+  ci: ["ciEvent"],
+  pr_status: ["prStatusEvent"],
+  artifact: ["artifactEvent"],
+  preview: ["previewEvent"],
+};
+
+/** The viewer types mapBrainEventToRc actually emits, from one real event of each kind. */
+const BRAIN_MAPPED: ReadonlySet<string | undefined> = new Set(([
+  { type: "stage", name: "build", face: "" },
+  { type: "tool_call", id: "1", name: "read_file", args: { path: "src/a.ts" } },
+  { type: "done", ok: true, result: "", remaining: 0, reason: "" },
+  { type: "error", msg: "boom" },
+] as BrainEvent[]).map((event) => mapBrainEventToRc(event)?.event_type));
+
+/** Every production module except the adapters' own, imports and comments removed. */
+function productionCode(): string {
+  const src = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
+  const own = join(src, "core", "rc", "producers.ts");
+  const files = (readdirSync(src, { recursive: true }) as string[])
+    .map((name) => join(src, name))
+    .filter((path) => path.endsWith(".ts") && !path.endsWith(".d.ts") && path !== own);
+  assert.ok(files.length > 50, "the production source tree was not found; this guard would be vacuous");
+  return files
+    .map((path) => readFileSync(path, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      // Keep `https://…` inside strings: only a `//` not preceded by `:` starts a comment.
+      .replace(/(^|[^:])\/\/.*$/gm, "$1 ")
+      .replace(/^\s*(?:import|export)\b[^;]*?\bfrom\s*["'][^"']+["'];?/gm, " "))
+    .join("\n");
+}
+
 test("all thirteen viewer event types now have a producer", () => {
+  // Restored with the producer lanes (#218-#222): the source test below proves
+  // each of these has a production caller, so the full count is honest again.
   const coverage = producerCoverage();
   assert.deepEqual(coverage.unproduced, []);
   assert.equal(coverage.produced.length, VIEWER_EVENT_TYPES.length);
   assert.deepEqual([...coverage.produced].sort(), [...VIEWER_EVENT_TYPES].sort());
+});
+
+test("a type counts as produced exactly when production code uses its adapter (#226)", () => {
+  // `rc status` prints "N / M available" and `rc exposure` lists what a viewer
+  // is sent. Listing a type whose adapter nothing in production calls would
+  // tell an operator a viewer can watch their tests or CI when nothing emits
+  // them. This reads the source, so it is re-proved after every producer lane
+  // lands: wiring an adapter forces its type into the produced list, and a
+  // produced type whose caller disappears is caught too.
+  const code = productionCode();
+  const coverage = producerCoverage();
+  for (const type of VIEWER_EVENT_TYPES) {
+    const adapters = ADAPTERS[type];
+    assert.ok(adapters, `${type} has no adapter named in this test`);
+    for (const name of adapters) {
+      assert.equal(typeof (producers as Record<string, unknown>)[name], "function", `${name} is not exported`);
+    }
+    const used = adapters.some((name) => new RegExp(`\\b${name}\\b`).test(code)) &&
+      // A shared adapter must really emit THIS type, not merely be called.
+      (adapters[0] !== "mapBrainEventToRc" || BRAIN_MAPPED.has(type));
+    assert.equal(
+      coverage.produced.includes(type),
+      used,
+      used
+        ? `${type} has a production caller of ${adapters.join("/")} but is listed as not produced`
+        : `${type} is listed as produced, but no production code calls ${adapters.join("/")}`,
+    );
+  }
 });
 
 test("the produced list stays inside the viewer profile", () => {
