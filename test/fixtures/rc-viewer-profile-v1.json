@@ -1,0 +1,59 @@
+{
+  "schema": "aether.rc_viewer_profile/1",
+  "capabilities": [
+    "observe"
+  ],
+  "grant_purpose": "observe",
+  "presence_roles": [
+    "host",
+    "observer"
+  ],
+  "event_types": [
+    "artifact",
+    "ci",
+    "diff_summary",
+    "done",
+    "error",
+    "plan",
+    "pr_status",
+    "presence",
+    "preview",
+    "session",
+    "subagent",
+    "tests",
+    "tool_activity"
+  ],
+  "excluded_event_types": [
+    "transcript"
+  ],
+  "control_capable": false,
+  "routes": [
+    "/rc",
+    "/rc/[sessionId]"
+  ],
+  "api_calls": [
+    {
+      "method": "GET",
+      "path": "/remote/sessions"
+    },
+    {
+      "method": "POST",
+      "path": "/remote/grants/redeem"
+    },
+    {
+      "method": "GET",
+      "path": "/remote/sessions/{session_id}/observe"
+    }
+  ],
+  "separate_profiles": {
+    "operator": {
+      "routes": [
+        "/rc-operator/[sessionId]"
+      ],
+      "gates": [
+        "NEXT_PUBLIC_AETHER_REMOTE_SESSION_BROWSER_ENABLED",
+        "NEXT_PUBLIC_AETHER_REMOTE_SESSION_CONTROL_ENABLED"
+      ]
+    }
+  }
+}
