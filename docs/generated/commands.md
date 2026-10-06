@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:d1d54032ed8cb1d139f8a4859e729deea8554358ef443208f4f2f6734c60cf52 -->
+<!-- manifest-digest: sha256:f580e0cc5449abd63d6b16b9eec6ebcdc23d42ab296387abba00e6683a3e80cb -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -525,9 +525,9 @@ show the current local terminal ID and state
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-status`
 
-#### `/queue <task>`
+#### `/queue [<task>|list|edit <id> <task>|remove <id>|clear|resume]`
 
-queue a task \(runs when current finishes\)
+queue a task, or inspect/edit/remove/clear pending entries
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.queue`
 

@@ -9,7 +9,9 @@ import { stripAnsi } from "../ui/text.js";
 import { discoverShellProfiles, type ShellProfile } from "../core/shell_profiles.js";
 
 type ShareAction = "preview" | "lines" | "drop" | "replace" | "mask" | "redact" | "send" | "cancel";
-type ShareInput = { kind: "share"; action: ShareAction; first?: number; last?: number; value?: string };
+/** `boundCommandId` is set when a send is queued: it may only send the preview
+ * the user reviewed for that command, never a later replacement. */
+type ShareInput = { kind: "share"; action: ShareAction; first?: number; last?: number; value?: string; boundCommandId?: string };
 
 interface ShellCapture {
   sessionId: string;
@@ -288,8 +290,16 @@ export class ConsoleShell {
     }
     if (input.action === "send") {
       const stage = this.staged ?? (scripted ? this.stageLatest() : null);
+      if (!stage && input.boundCommandId !== undefined) {
+        this.shareNotice(`Queued send was bound to the preview of command ${input.boundCommandId}, which is no longer staged. Nothing was sent.`, "rebound");
+        return { kind: "empty" };
+      }
       if (!stage) {
         this.shareNotice(scripted ? "No local shell result to share." : "Preview the shell result before sending: /shell-result", "missing");
+        return { kind: "empty" };
+      }
+      if (input.boundCommandId !== undefined && stage.capture.commandId !== input.boundCommandId) {
+        this.shareNotice(`Queued send was bound to the preview of command ${input.boundCommandId}, but the staged preview is now command ${stage.capture.commandId}. Nothing was sent; review it and send again.`, "rebound");
         return { kind: "empty" };
       }
       if (!stage.editable.trim()) {
@@ -351,6 +361,8 @@ export class ConsoleShell {
     this.showPreview(stage);
     return { kind: "empty" };
   }
+  /** Command whose preview is staged for review, if any. */
+  stagedCommandId(): string | null { return this.staged?.capture.commandId ?? null; }
   prompt(): string { return `[${this.profile} ${sanitizeServerText(this.session.cwd)}${this.session.state === "lost" ? "; shell lost" : ""}] `; }
   close(): void { this.latest = null; this.staged = null; this.terminal?.stop(); this.session.close(); }
 }

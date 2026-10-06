@@ -215,7 +215,7 @@ for (const tty of [false, true]) {
       submit('hello');
       await until(() => calls === 1 && releaseModel !== null, 'model turn running');
       submit('!echo QUEUED_SHELL');
-      ${tty ? "await until(() => observed.includes('Local shell queued'), 'shell queued during model turn');" : ""}
+      ${tty ? "await until(() => observed.includes('(user shell, 1 pending)'), 'shell queued during model turn');" : ""}
       await releaseTurn(1);
       await until(() => completed() === 3, 'queued shell completion');
       submit(${JSON.stringify(`!"${process.execPath}" -e "process.exit(7)"`)});
@@ -277,8 +277,8 @@ for (const tty of [false, true]) {
 
 test("console submit routing remains before history/rewrite and uses typed queue", () => {
   const code = readFileSync("src/commands/chat.ts", "utf8");
-  assert.ok(code.includes("const queue: ConsoleInput[]"));
+  assert.ok(code.includes("const queue = new ConsoleQueue()"));
   assert.ok(code.indexOf("classifyConsoleInput(queuePrefix") < code.indexOf("const commit ="));
-  assert.ok(code.includes("result = await runQueuedTurn(next)"));
+  assert.ok(code.includes("result = await runEntry(entry)"));
   assert.ok(code.includes("appendHistory(line.trim(), historyPath(ctx.flags.cwd))"), "save the original escaped input, not its model prompt");
 });

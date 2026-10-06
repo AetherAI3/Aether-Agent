@@ -58,11 +58,72 @@ tools. Online account-agent and ATS chats remain separate surfaces.
 - `!` submissions made while a model turn is busy retain their shell type and
   wait until that turn completes. All local tools share a FIFO execution slot.
   Ctrl+C cancels the active command/turn and discards its queued follow-ups;
-  typing ahead retains the newer composer draft.
+  typing ahead retains the newer composer draft. See [Queued input](#queued-input).
 - Shell commands and results are excluded from chat history and hosted prompts.
   `/shell-result` explicitly shares up to 8 KiB of the latest user result as
   untrusted data. Reset clears that result.
   Ordinary chat history still honors `AETHER_NO_HISTORY=1`.
+
+## Queued input
+
+Anything submitted while a turn, shell command or slash command is running
+waits in one strictly ordered queue. Each entry gets a session-stable id
+(`q1`, `q2`, … never reused) and a type: `chat`, `user shell`, `shell reset`,
+`shell profile` or `shell-share`. The input that is running also has an id and is shown
+separately; it cannot be edited (Ctrl+C cancels it).
+
+| Command | Effect |
+|---|---|
+| `/queue` or `/queue list` | Running entry, pending entries in order, and the bound in use |
+| `/queue <task>` | Queue a task (runs at once when idle) |
+| `/queue edit <id> <text>` | Replace a pending chat or user shell entry in place |
+| `/queue remove <id>` | Discard one pending entry |
+| `/queue clear` | Discard every pending entry |
+| `/queue resume` | Run entries that were kept after a failure |
+
+- Queue commands are local bookkeeping. They work mid-stream and while a model
+  switch is pending, never call a model, never start a process, and never
+  enter chat history (an edit can carry shell text). A removed or cleared
+  entry is never run.
+- An edit is classified exactly like typed input and must keep the entry's
+  type: a chat entry needs chat text (`\!` for a leading `!`; slash commands
+  are not queued), a user shell entry needs `!<command>`. Shell-reset,
+  shell-profile and shell-share actions have no editable text: remove and
+  queue again. A
+  rejected edit leaves the entry unchanged.
+- Management keywords match exactly, so `/queue clear the cache` queues a
+  task. Edit and remove act only on `q<number>` ids.
+- Bound: 32 entries and 64 KiB of queued text. A rejected entry is not queued
+  and its draft stays in the composer.
+- Slash commands typed mid-turn other than `/steer`, `/btw` and `/queue` are
+  not queued; the console says so and ↑ recalls them.
+
+Shell-share binding is explicit. A queued `/shell-result send` binds, when it
+is queued, to the preview you reviewed (its command id). At execution it sends
+only that preview, and it refuses and sends nothing if the preview was cancelled
+or replaced by a different command's. It is not queued at all if nothing is
+staged. Queued preview and edit actions (`lines`, `drop`, `replace`, `mask`,
+`redact`) act on the staged preview, or stage the **latest shell result at
+execution** if none is staged. A queued `cancel` discards whatever is staged
+when it runs.
+
+What happens to pending entries:
+
+| Event | Pending entries |
+|---|---|
+| Turn or command completes | Next entry runs |
+| Chat turn fails (including hosted 401) | Kept and listed as **paused**; nothing runs until `/queue resume`. A new submission runs alone, and later type-ahead is marked paused |
+| Ctrl+C / turn or slash command cancelled | Discarded and listed |
+| Local shell state lost, shell action failed, `/shell-reset`, or a shell profile change | Discarded and listed; queued commands never run against a different shell |
+| `/auth new`, session exit | Discarded and listed |
+
+The console has no reconnect path that replays work: a hosted turn that drops
+is a failed turn (paused above), never a silent resume.
+
+Line mode (non-TTY stdin, pipes, CI) reads the next line only after the
+previous one finishes, so it has no pending queue. `/queue <task>` runs the
+task as the next line. The management commands print that there is nothing
+to manage.
 
 ## Interactive Linux terminal
 
