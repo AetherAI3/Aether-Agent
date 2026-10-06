@@ -1052,7 +1052,13 @@ function previewLine(s: string): string {
  * automation needs correlation/outcome/retry facts, not a second copy of user
  * content in every captured JSON log. */
 export function turnOutcomeJson(outcome: TurnOutcome): string {
-  return JSON.stringify({
+  return JSON.stringify(turnOutcomeRecord(outcome));
+}
+
+/** The `aether.turn/1` outcome record as an object, for a command that adds
+ * its own terminal facts (`aether agent` adds its verification reading). */
+export function turnOutcomeRecord(outcome: TurnOutcome): Record<string, unknown> {
+  return {
     protocol: "aether.turn/1",
     type: "turn_outcome",
     turn_id: outcome.turnId,
@@ -1066,7 +1072,7 @@ export function turnOutcomeJson(outcome: TurnOutcome): string {
     finished_at: outcome.finishedAt,
     last_meaningful_activity_at: outcome.lastMeaningfulActivityAt,
     prompt_preserved: true,
-  });
+  };
 }
 
 // A trailing partial escape sequence (CSI/SS3/OSC intro with no final byte) —

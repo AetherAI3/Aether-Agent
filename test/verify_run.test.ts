@@ -11,10 +11,11 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpWorkspace } from "./tmp_workspace.js";
-import { verifyAndRecord } from "../src/core/verify_run.js";
+import { recordingRunner, verifyAndRecord } from "../src/core/verify_run.js";
 import { classifyVerification, readVerification, treeIdentity } from "../src/core/verification_record.js";
 import type { VerifyRunner } from "../src/core/verify_gate.js";
-import type { ToolResult } from "../src/core/tool_executor.js";
+import type { RunOptions, ToolResult } from "../src/core/tool_executor.js";
+import { CodeTurnLifecycle, verifyCodeTurn } from "../src/commands/code.js";
 import type { Runner, RunResult } from "../src/core/worktree.js";
 
 const haveGit = !spawnSync("git", ["--version"], { encoding: "utf8" }).error;
@@ -120,6 +121,7 @@ test("real git: a run whose tree moved underneath it is not recorded at all", as
     assert.equal(result.reading.status, "unknown", "a green exit code about no particular tree is not verified");
     assert.match(result.reading.reason, /changed while npm test was running/);
     assert.equal(result.written, null);
+    assert.equal(result.completed, true, "the check completed; it is the tree that cannot be named");
     assert.equal(readVerification(repo.dir), null, "nothing was written, so nothing can be read back as verified");
     assert.equal(result.exitCode, 0, "the raw result is still returned for the caller to show");
   });
@@ -155,4 +157,106 @@ test("real git: a second run replaces the first, and an edit afterwards makes it
       "one edit after the green run and the claim is stale again",
     );
   });
+});
+
+// ── #275: only a check that ran to completion proves anything ──────────────
+// A run killed at its deadline, cancelled by the operator, or never started by
+// the shell says nothing about the tree. It is neither "verified" nor "failed",
+// so it is not written — and a prior record about the same tree stands.
+
+test("real git: a check that did not complete is not recorded and reads unknown", async (t) => {
+  if (!haveGit) return t.skip("git not available");
+  const cases: Array<[ToolResult, RegExp]> = [
+    [{ output: "[timeout after 120s]\n", exitCode: 124 }, /did not finish within 120s/],
+    [{ output: "[aborted]\n", exitCode: 130 }, /cancelled before it finished/],
+  ];
+  for (const [result, why] of cases) {
+    await inTempConfig(async () => {
+      const repo = fixture("aether-verify-incomplete-");
+      const outcome = await verifyAndRecord(runner(result), repo.run, repo.dir, "npm test");
+      assert.equal(outcome.reading.status, "unknown", `exit ${result.exitCode}`);
+      assert.match(outcome.reading.reason, why);
+      assert.equal(outcome.written, null);
+      assert.equal(outcome.completed, false, "the rail can tell an incomplete check from a moved tree");
+      assert.equal(readVerification(repo.dir), null, `exit ${result.exitCode} must not be stored as a failure`);
+      assert.equal(outcome.exitCode, result.exitCode, "the raw result is still returned");
+    });
+  }
+});
+
+test("real git: a shell's command-not-found exit completed, and is recorded as failed", async (t) => {
+  if (!haveGit) return t.skip("git not available");
+  await inTempConfig(async () => {
+    const repo = fixture("aether-verify-127-");
+    const outcome = await verifyAndRecord(runner({ output: "sh: 1: npm: not found", exitCode: 127 }), repo.run, repo.dir, "npm test");
+    assert.equal(outcome.reading.status, "failed");
+    assert.equal(outcome.completed, true);
+    assert.equal(readVerification(repo.dir)?.exitCode, 127);
+  });
+});
+
+test("real git: an incomplete run leaves an earlier record about the same tree standing", async (t) => {
+  if (!haveGit) return t.skip("git not available");
+  await inTempConfig(async () => {
+    const repo = fixture("aether-verify-keep-");
+    await verifyAndRecord(runner({ output: "24 passed", exitCode: 0 }), repo.run, repo.dir, "npm test");
+    await verifyAndRecord(runner({ output: "[aborted]\n", exitCode: 130 }), repo.run, repo.dir, "npm test");
+    assert.equal(
+      classifyVerification(readVerification(repo.dir), treeIdentity(repo.run, repo.dir)).status,
+      "verified",
+    );
+  });
+});
+
+test("verifyAndRecord forwards the caller's cancellation and deadline to the check", async () => {
+  const controller = new AbortController();
+  let seen: RunOptions | undefined;
+  const exec: VerifyRunner = {
+    executeAsync: async (_name, _args, options) => {
+      seen = options;
+      return { output: "", exitCode: 0 };
+    },
+  };
+  const noGit = (() => ({ status: 1, stdout: "", stderr: "" })) as Runner;
+  await inTempConfig(() =>
+    verifyAndRecord(exec, noGit, "/repo", "npm test", { run: { signal: controller.signal, timeoutMs: 321 } }),
+  );
+  assert.equal(seen?.signal, controller.signal);
+  assert.equal(seen?.timeoutMs, 321);
+});
+
+test("real git: recordingRunner records the agent's completed check for the review rail", async (t) => {
+  if (!haveGit) return t.skip("git not available");
+  await inTempConfig(async () => {
+    const repo = fixture("aether-verify-recording-");
+    const inner = runner({ output: "24 passed", exitCode: 0 });
+    const result = await recordingRunner(inner, repo.run, repo.dir).executeAsync("run_tests", { command: "npm test" });
+    assert.deepEqual(result, { output: "24 passed", exitCode: 0 }, "the caller sees the raw result unchanged");
+    assert.deepEqual(inner.commands, ["npm test"]);
+    assert.equal(readVerification(repo.dir)?.command, "npm test");
+  });
+});
+
+test("real git: the agent footer and the review rail agree about the same check", async (t) => {
+  if (!haveGit) return t.skip("git not available");
+  const scenarios: Array<[ToolResult, string, string]> = [
+    [{ output: "24 passed", exitCode: 0 }, "passed", "verified"],
+    [{ output: "2 failed", exitCode: 1 }, "failed", "failed"],
+    [{ output: "[timeout after 120s]\n", exitCode: 124 }, "timed_out", "unknown"],
+  ];
+  for (const [result, checkState, reviewStatus] of scenarios) {
+    await inTempConfig(async () => {
+      const repo = fixture("aether-verify-agree-");
+      const turn = new CodeTurnLifecycle("fix it", { id: "turn-review" });
+      turn.observe({ type: "done", ok: true, result: "claimed", remaining: 0, reason: "" });
+      const { report } = await verifyCodeTurn(turn, recordingRunner(runner(result), repo.run, repo.dir), {
+        testCmd: "npm test",
+        signal: new AbortController().signal,
+        timeoutMs: 120_000,
+      });
+      const review = classifyVerification(readVerification(repo.dir), treeIdentity(repo.run, repo.dir));
+      assert.equal(report.check.state, checkState);
+      assert.equal(review.status, reviewStatus, `${checkState} reads ${reviewStatus} on the review rail`);
+    });
+  }
 });

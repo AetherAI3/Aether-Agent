@@ -23,7 +23,16 @@ import { defaultRunner, type Runner } from "../core/worktree.js";
 import { isCurrentWorkspace } from "../core/workspace_scope.js";
 import { HostRenderer, routingDriftLines } from "../ui/host_render.js";
 import { SessionLog } from "../core/session_log.js";
-import { finalVerify, type BrainDone, type VerifyOutcome } from "../core/verify_gate.js";
+import {
+  checkNotRun,
+  finalVerify,
+  verificationLaunchFailure,
+  type BrainDone,
+  type CheckReading,
+  type VerifyOutcome,
+  type VerifyRunner,
+} from "../core/verify_gate.js";
+import type { FinalStatus } from "../core/session_log.js";
 import { StatusRenderer } from "../ui/status_renderer.js";
 import { AnimationController } from "../ui/animations.js";
 import { HeartbeatIndicator } from "../ui/heartbeat.js";
@@ -38,10 +47,12 @@ import {
   runSummary,
   stageGate,
   writeDiffLines,
+  type CodeRunReport,
 } from "./code_support.js";
 import { continuationTask, resolveResume, resumeReplayLines, wroteFile, type ResolvedResume } from "../core/handoff.js";
 import { resumeHint } from "./resume.js";
-import { createWorktree, mergeHint, type Worktree } from "../core/worktree.js";
+import { createWorktree, mergeHint, repoRoot, type Worktree } from "../core/worktree.js";
+import { recordingRunner } from "../core/verify_run.js";
 import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js";
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
@@ -53,19 +64,26 @@ import type { SkillSessionProvenance } from "../core/skills/skill_session.js";
 import type { SkillRefusal } from "../core/skills/skill_errors.js";
 import {
   TurnLifecycle,
+  describeStreamFailure,
+  type TurnFinalization,
   type TurnLifecycleOptions,
   type TurnOutcome,
+  type TurnTerminalState,
 } from "../core/turn_lifecycle.js";
 import {
+  HttpError,
   MeaningfulProgressTimeoutError,
   ModelOutputLimitError,
+  StreamIncompleteError,
   StreamTimeoutError,
   TurnDeadlineError,
   errorMessage,
+  httpStatusHint,
   isAbortError,
+  nonHttpErrorHint,
 } from "../core/errors.js";
 import { sanitizeServerText } from "../core/transport.js";
-import { turnOutcomeJson } from "./chat.js";
+import { turnOutcomeRecord } from "./chat.js";
 import { openRcCodingObserver } from "./rc_observation.js";
 
 export { prepareWorkspace } from "./code_support.js";
@@ -272,6 +290,7 @@ export class CodeTurnLifecycle {
   private brainError = "";
   private done: BrainDone | null = null;
   private fatal: Extract<BrainEvent, { type: "routing_drift" }> | null = null;
+  private final: { report: CodeRunReport; verification: VerifyOutcome | null } | null = null;
 
   constructor(prompt: string, opts: TurnLifecycleOptions = {}) {
     this.lifecycle = new TurnLifecycle(prompt, opts);
@@ -291,9 +310,6 @@ export class CodeTurnLifecycle {
     return this.done ? { ...this.done } : null;
   }
 
-  get sawError(): boolean {
-    return this.brainError.length > 0;
-  }
 
   get fatalDrift(): Extract<BrainEvent, { type: "routing_drift" }> | null {
     return this.fatal ? { ...this.fatal } : null;
@@ -351,87 +367,144 @@ export class CodeTurnLifecycle {
     this.toCompleting();
   }
 
+  /** The loop ended in a way that forbids starting the check: the operator
+   * cancelled, the model stream timed out, or the model hit its output cap. */
+  get interrupted(): boolean {
+    return (
+      isAbortError(this.thrown) ||
+      this.thrown instanceof StreamTimeoutError ||
+      this.thrown instanceof ModelOutputLimitError
+    );
+  }
+
+  /** The brain never reached a clean end: an error frame, a throw, or EOF. */
+  get errored(): boolean {
+    return this.brainError.length > 0 || this.thrown !== null || this.eofBeforeTerminal;
+  }
+
+  /** The settled run — outcome, check reading, cause — or null before settle(). */
+  get report(): CodeRunReport | null {
+    return this.final ? { ...this.final.report } : null;
+  }
+
+  /** The settled run together with the gate result it was settled from. */
+  get settledRun(): { report: CodeRunReport; verification: VerifyOutcome | null } | null {
+    return this.final ? { report: { ...this.final.report }, verification: this.final.verification } : null;
+  }
+
   /** Exactly-once terminal reduction. Repeated cleanup paths receive the first
    * immutable outcome rather than attempting a second finalization. */
   settle(verification: VerifyOutcome | null): TurnOutcome {
     const settled = this.lifecycle.outcome;
-    if (settled) return settled;
+    if (settled) {
+      // Finalized outside reduce(): still expose a report, so no caller has to
+      // assert one into existence.
+      this.final ??= {
+        report: { outcome: settled, check: verification?.check ?? checkNotRun(this.notRunReason()), cause: settled.message },
+        verification,
+      };
+      return settled;
+    }
     this.toCompleting();
+    const { outcome, cause } = this.reduce(verification);
+    const check = verification?.check ?? checkNotRun(this.notRunReason());
+    this.final = { report: { outcome, check, cause }, verification };
+    return { ...outcome };
+  }
+
+  /**
+   * One terminal outcome, plus the turn-level cause when something other than
+   * the host's check decided it. The cause is what the footer names; a check
+   * that decided the outcome speaks for itself through its reading.
+   */
+  private reduce(verification: VerifyOutcome | null): { outcome: TurnOutcome; cause: string | null } {
+    const partialOutput = this.partialOutput;
+    const byTurn = (state: TurnTerminalState, details: TurnFinalization) => {
+      const outcome = this.lifecycle.finalize(state, { partialOutput, ...details });
+      return { outcome, cause: outcome.message };
+    };
+    const byCheck = (state: TurnTerminalState, details: TurnFinalization) => ({
+      outcome: this.lifecycle.finalize(state, { partialOutput, ...details }),
+      cause: null,
+    });
+    const check = verification?.check;
 
     if (this.thrown instanceof StreamTimeoutError) {
-      return this.lifecycle.finalize("timed_out", {
+      return byTurn("timed_out", {
         message: sanitizeServerText(this.thrown.message),
         hint: "retry the prompt or run `aether doctor` to inspect connectivity",
         retryable: true,
-        partialOutput: this.partialOutput,
       });
     }
     if (isAbortError(this.thrown)) {
-      return this.lifecycle.finalize("cancelled", {
-        message: "coding turn cancelled",
+      return byTurn("cancelled", { message: cancellationMessage(this.thrown), retryable: true });
+    }
+    // A check killed mid-run is a cancellation or a timeout of the run — never
+    // a red test result, and never a model stream timeout.
+    if (check?.state === "cancelled") {
+      return byCheck("cancelled", { message: `host verification: ${check.reason}`, retryable: true });
+    }
+    // An errored turn keeps its own cause: the check timing out after a crash
+    // is reported through the check reading, as the old exit-1 contract had it.
+    if (check?.state === "timed_out" && !this.errored) {
+      return byCheck("timed_out", {
+        message: `host verification: ${check.reason}`,
+        hint: `raise ${CODE_MEANINGFUL_PROGRESS_TIMEOUT_ENV} (milliseconds) for a slower check, or narrow --test-cmd`,
         retryable: true,
-        partialOutput: this.partialOutput,
       });
     }
     if (this.fatal) {
-      return this.lifecycle.finalize("failed", {
+      return byTurn("failed", {
         message: "coding transport was refused before local execution",
         hint: sanitizeServerText(this.fatal.remediation),
-        partialOutput: this.partialOutput,
       });
     }
-    if (this.thrown !== null) {
-      return this.lifecycle.finalize("failed", {
-        message: "coding turn failed before final verification",
-        retryable: false,
-        partialOutput: this.partialOutput,
-      });
-    }
+    if (this.thrown !== null) return byTurn(...thrownFinalization(this.thrown));
     if (this.eofBeforeTerminal) {
-      return this.lifecycle.finalize("incomplete", {
+      return byTurn("incomplete", {
         message: "connection ended before the coding brain delivered a terminal frame",
         hint: "the prompt is safe to retry; run `aether doctor` to inspect connectivity",
         retryable: true,
-        partialOutput: this.partialOutput,
       });
     }
     if (this.brainError) {
-      return this.lifecycle.finalize("failed", {
-        message: this.brainError,
-        partialOutput: this.partialOutput,
+      // A refusal or auth failure relayed as an error frame gets the same
+      // status-aware next step a streamed chat failure gets.
+      const described = describeStreamFailure({ message: this.brainError });
+      return byTurn("failed", { message: this.brainError, hint: described.hint, retryable: described.retryable });
+    }
+    if (!verification) return byTurn("failed", { message: "host final verification did not complete" });
+    if (verification.check.state === "launch_failed") {
+      return byCheck("failed", {
+        message: `host verification: ${verification.check.reason}`,
+        hint: "check that --test-cmd names a command available in this workspace",
       });
     }
-    if (!verification) {
-      return this.lifecycle.finalize("failed", {
-        message: "host final verification did not complete",
-        partialOutput: this.partialOutput,
-      });
-    }
-    if (verification.status === "ok") {
-      return this.lifecycle.finalize("succeeded", {
-        message: "host verification passed",
-        partialOutput: this.partialOutput,
-      });
-    }
+    if (verification.status === "ok") return byCheck("succeeded", { message: "host verification passed" });
     if (verification.status === "unverified") {
-      return this.lifecycle.finalize("incomplete", {
+      return byCheck("incomplete", {
         message: "coding turn completed without host verification",
         hint: "re-run with --test-cmd so the host can establish a green result",
         retryable: false,
-        partialOutput: this.partialOutput,
       });
     }
     if (verification.status === "error" || verification.status === "failed") {
-      return this.lifecycle.finalize("failed", {
-        message: "coding turn or host verification failed",
-        partialOutput: this.partialOutput,
-      });
+      return byTurn("failed", { message: "coding turn or host verification failed" });
     }
-    const count = verification.remaining > 0 ? ` (${verification.remaining} remaining)` : "";
-    return this.lifecycle.finalize("incomplete", {
-      message: `host verification did not pass${count}`,
-      partialOutput: this.partialOutput,
-    });
+    const { failing, reason } = verification.check;
+    const detail = failing !== null && failing > 0 ? `${failing} test${failing === 1 ? "" : "s"} failing` : reason;
+    return byCheck("incomplete", { message: `host verification failed: ${detail}` });
+  }
+
+  /** Why no check ran, for a run that settled without one. */
+  private notRunReason(): string {
+    if (this.fatal) return "the coding transport was refused before local execution";
+    if (isAbortError(this.thrown)) return "the coding turn was cancelled before host verification";
+    if (this.thrown instanceof StreamTimeoutError) return "the model stream timed out before host verification";
+    if (this.thrown instanceof ModelOutputLimitError) {
+      return "the model output limit ended the turn before host verification";
+    }
+    return "the coding turn ended before host verification";
   }
 
   private noteActive(waitingForTool: boolean): void {
@@ -457,13 +530,113 @@ export class CodeTurnLifecycle {
   }
 }
 
-/** Append the shared headless terminal record exactly once at the command edge. */
+/** Name the operator's interruption when the signal carried one ("…by SIGINT"). */
+function cancellationMessage(err: unknown): string {
+  const message = err instanceof Error ? sanitizeServerText(err.message) : "";
+  return message.startsWith("coding turn") ? message : "coding turn cancelled";
+}
+
+/** A throw that ended the turn, named as itself — mirroring chat's
+ * finalizeThrownTurn, so a coding turn and a chat turn read a 401, an output
+ * cap or a dropped stream the same way. Timeouts and cancellation are reduced
+ * before this is reached. */
+function thrownFinalization(err: unknown): [TurnTerminalState, TurnFinalization] {
+  const message = sanitizeServerText(errorMessage(err)) || "coding turn failed before final verification";
+  const hint = nonHttpErrorHint(err) ?? (err instanceof HttpError ? httpStatusHint(err.status) : null);
+  if (err instanceof StreamIncompleteError) return ["incomplete", { message, hint, retryable: true }];
+  const retryable =
+    hint !== null || (err instanceof HttpError && (err.status === 402 || err.status === 429 || err.status >= 500));
+  return ["failed", { message, hint, retryable }];
+}
+
+/** Append the shared headless terminal record exactly once at the command edge,
+ * carrying the same check reading the footer and session record render. */
 export function emitCodeTurnOutcome(
-  outcome: TurnOutcome,
+  report: CodeRunReport,
   json: boolean,
   write: (line: string) => unknown = (line) => process.stdout.write(line),
 ): void {
-  if (json) write(turnOutcomeJson(outcome) + "\n");
+  if (!json) return;
+  const record = {
+    ...turnOutcomeRecord(report.outcome),
+    verification: {
+      state: report.check.state,
+      exit_code: report.check.exitCode,
+      failing: report.check.failing,
+      reason: report.check.reason,
+    },
+  };
+  write(JSON.stringify(record) + "\n");
+}
+
+export interface CodeVerificationOptions {
+  /** The operator's --test-cmd; absent means the run is unverified by design. */
+  testCmd: string | undefined;
+  /** The command-owned cancellation authority shared with the brain loop. */
+  signal: AbortSignal;
+  /** Deadline for the check process. */
+  timeoutMs: number;
+  /** Told when the host could not start the check at all. */
+  onLaunchError?: (err: unknown) => void;
+}
+
+/**
+ * Run the host's final verification for a coding turn whose loop has ended,
+ * and settle the turn from what the check actually did. This is the whole
+ * post-loop path of `aether agent`, kept out of cmdCode so it can be driven
+ * without a brain.
+ *
+ * The check is never started after a cancellation, a model stream timeout, or
+ * a model output cap — those runs settle with "verification not run". A
+ * cancellation that lands between the loop and the check is a cancellation,
+ * not a missing verification. Settles exactly once: a second call returns the
+ * first result without running anything.
+ */
+export async function verifyCodeTurn(
+  turn: CodeTurnLifecycle,
+  exec: VerifyRunner,
+  opts: CodeVerificationOptions,
+): Promise<{ report: CodeRunReport; verification: VerifyOutcome | null }> {
+  const prior = turn.settledRun;
+  if (prior) return prior;
+  // A clean turn cancelled before its check is a cancellation. A turn that
+  // already failed keeps its real cause; either way the check never starts.
+  if (opts.signal.aborted && !turn.interrupted && !turn.errored) turn.noteThrown(codeSignalReason(opts.signal));
+  let verification: VerifyOutcome | null = null;
+  if (!turn.interrupted && !opts.signal.aborted) {
+    try {
+      verification = await finalVerify(exec, opts.testCmd, turn.lastDone, turn.errored, {
+        signal: opts.signal,
+        timeoutMs: opts.timeoutMs,
+      });
+    } catch (err) {
+      opts.onLaunchError?.(err);
+      verification = verificationLaunchFailure(opts.testCmd ?? "the check", err);
+    }
+  }
+  turn.settle(verification);
+  return turn.settledRun!;
+}
+
+/**
+ * The session record of a settled run. A stopped run is filed as stopped —
+ * "cancelled" or "timed-out" — rather than as a red one, and `remaining` is
+ * the HOST's failing count from a completed red check, or nothing: a brain's
+ * self-reported count is never recorded as failing tests.
+ */
+export function codeRunRecord(
+  report: CodeRunReport,
+  verification: VerifyOutcome | null,
+): { finalStatus: FinalStatus; remaining: number; verification: CheckReading } {
+  const { outcome, check } = report;
+  const finalStatus: FinalStatus =
+    outcome.state === "cancelled"
+      ? "cancelled"
+      : outcome.state === "timed_out"
+        ? "timed-out"
+        : (verification?.status ?? "error");
+  const remaining = check.state === "failed" ? (check.failing ?? 0) : 0;
+  return { finalStatus, remaining, verification: check };
 }
 
 export async function cmdCode(
@@ -940,19 +1113,13 @@ export async function cmdCode(
   }
 
   const startedAt = Date.now();
-  let loopError: unknown = null;
-  let incompleteEof = false;
   try {
     await hostLoop(brain, exec, onEvent, taskCmd, onToolResult, gate, run.guard, {
       meaningfulProgressTimeoutMs: progressTimeoutMs,
       signal: commandAbort.signal,
     });
-    if (!turn.hasTerminalFrame) {
-      incompleteEof = true;
-      turn.noteIncompleteEof();
-    }
+    if (!turn.hasTerminalFrame) turn.noteIncompleteEof();
   } catch (err) {
-    loopError = err;
     turn.noteThrown(err);
     if (!ctx.flags.json) {
       process.stderr.write(`\n✗ ${sanitizeServerText(errorMessage(err))}\n`);
@@ -971,65 +1138,46 @@ export async function cmdCode(
     // No second copy of the remediation: the ROUTING_DRIFT banner already
     // carried it (host_render.routingDriftLines prints it on a fatal drift),
     // on this path and on the animated one alike.
-    log?.close("incomplete", nowIso(), 0);
-    emitCodeTurnOutcome(turn.settle(null), ctx.flags.json);
+    turn.settle(null);
+    const refused = turn.report!;
+    log?.close("incomplete", nowIso(), 0, refused.check);
+    emitCodeTurnOutcome(refused, ctx.flags.json);
     if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
     return EXIT_ROUTING_REFUSED;
   }
 
   // ── Final verification gate: ground truth, never the brain's self-report ──
-  // The host re-runs the test command ITSELF and derives finalStatus from the real
+  // The host re-runs the test command ITSELF and derives the result from the real
   // exit code (verify_gate.ts). The brain's `done` is advisory — it only enriches a
   // red result with its breaker reason and can never upgrade a red run to "ok".
-  let verification: VerifyOutcome | null = null;
-  const loopWasInterrupted =
-    commandAbort.signal.aborted || loopError instanceof StreamTimeoutError || loopError instanceof ModelOutputLimitError || isAbortError(loopError);
-  if (!loopWasInterrupted) {
-    try {
-      verification = await finalVerify(
-        exec,
-        opts.testCmd,
-        turn.lastDone,
-        turn.sawError || loopError !== null || incompleteEof,
-        { signal: commandAbort.signal, timeoutMs: progressTimeoutMs },
-      );
-      // ToolExecutor reports a killed process as a structured result so callers
-      // can distinguish operator cancellation from a clock expiry. Feed that
-      // distinction back into the lifecycle instead of flattening either into
-      // an ordinary red test run.
-      if (verification.exitCode === 130 || commandAbort.signal.aborted) {
-        const interrupted = codeSignalReason(commandAbort.signal);
-        loopError = interrupted;
-        turn.noteThrown(interrupted);
-      } else if (verification.exitCode === 124) {
-        const timedOut = new MeaningfulProgressTimeoutError(progressTimeoutMs);
-        loopError = timedOut;
-        turn.noteThrown(timedOut);
-      }
-    } catch (err) {
-      loopError = err;
-      turn.noteThrown(err);
+  // A cancelled, timed-out or capped turn never starts the check at all.
+  // In a git checkout the check is recorded through the review rail's single
+  // writer, so `aether review` reads back the same result this run reports —
+  // bound to this tree, and stale after the next edit.
+  const checkRoot = opts.testCmd ? repoRoot(workspaceRun, cwd) : null;
+  const checkRunner = checkRoot ? recordingRunner(exec, workspaceRun, checkRoot) : exec;
+  const { report, verification } = await verifyCodeTurn(turn, checkRunner, {
+    testCmd: opts.testCmd,
+    signal: commandAbort.signal,
+    timeoutMs: progressTimeoutMs,
+    onLaunchError: (err) => {
       if (!ctx.flags.json) {
-        process.stderr.write(`\n✗ final verification failed: ${sanitizeServerText(errorMessage(err))}\n`);
+        process.stderr.write(`\n✗ final verification could not start: ${sanitizeServerText(errorMessage(err))}\n`);
       }
-    }
-  }
-  const outcome = turn.settle(verification);
-  emitCodeTurnOutcome(outcome, ctx.flags.json);
-  const finalStatus = verification?.status ?? "error";
-  const remaining = verification?.remaining ?? turn.lastDone?.remaining ?? 0;
+    },
+  });
+  const outcome = report.outcome;
+  emitCodeTurnOutcome(report, ctx.flags.json);
+  const record = codeRunRecord(report, verification);
   const verifyExit = verification?.exitCode ?? 1;
-  log?.close(finalStatus, nowIso(), remaining);
+  log?.close(record.finalStatus, nowIso(), record.remaining, record.verification);
   // The verdict line — printed even with --no-log (which used to end with
-  // NOTHING); suppressed under --json (frames already carry the data). Surfaces
-  // the failing-test count the verify gate already computed but used to bury
-  // in the log file only. runSummary only distinguishes ok/incomplete/unverified
-  // (a breaker reason like "stalled" still reads as "incomplete" to the user —
-  // the run didn't finish green either way), so collapse the wider FinalStatus.
+  // NOTHING); suppressed under --json (the outcome record carries the same
+  // reading). Rendered from the turn outcome plus what the check actually did,
+  // so a run that ended before (or during) its check never reads as failing.
   if (!ctx.flags.json) {
     const secs = (Date.now() - startedAt) / 1000;
-    const summaryStatus = finalStatus === "ok" || finalStatus === "unverified" ? finalStatus : "incomplete";
-    process.stderr.write("\n  " + runSummary(summaryStatus, remaining, touched.size, secs) + "\n");
+    process.stderr.write("\n  " + runSummary(report, touched.size, secs) + "\n");
   }
   if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
   if (process.env["AETHER_PROJECT_MEMORY_RECEIPTS_ENABLED"] === "1") {
