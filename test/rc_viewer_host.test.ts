@@ -43,6 +43,8 @@ import {
   sanitizeRemotePayload,
 } from "../src/core/rc/redaction.js";
 import { loadEnrollmentMetadata } from "../src/core/device_runtime/identity.js";
+import { createOutbox, enqueueEvent } from "../src/core/rc/outbox.js";
+import { mapBrainEventToRc } from "../src/core/rc/producers.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -394,6 +396,27 @@ test("absolute paths are relativized or refused", () => {
   assert.equal(relativizePath("/repo/src/a.ts", "/repo"), "src/a.ts");
   assert.equal(relativizePath("/etc/passwd", "/repo"), "[external-path]");
   assert.equal(relativizePath("src/a.ts", "/repo"), "src/a.ts");
+});
+
+test("a home-relative tool target is refused before durable enqueue, never left for Cloud to 400", () => {
+  // Cloud's display/1 identifier rule refuses ANY leading "~" as "absolute
+  // local paths are forbidden", and RC_EVENT_REJECTED keeps the batch at the
+  // head of the outbox, so one such target wedged delivery for good:
+  // `list_dir("~")`, or an Office lock file such as `~$Report.docx`.
+  for (const target of ["~", "~$Report.docx", "~other/notes.txt", "~/x", "~\\x"]) {
+    const produced = mapBrainEventToRc({ type: "tool_call", id: "1", name: "list_dir", args: { path: target } });
+    assert.ok(produced, target);
+    const record = createOutbox({ session_id: "s", project_ref: "p", device_id: "d", epoch: 1, project_root: "/repo" });
+    assert.equal(enqueueEvent(record, produced.event_type, produced.payload), true, target);
+    assert.equal(record.events[0]?.payload["target"], "[external-path]", `${target} reached the outbox`);
+  }
+  // A "~" that is not leading is part of a project-relative name and survives.
+  const inner = sanitizeRemotePayload(
+    "tool_activity",
+    { tool: "read_file", target: "src/a~b.ts", status: "started" },
+    { projectRoot: "/repo" },
+  );
+  assert.equal(inner?.["target"], "src/a~b.ts");
 });
 
 test("an oversize payload is refused, not truncated into a new shape", () => {

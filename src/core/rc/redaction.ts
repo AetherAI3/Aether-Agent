@@ -149,6 +149,11 @@ function sanitizeString(value: string, projectRoot: string, env: NodeJS.ProcessE
 function sanitizePathIdentifier(value: string, projectRoot: string, env: NodeJS.ProcessEnv): string {
   if (!value) return "[unnamed-file]";
   if (value.replaceAll("\\", "/").split("/").includes("..")) return "[external-path]";
+  // Cloud's display/1 identifier rule reads ANY leading "~" as a home path
+  // ("absolute local paths are forbidden"): `~`, `~user/x`, even an Office
+  // lock file `~$Report.docx`. Sent as-is it is a 400 that keeps the batch at
+  // the head of the outbox, so it is refused here, before durable enqueue.
+  if (value.startsWith("~")) return "[external-path]";
   return sanitizeString(value, projectRoot, env);
 }
 
