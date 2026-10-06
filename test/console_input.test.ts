@@ -72,7 +72,8 @@ for (const tty of [false, true]) {
       let calls = 0;
       let sharing = false;
       let releaseModel = null;
-      globalThis.fetch = async (_url, options) => {
+      globalThis.fetch = async (url, options) => {
+        if (String(url).endsWith('/models')) return Response.json({ account_id: 'fixture-account' });
         const body = String(options?.body ?? '');
         if (body.includes('SHELL_ONLY') || body.includes('QUEUED_SHELL')) throw new Error('shell output leaked');
         if (body.includes('SHARE_ALLOWED') && !sharing) throw new Error('implicit sharing');

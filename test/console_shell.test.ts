@@ -35,7 +35,11 @@ test("line console shell commands make zero model calls, keep output out of prom
   let output = "";
   const bodies: string[] = [];
   const shell = new ConsoleShell(root, text => { output += text; }, true);
-  globalThis.fetch = (async (_url, init) => { bodies.push(String(init?.body ?? "")); return turnResponse(); }) as typeof fetch;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith("/models")) return Response.json({ account_id: "fixture-account" });
+    bodies.push(String(init?.body ?? ""));
+    return turnResponse();
+  }) as typeof fetch;
   process.stdout.write = ((text: string | Uint8Array) => { output += String(text); return true; }) as typeof process.stdout.write;
   try {
     const run = replLines(context(root), { noSkills: true }, shell, input);
