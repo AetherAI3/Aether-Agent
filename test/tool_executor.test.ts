@@ -28,7 +28,8 @@ test("git_commit passes a message with shell metacharacters through unexecuted",
     // baseline is armed by the first mutating tool call, so a change made
     // behind the executor's back is (correctly) part of the baseline and would
     // not be a commit candidate.
-    exec.execute("write_file", { path: "a.txt", content: "changed\n" });
+    const prior = JSON.parse(exec.execute("read_file", { path: "a.txt" }).output);
+    exec.execute("write_file", { path: "a.txt", content: "changed\n", expected_revision: prior.revision, replace_token: prior.replace_token });
     const r = exec.execute("git_commit", { message: 'fix "cap & retry" `whoami` $(id)' });
     assert.equal(r.exitCode, 0);
     const log = spawnSync("git", ["log", "-1", "--pretty=%s"], { cwd: dir, encoding: "utf8" });
@@ -126,7 +127,8 @@ test("git_commit surfaces a real failure instead of reporting the old HEAD as su
   const dir = initRepo();
   try {
     const exec = new ToolExecutor(dir);
-    exec.execute("write_file", { path: "a.txt", content: "changed again\n" });
+    const prior = JSON.parse(exec.execute("read_file", { path: "a.txt" }).output);
+    exec.execute("write_file", { path: "a.txt", content: "changed again\n", expected_revision: prior.revision, replace_token: prior.replace_token });
     // Break the repo's ability to commit: a pre-commit hook that always fails.
     const hookPath = join(dir, ".git", "hooks", "pre-commit");
     mkdirSync(join(dir, ".git", "hooks"), { recursive: true });

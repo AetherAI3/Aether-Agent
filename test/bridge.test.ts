@@ -185,7 +185,7 @@ test("ToolExecutor writes then reads a file in the workspace", () => {
     const ex = new ToolExecutor(dir);
     const w = ex.execute("write_file", { path: "a.txt", content: "hello" });
     assert.equal(w.exitCode, 0);
-    assert.match(w.output, /\[wrote a\.txt/);
+    assert.match(w.output, /\[created a\.txt/);
     assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "hello");
     const r = ex.execute("read_file", { path: "a.txt" });
     assert.equal(JSON.parse(r.output).content, "hello");

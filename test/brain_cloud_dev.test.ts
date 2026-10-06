@@ -149,6 +149,7 @@ test("dev session: create carries effort + capabilities; tool_call surfaces and 
     assert.ok((createBody["capabilities"] as string[]).includes("patch_file"));
     assert.equal(createBody["read_file_ranges"], true);
     assert.equal(createBody["read_file_revisions"], process.platform === "linux" ? true : undefined);
+    assert.equal(createBody["write_file_preconditions"], true);
 
     const tc = out.find((e) => e.type === "tool_call");
     assert.ok(tc && tc.type === "tool_call");

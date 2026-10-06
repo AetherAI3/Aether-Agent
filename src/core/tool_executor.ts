@@ -7,8 +7,8 @@
 // regardless of which side originally ran it.
 
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, opendirSync, readFileSync, readlinkSync, readdirSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { chmodSync, closeSync, constants as fsConstants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, opendirSync, readFileSync, readlinkSync, readdirSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import type { BigIntStats, Dirent } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -32,6 +32,9 @@ const DEFAULT_TEST_CMD = "";
 const SNAPSHOT_MAX_BYTES = 1024 * 1024;
 const SEARCH_MAX_HITS = 40;
 const FILE_PATCH_MAX_BYTES = 16 * 1024 * 1024;
+// A complete byte read is at most 4096 bytes. Replacement checks only this
+// bounded prior image, never a whole large file.
+const FILE_REPLACE_MAX_BYTES = 4096;
 function fileRevision(stat: BigIntStats, digest: string | null = null): string {
   const fields = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.birthtimeNs];
   return "r1_" + createHash("sha256").update([...fields.map(String), digest ?? ""].join(":"), "utf8").digest("base64url");
@@ -87,6 +90,7 @@ export interface FileSnapshot {
 
 export class ToolExecutor {
   private readonly root: string;
+  private readonly replacementKey = randomBytes(32);
   private readonly mode: ToolExecutionContext["mode"];
   /**
    * Built on first use by armCommitGuard(), never in the constructor. See the
@@ -415,7 +419,7 @@ export class ToolExecutor {
         case "patch_file":
           return this.patchFile(args);
         case "write_file":
-          return this.writeFile(String(args["path"] ?? ""), String(args["content"] ?? ""));
+          return this.writeFile(args);
         case "run_shell":
         case "run_tests":
           // Shell-backed tools became async so a timeout or Ctrl+C can reap the
@@ -602,7 +606,10 @@ export class ToolExecutor {
           try { content = decoder.decode(bytes.subarray(0, end)); }
           catch { end--; continue; }
           const nextOffset = offset + end;
-          output = JSON.stringify({ path, sha256: digest, revision, offset, range_end: nextOffset,
+          output = JSON.stringify({ path, sha256: digest, revision,
+            ...(offset === 0 && nextOffset === size && size <= FILE_REPLACE_MAX_BYTES
+              ? { replace_token: this.replacementToken(abs, revision) } : {}),
+            offset, range_end: nextOffset,
             next_offset: nextOffset < size ? nextOffset : null, size,
             complete: offset === 0 && nextOffset === size, truncated: nextOffset < size,
             starts_mid_line: startsMidLine,
@@ -785,19 +792,97 @@ export class ToolExecutor {
     }
   }
 
-  private writeFile(path: string, content: string): ToolResult {
+  private replacementToken(abs: string, revision: string): string {
+    return "w1_" + createHmac("sha256", this.replacementKey).update(abs).update("\0").update(revision).digest("base64url");
+  }
+
+  private writeFile(args: Record<string, string | number>): ToolResult {
+    const path = String(args["path"]);
+    const content = String(args["content"]);
+    const expected = args["expected_revision"] as string | undefined;
+    const token = args["replace_token"] as string | undefined;
     const abs = this.safe(path);
-    mkdirSync(dirname(abs), { recursive: true });
-    // Re-validate immediately before opening, then refuse a symlink final component.
-    const verified = this.safe(path);
-    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
-    const fd = openSync(verified, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | noFollow, 0o600);
-    try {
-      writeFileSync(fd, content, "utf8");
-    } finally {
-      closeSync(fd);
+    // Never turn an intended replacement into creation, or accept a partial
+    // read's public revision without its complete-read proof.
+    if ((expected === undefined) !== (token === undefined)) throw new Error("replacement requires expected_revision and replace_token from one complete read_file result");
+    if (expected !== undefined) {
+      const actual = Buffer.from(this.replacementToken(abs, expected));
+      const supplied = Buffer.from(token!);
+      if (actual.length !== supplied.length || !timingSafeEqual(actual, supplied)) {
+        throw new Error("invalid replace_token: read the complete file before replacement");
+      }
     }
-    return { output: `[wrote ${path} · ${Buffer.byteLength(content)} bytes]`, exitCode: 0 };
+    if (expected === undefined && existsSync(abs)) {
+      throw new Error("file already exists: read the complete file and pass expected_revision with replace_token; use patch_file for larger files");
+    }
+    if (expected !== undefined && !existsSync(abs)) {
+      throw new Error(`stale_revision: ${path}; replacement target no longer exists`);
+    }
+    mkdirSync(dirname(abs), { recursive: true });
+    this.safe(path);
+    const staged = resolve(dirname(abs), `.aether-write-${randomUUID()}.tmp`);
+    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+    let fd: number | undefined;
+    try {
+      // Stage in the same directory so the final rename/link is atomic on
+      // filesystems that provide those operations. The old file stays intact
+      // if writing, syncing, or changing permissions fails.
+      fd = openSync(staged, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow, 0o600);
+      writeFileSync(fd, content, "utf8");
+      fsyncSync(fd);
+      closeSync(fd); fd = undefined;
+      if (expected === undefined) {
+        this.safe(path);
+        linkSync(staged, abs); // atomic create-only; EEXIST preserves a racing creator
+        return { output: `[created ${path} · ${Buffer.byteLength(content)} bytes · revision new]`, exitCode: 0 };
+      }
+      // Validate the named file after staging, immediately before rename.
+      // The digest uses at most 4096 bytes, the largest complete read_file
+      // response; large targets must use patch_file instead.
+      const current = this.replacementRevision(path, abs);
+      if (current.revision !== expected) throw new Error(`stale_revision: ${path}; read again before replacement`);
+      chmodSync(staged, current.mode);
+      this.safe(path);
+      const confirmed = this.replacementRevision(path, abs);
+      if (confirmed.revision !== expected) throw new Error(`stale_revision: ${path}; read again before replacement`);
+      renameSync(staged, abs);
+      const newStat = statSync(abs, { bigint: true });
+      const newDigest = createHash("sha256").update(content, "utf8").digest("hex");
+      return { output: `[replaced ${path} · prior_revision ${expected} · new_revision ${fileRevision(newStat, newDigest)} · ${Buffer.byteLength(content)} bytes]`, exitCode: 0 };
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+      if (existsSync(staged)) unlinkSync(staged);
+    }
+  }
+
+  private replacementRevision(path: string, abs: string): { revision: string; mode: number } {
+    this.safe(path);
+    const named = lstatSync(abs, { bigint: true });
+    if (!named.isFile() || named.isSymbolicLink()) throw new Error("replacement target must be a regular file");
+    if (named.size > BigInt(FILE_REPLACE_MAX_BYTES)) throw new Error("replacement target exceeds a complete read_file page; use patch_file");
+    const fd = openSync(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    try {
+      const before = fstatSync(fd, { bigint: true });
+      if (!before.isFile() || before.dev !== named.dev || before.ino !== named.ino) throw new Error("replacement target changed while opening");
+      if (process.platform === "linux") {
+        const opened = readlinkSync(`/proc/self/fd/${fd}`).replace(/ \(deleted\)$/, "");
+        if (opened !== this.root && !opened.startsWith(this.root + sep)) throw new Error("replacement target opened outside workspace");
+      }
+      const bytes = Buffer.alloc(Number(before.size));
+      for (let at = 0; at < bytes.length;) {
+        const n = readSync(fd, bytes, at, bytes.length - at, at);
+        if (n === 0) throw new Error("replacement target changed during check");
+        at += n;
+      }
+      const after = fstatSync(fd, { bigint: true });
+      const finalName = lstatSync(abs, { bigint: true });
+      if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size
+        || after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs
+        || finalName.dev !== before.dev || finalName.ino !== before.ino || finalName.isSymbolicLink()) {
+        throw new Error("replacement target changed during check");
+      }
+      return { revision: fileRevision(before, createHash("sha256").update(bytes).digest("hex")), mode: Number(before.mode) };
+    } finally { closeSync(fd); }
   }
 
   /**

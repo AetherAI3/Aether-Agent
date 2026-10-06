@@ -242,6 +242,7 @@ export class CloudBrain implements Brain {
             capabilities: this.opts.localToolCapabilities ?? TOOLS,
             readFileRanges: true,
             readFileRevisions: process.platform === "linux",
+            writeFilePreconditions: true,
             maxUvt: this.opts.maxUvt,
             protocolVersion: DEV_PROTOCOL_VERSION,
           }),

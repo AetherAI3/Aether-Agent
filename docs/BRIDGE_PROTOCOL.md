@@ -87,6 +87,28 @@ on decode and back on encode.
   code 1 before content I/O. All revision comparisons use the opened handle;
   Linux verifies that handle stays inside the workspace, and observed changes
   during a read still fail the read-conflict check.
+- `write_file` creates a missing path with create-only semantics. To replace an
+  existing regular text file, send `expected_revision` and `replace_token` from
+  the **same complete byte-mode `read_file` result** (`complete: true`). The
+  token is signed for this executor, path, and revision, and is absent from
+  partial, line-mode, binary, and unsupported reads. A legacy `path`/`content`
+  call against an existing file fails with guidance. A stale revision fails
+  before replacement. Since a complete byte result is limited to 4096 bytes,
+  use `patch_file` for larger files. Hosted dev sessions advertise
+  `write_file_preconditions: true`; the hosted server rejects coding sessions
+  that request `write_file` without this flag with a clear upgrade error.
+  Local and hosted calls execute through the same host validator. Tokens
+  cannot be carried to another executor/session.
+  The host stages content in a sibling file and syncs it first. New files are
+  committed with an atomic hard link that fails if another creator won the
+  race. Replacements recheck the bounded prior image and path identity just
+  before same-directory rename. On filesystems where rename over a file is
+  unsupported or blocked (including some Windows sharing modes), the call
+  fails and leaves the old file intact. Concurrent writers that bypass this
+  host and change the path in the interval between final check and rename are
+  outside the host's compare-and-swap guarantee; use an external workspace
+  lock when such writers are present. Successful replacements report prior
+  and new revisions for audit.
 - Tool output is bounded. Shell and test output includes `[exit N]`; file reads
   include explicit range and continuation metadata. The host sends the same
   result shape to local and cloud brains.

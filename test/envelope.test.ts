@@ -8,6 +8,8 @@ test("dev-session request advertises range reads only for a capable host", () =>
   assert.equal(buildDevSessionRequest({ ...base, readFileRanges: true }).read_file_ranges, true);
   assert.equal(buildDevSessionRequest(base).read_file_revisions, undefined);
   assert.equal(buildDevSessionRequest({ ...base, readFileRevisions: true }).read_file_revisions, true);
+  assert.equal(buildDevSessionRequest(base).write_file_preconditions, undefined);
+  assert.equal(buildDevSessionRequest({ ...base, writeFilePreconditions: true }).write_file_preconditions, true);
 });
 
 test("buildChatRequest nulls empty model/agent and defaults to auto", () => {

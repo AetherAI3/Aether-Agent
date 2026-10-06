@@ -44,7 +44,7 @@ export const TOOL_DEFINITIONS: Readonly<Record<ToolName, ToolDefinition>> = {
   },
   write_file: {
     sideEffect: "write",
-    args: { path: stringArg(4096), content: stringArg(1024 * 1024, true, true) },
+    args: { path: stringArg(4096), content: stringArg(1024 * 1024, true, true), expected_revision: stringArg(128, false), replace_token: stringArg(128, false) },
   },
   run_shell: {
     sideEffect: "shell",
@@ -125,6 +125,9 @@ export function validateToolCall(name: string, rawArgs: unknown): ToolValidation
   if (name === "read_file" && (validated["start_line"] !== undefined || validated["max_lines"] !== undefined)
     && (validated["offset"] !== undefined || validated["max_bytes"] !== undefined)) {
     return { ok: false, error: "line and byte ranges cannot be combined" };
+  }
+  if (name === "write_file" && (validated["expected_revision"] === undefined) !== (validated["replace_token"] === undefined)) {
+    return { ok: false, error: "replacement requires expected_revision and replace_token together" };
   }
   return { ok: true, name: name as ToolName, args: validated };
 }

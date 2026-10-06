@@ -126,6 +126,14 @@ export interface ReadFileArgs {
   expected_revision?: string;
 }
 
+/** Existing-file writes need both fields from one complete read_file byte result. */
+export interface WriteFileArgs {
+  path: string;
+  content: string;
+  expected_revision?: string;
+  replace_token?: string;
+}
+
 export interface WorkflowDoneFrame {
   type: "workflow_done";
   synthesis: string;

@@ -149,4 +149,9 @@ test("local model, hosted capabilities, and headless allowlist advertise the new
     assert.ok(schemas.includes(name));
     assert.ok((EXEC_V1_TOOLS as readonly string[]).includes(name));
   }
+  const write = ollamaToolSchemas().find((schema) => schema.function.name === "write_file")!;
+  const parameters = write.function.parameters as { properties: Record<string, unknown> };
+  assert.ok(parameters.properties["expected_revision"]);
+  assert.ok(parameters.properties["replace_token"]);
+  assert.match(write.function.description ?? "", /complete read_file/);
 });
