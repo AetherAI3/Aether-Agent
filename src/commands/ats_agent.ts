@@ -744,7 +744,7 @@ export function createAtsHooks(deps: AtsHookDeps = {}): ManagedAgentHooks {
           throw new Error("ATS memory writer lease did not establish runtime exclusivity.");
         }
         const settings = await pack.loadSettings(join(dirname(path), "settings.json"));
-        surface?.setContext?.({ memory: `writer leased ${binding.memory_gb} GiB`, mode: `${settings.permission_mode} requested`, strategies: "configured", data: String(pack.dataStreamStatus(settings)["state"] ?? "unverified") });
+        surface?.setContext?.({ memory: `writer leased ${binding.memory_gb} GiB`, mode: `${settings.permission_mode} requested`, strategies: "directory configured; readiness unverified", data: String(pack.dataStreamStatus(settings)["state"] ?? "unverified"), profileCheckedAt: Date.now() });
         await appendJournal(pack, path, agent.agent_id, "chat.opened", "ATS chat acquired the memory writer lease.", { memory_gb: binding.memory_gb, runtime_exclusive: true });
         output(theme.dim("ATS · local memory writer leased · Cloud DM · local execution is not connected to this conversation\n"));
         // Strict local loopback runtimes intentionally support unauthenticated setup.

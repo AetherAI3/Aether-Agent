@@ -53,9 +53,11 @@ import { chooseBackend, type BackendPath } from "../core/backend.js";
 import { OllamaBrain } from "../core/brain_ollama.js";
 import { isLocalModelId, localModelId, ollamaTagFromId, resolveHostedModel, resolveLocalModel } from "../core/local_ollama.js";
 import type { Brain } from "../core/brain.js";
+import { SteerChannel, formatSteerAck } from "../core/steer_channel.js";
 import type { RunOptions, ToolResult } from "../core/tool_executor.js";
 import { ToolExecutor } from "../core/tool_executor.js";
 import { ConsoleShell, classifyConsoleInput, type ConsoleInput } from "./console_input.js";
+import { ConsoleQueue, describeEntry, entryKind, parseQueueCommand, renderDisposition, type QueueCommand, type QueueEntry, type QueueableInput } from "./console_queue.js";
 import { HostRenderer } from "../ui/host_render.js";
 import type { TaskCommand } from "../core/brain.js";
 import { getRegistry } from "../core/context_registry.js";
@@ -109,13 +111,18 @@ interface ChatJsonResponse {
 export interface TurnSkillOptions {
   explicitSkill?: string;
   noSkills?: boolean;
-  /** Reviewed shell content must not enter durable receipt/export storage. */
+  /** Shell attachments must never become durable receipt/export content. */
   ephemeralAttachment?: boolean;
   /** Local console authority, never serialized to Cloud. */
   exec?: ToolExecutor;
   /** Host-observed results only; no model text or shell output. */
   onToolResult?: (tool: ObservedTool) => void;
+  /** Console /steer routing for this turn (#283). Never serialized to Cloud. */
+  steer?: SteerChannel;
 }
+
+/** Why a hosted chat turn only takes steering for the next turn (#283). */
+export const HOSTED_STEER_DEFERRED = "this hosted chat route has no live control acknowledgement";
 
 export const DEFAULT_CHAT_TURN_DEADLINE_MS = 30 * 60_000;
 /** A positive override is useful for tests and operators; 0 cannot disable it. */
@@ -521,8 +528,11 @@ export async function runTurn(
       getRegistry().markLocalUnmetered();
       // The signal used to be dropped here, so the REPL Ctrl+C controller could
       // not reach a local turn at all: the abort fired and nothing observed it.
-      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, ...(skillOpts.exec ? { exec: skillOpts.exec } : {}), ...(skillOpts.onToolResult ? { onToolResult: skillOpts.onToolResult } : {}) }, run.guard);
+      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, ...(skillOpts.exec ? { exec: skillOpts.exec } : {}), ...(skillOpts.onToolResult ? { onToolResult: skillOpts.onToolResult } : {}), ...(skillOpts.steer ? { steer: skillOpts.steer } : {}) }, run.guard);
     }
+    // /agent/chat/stream exposes no control acknowledgement, so a steer typed
+    // during this turn is kept for the next one rather than reported as live.
+    skillOpts.steer?.markNextTurnOnly(HOSTED_STEER_DEFERRED);
     // The cloud REPL turn streams from /agent/chat/stream, where the SERVER runs
     // the tools. This host executes nothing on that path, so it can enforce
     // nothing on it either. Say so rather than let the Policy line above read as
@@ -810,6 +820,13 @@ export interface LocalTurnDeps {
    * workspace. `false` disables it for a deliberate embed. */
   failureBudget?: ToolFailureBudget | false;
   onToolResult?: (tool: ObservedTool) => void;
+  /** Live /steer routing: attached once the brain runs (#283). */
+  steer?: SteerChannel;
+}
+
+/** What the brain is told when the host refuses a call selected before a steer. */
+export function staleAfterSteerResult(name: string): ToolResult {
+  return { output: `[tool ${name} not executed: superseded by operator steering accepted before it ran]`, exitCode: 1 };
 }
 
 export async function runLocalTurn(
@@ -882,6 +899,7 @@ export async function runLocalTurn(
   try {
     pulse.start();
     iterator = brain.run(task)[Symbol.asyncIterator]();
+    deps.steer?.attach(brain);
     for (;;) {
       const next = await boundedLocalOperation(
         () => iterator!.next(),
@@ -939,6 +957,22 @@ export async function runLocalTurn(
           const note = origin ? failures?.repeatNote(key) : null;
           brain.sendToolResult(ev.id, note && result.exitCode !== 0 ? { ...result, output: `${result.output}\n${note}` } : result);
         };
+        // A steer the brain accepted but has not yet put in front of the
+        // model means this call was selected before it. It is answered
+        // without prompting or executing, and counts as no failure (#283).
+        const supersededBySteer = (): boolean => {
+          if (!deps.steer?.hasPendingSteer()) return false;
+          deps.steer.noteToolSkipped(ev.name);
+          deliver(staleAfterSteerResult(ev.name), null);
+          return true;
+        };
+        if (supersededBySteer()) {
+          lastMeaningfulAt = Date.now();
+          modelOutput.reset();
+          noteStreamingActivity(lifecycle);
+          pulse.start();
+          continue;
+        }
         // Same repeated-failure budget as hostLoop, checked before any prompt
         // or execution: a spent operation is refused once, then stops the turn.
         failures?.noteModelRound(brain.modelRound?.());
@@ -1005,13 +1039,16 @@ export async function runLocalTurn(
           };
           if (!approved) {
             deliver({ output: `[tool ${ev.name} blocked: permission denied]`, exitCode: 1 }, "approval");
-          } else {
+          } else if (!supersededBySteer()) {
+            // Approval can take a while; a steer accepted during the prompt is
+            // checked above, so an approved-but-stale write still never runs.
             let result = await execute();
             // Read-only transient failures only; a mutation is never replayed.
             for (let retry = 0; retry < TRANSIENT_READ_AUTO_RETRIES; retry += 1) {
-              if (controller.signal.aborted || !hostMayRetry(ev.name, classifyToolFailure(ev.name, result))) break;
+              if (controller.signal.aborted || deps.steer?.hasPendingSteer() || !hostMayRetry(ev.name, classifyToolFailure(ev.name, result))) break;
               result = await execute();
             }
+            deps.steer?.noteToolFinished(ev.name);
             deliver(result, "execution");
           }
         }
@@ -1046,6 +1083,13 @@ export async function runLocalTurn(
   if (terminalError) throw terminalError;
   const settled = lifecycle.outcome;
   if (settled) return settled;
+  // Ctrl+C while the model is generating closes the brain, which ends its
+  // stream without a done event. That is a cancellation, not a stream the
+  // server cut short, and must settle the same way a cancelled tool wait does.
+  const cancelReason: unknown = signal?.aborted ? signal.reason ?? new DOMException("turn cancelled", "AbortError") : null;
+  if (cancelReason && isAbortError(cancelReason)) {
+    return finalizeThrownTurn(lifecycle, cancelReason, ctx.cfg.baseUrl, partialOutput);
+  }
   const incomplete = new StreamIncompleteError();
   lifecycle.finalize("incomplete", {
     message: incomplete.message,
@@ -1091,7 +1135,7 @@ async function currentConsoleModel(ctx: AppContext): Promise<string> {
 
 function switchDisposition(target: ModelTarget, brief: string, queueCount: number, draftSaved = false): string {
   return `Model switch pending: ${target.label} (${target.destination}).\n` +
-    (queueCount ? `Queued entries: ${queueCount}; they stay queued and will not replay across this switch. Cancel and finish them first.\n` : "Queued entries: none.\n") +
+    (queueCount ? `Queued entries: ${queueCount}; they stay queued and will not replay across this switch. Review them with /queue; remove them with /queue remove <id> or /queue clear.\n` : "Queued entries: none.\n") +
     `Unsent draft: ${draftSaved ? "saved; restored after continue, fresh, or cancel; never sent automatically" : "none"}.\n` +
     (target.contextWindow !== null && target.contextWindow < 2_048 ? "This target's context window is too small for continuation; choose fresh or cancel.\n" : "") +
     `Exact continuation brief for review:\n${brief}\n` +
@@ -1099,15 +1143,17 @@ function switchDisposition(target: ModelTarget, brief: string, queueCount: numbe
 }
 
 /** Build a prompt with optional steering and btw context prepended.
- *  Clears steering and btwNotes in the returned result so callers
- *  can use single-shot semantics.  Exported for testing. */
+ *  Several steering notes keep their order, one line each. Clears steering
+ *  and btwNotes in the returned result so callers can use single-shot
+ *  semantics.  Exported for testing. */
 export function buildPromptContext(
   base: string,
-  steering: string | null,
+  steering: string | readonly string[] | null,
   btwNotes: string[],
 ): { prompt: string; steering: string | null; btwNotes: string[] } {
   const ctxParts: string[] = [];
-  if (steering) ctxParts.push(`STEERING: ${steering}`);
+  const steers = steering === null ? [] : typeof steering === "string" ? [steering] : steering;
+  for (const steer of steers) if (steer) ctxParts.push(`STEERING: ${steer}`);
   if (btwNotes.length) ctxParts.push(`NOTE: ${btwNotes.join("; ")}`);
   const prompt = ctxParts.length ? ctxParts.join("\n") + "\n\n" + base : base;
   return { prompt, steering: null, btwNotes: [] };
@@ -1142,11 +1188,6 @@ export function ctrlCDecision(s: {
   }
   if (s.hasDraft) return "clear-line";
   return s.armed ? "exit" : "arm-exit";
-}
-
-/** Truncate a queued-prompt preview to 55 chars for the "⏳ Queued" echo lines. */
-function previewLine(s: string): string {
-  return s.length > 55 ? s.slice(0, 55) + "…" : s;
 }
 
 /** Stable machine terminal record. The prompt itself is deliberately omitted:
@@ -1312,8 +1353,14 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let pasting = false;
   let pasteAcc = "";
   let carry = ""; // partial escape sequence held across chunk boundaries
-  const queue: ConsoleInput[] = [];
-  let steering: string | null = null;
+  const queue = new ConsoleQueue();
+  let runningSlash: string | null = null; // names a running slash command for /queue
+  // /steer during a turn goes to that turn's brain when it can acknowledge
+  // it; everything else waits for the next turn and is reported as such.
+  const steerChannel = new SteerChannel((ack) => {
+    process.stdout.write((busy ? "\n" : "") + formatSteerAck(ack) + "\n");
+    if (!busy) repaint();
+  });
   const btwNotes: string[] = [];
   let turnAbort: AbortController | null = null; // live while a local/cloud turn runs
   // Live while a slash command (e.g. /audit, /doctor) is in flight — kept
@@ -1347,8 +1394,25 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       process.stdin.removeListener("data", onData);
       process.stdout.removeListener("resize", onResize);
     };
+    /** Every pending entry is dropped and listed; none of them will resume. */
+    const discardQueue = (reason: string): void => {
+      const removed = queue.clear();
+      process.stdout.write(renderDisposition(
+        `\nQueue discarded (${reason}): ${removed.length} pending ${removed.length === 1 ? "entry" : "entries"} removed; none ran and none will resume.`,
+        removed,
+      ));
+    };
+    /** After a failed entry the rest stay listed but wait for /queue resume. */
+    const holdQueue = (failed: QueueEntry): void => {
+      if (!queue.hold(`${failed.id} failed`)) return;
+      process.stdout.write(renderDisposition(
+        `\nQueue paused (${failed.id} failed): ${queue.length} pending ${queue.length === 1 ? "entry" : "entries"} kept; none ran.`,
+        queue.pending,
+        "/queue resume runs them in order; /queue edit|remove <id> or /queue clear changes them.",
+      ));
+    };
     const finish = (code: number): void => {
-      turnAbort?.abort(); slashAbort?.abort(); queue.length = 0;
+      turnAbort?.abort(); slashAbort?.abort(); discardQueue("session ended");
       cleanup();
       process.stdout.write("\n");
       resolve(code);
@@ -1356,23 +1420,40 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     /** Run one turn without sacrificing an existing type-ahead draft. */
     const runQueuedTurn = async (input: ConsoleInput, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
-      const sharedShellResult = input.kind === "attachment";
-      if (input.kind === "share") return "completed"; // Preview controls are resolved at submission, never at execution.
-      if (input.kind === "error") { process.stdout.write((ctx.flags.json ? JSON.stringify({ type: "console_error", message: input.message }) : input.message) + "\n"); return "completed"; }
+      const sharedShellResult = input.kind === "share";
+      if (input.kind === "share") input = consoleShell.share(input);
+      if (input.kind === "error") { process.stdout.write(input.message + "\n"); return "completed"; }
       if (input.kind === "empty") return "completed";
-      if (input.kind !== "chat" && input.kind !== "attachment") {
+      if (input.kind === "profile") {
+        if (consoleShell.profileCommand(input)) {
+          skillOpts = { ...skillOpts, exec: consoleShell.exec };
+          discardQueue("shell profile changed");
+        }
+        return "completed";
+      }
+      if (input.kind !== "chat") {
         turnAbort = new AbortController();
         try {
           const result = await consoleShell.run(input, turnAbort.signal);
-          if (result !== "completed") queue.length = 0;
+          // Queued shell commands assumed the old shell state: never run them
+          // against a fresh one, and never after the user said stop.
+          if (result === "aborted") discardQueue("cancelled");
+          else if (result === "failed") discardQueue(consoleShell.session.state === "lost" ? "shell state lost" : "shell action failed");
+          else if (input.kind === "reset-shell") discardQueue("shell reset");
           return result;
         } finally { turnAbort = null; }
       }
       const text = input.text;
-      const built = authContinuation ? { prompt: text, steering, btwNotes } : buildPromptContext(text, steering, btwNotes);
+      // An auth continuation replays the saved task verbatim; kept notes wait.
+      const carriedSteers = authContinuation ? [] : steerChannel.takeNextTurnNotes();
+      const built = authContinuation ? { prompt: text } : buildPromptContext(text, carriedSteers, btwNotes);
       const beforeChanges = observedWorkspaceChanges(ctx.flags.cwd);
       const toolResults: ObservedTool[] = [];
-      if (!authContinuation) { steering = built.steering; btwNotes.length = 0; }
+      if (!authContinuation) btwNotes.length = 0;
+      const steerTurn = steerChannel.beginTurn();
+      // How the turn ended, for its steering: a cancel drops unapplied notes
+      // (reported); a failure the operator may retry keeps the carried ones.
+      let steerEnd: "ended" | "cancelled" | "retryable" = "ended";
       viewerState = createViewerState();
       viewerOpen = false;
       viewerLastLines = 0;
@@ -1384,6 +1465,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           if (authRepair.submissionBlocked) {
             process.stdout.write("Account changed or could not be verified. Use /auth new before sending another hosted task.\n");
             if (!sharedShellResult && !buf.value) buf.insert(text);
+            steerEnd = "retryable";
             return "failed";
           }
           await authRepair.captureAccount();
@@ -1446,13 +1528,14 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               viewerOpen = false;
               break;
           }
-        }, redrawInput, { ...skillOpts, ephemeralAttachment: sharedShellResult, onToolResult: tool => toolResults.push(tool) });
+        }, redrawInput, { ...skillOpts, ephemeralAttachment: sharedShellResult, onToolResult: tool => toolResults.push(tool), steer: steerChannel });
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authContinuation);
         if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
         if (outcome.state === "cancelled") {
-          queue.length = 0;
           if (!ctx.flags.json) process.stdout.write("\n" + theme.dim("✗ turn aborted") + "\n");
+          steerEnd = "cancelled";
+          discardQueue("turn cancelled");
           return "aborted";
         }
         return "completed";
@@ -1460,11 +1543,12 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), "failed", !sharedShellResult && !authContinuation);
         if (isAbortError(err)) {
-          // User said stop: drop the queued follow-ups too.
-          queue.length = 0;
+          // User said stop: drop the queued follow-ups too, and say which.
           const outcome = turnOutcomeForError(err);
           if (ctx.flags.json && outcome) process.stdout.write(turnOutcomeJson(outcome) + "\n");
           else process.stdout.write("\n" + theme.dim("✗ turn aborted") + "\n");
+          steerEnd = "cancelled";
+          discardQueue("turn cancelled");
           return "aborted";
         }
         // ChatTurnError means the Renderer already painted "✗ <msg>" for the
@@ -1496,25 +1580,103 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           buf.clear();
           buf.insert(recovered);
         }
+        // A hosted auth failure saved the prompt with its notes already in it.
+        if (!authFailure) steerEnd = "retryable";
         return "failed";
       } finally {
         turnAbort = null;
+        // Notes that never reached the model are reported either way: kept for
+        // the next turn, or — when the operator cancelled — not retained.
+        if (steerEnd === "cancelled") steerChannel.cancelTurn();
+        else steerChannel.endTurn();
+        if (steerEnd === "retryable") {
+          steerChannel.restoreNextTurnNotes(carriedSteers, `turn ${steerTurn} failed; kept for the retry`);
+        }
       }
     };
 
-    const runAndDrain = async (input: ConsoleInput, authContinuation = false): Promise<void> => {
+    const runEntry = async (entry: QueueEntry, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
+      queue.setRunning(entry);
+      const sessionId = consoleShell.session.id;
+      try { return await runQueuedTurn(entry.input, authContinuation); }
+      finally {
+        if (consoleShell.session.id !== sessionId || consoleShell.session.state !== "ready") discardQueue("shell session changed");
+        queue.setRunning(null);
+      }
+    };
+
+    /** Run one entry, then drain pending entries in strict order. A failure
+     * pauses the rest; a cancellation discards them (see runQueuedTurn). */
+    const runAndDrain = async (first: QueueEntry, authContinuation = false): Promise<void> => {
       try {
         getRegistry().startAgentTimer();
-        let result = await runQueuedTurn(input, authContinuation);
-        while (result === "completed" && queue.length > 0) {
-          const next = queue.shift()!;
-          const preview = next.kind === "chat" ? next.text : next.kind === "shell" ? "!" + next.command : next.kind === "attachment" ? "reviewed shell attachment" : "/shell-reset";
-          process.stdout.write(`\n→ Queued: "${previewLine(preview)}"\n`);
-          result = await runQueuedTurn(next);
+        let entry: QueueEntry | undefined = first;
+        let result = await runEntry(first, authContinuation);
+        while (result === "completed") {
+          entry = queue.shift();
+          if (!entry) break;
+          process.stdout.write(`\n→ Running queued ${entry.id} (${entryKind(entry.input)}): ${describeEntry(entry.input)}\n`);
+          result = await runEntry(entry);
         }
+        if (result === "failed" && entry) holdQueue(entry);
       } finally {
         busy = false;
         getRegistry().startUserTimer();
+      }
+    };
+
+    /** Queue one input behind the active operation. Returns false (and says
+     * why) when it was not queued, so the caller keeps the draft. */
+    const enqueueInput = (input: QueueableInput): boolean => {
+      const toQueue = input;
+      const result = queue.enqueue(toQueue);
+      if (!result.ok) {
+        const restored = input.kind !== "share" || consoleShell.restoreShare(input);
+        process.stdout.write(`\n${result.message} ${restored ? "Draft kept." : "A newer shell preview was preserved; the rejected send was not queued."}\n`);
+        return false;
+      }
+      const paused = queue.held ? "; queue PAUSED, /queue resume runs it" : "";
+      process.stdout.write(`\n⏳ Queued ${result.entry.id} (${entryKind(toQueue)}, ${queue.length} pending${paused}): ${describeEntry(toQueue)}\n`);
+      return true;
+    };
+
+    /** /queue management is local bookkeeping: it never calls a model or
+     * starts a process (except /queue resume, which hands entries back to the
+     * ordinary drain). */
+    const handleQueueCommand = async (command: QueueCommand): Promise<void> => {
+      const write = (text: string): void => { process.stdout.write(text); };
+      switch (command.op) {
+        case "usage": write(command.message + "\n"); return;
+        case "list": write(queue.render(runningSlash)); return;
+        case "clear": {
+          const removed = queue.clear();
+          write(removed.length
+            ? renderDisposition(`Cleared ${removed.length} pending ${removed.length === 1 ? "entry" : "entries"}; none ran:`, removed)
+            : "Queue is already empty.\n");
+          return;
+        }
+        case "remove": {
+          const result = queue.remove(command.id);
+          write(result.ok ? `Removed ${result.entry.id} (${entryKind(result.entry.input)}); it will not run.\n` : result.message + "\n");
+          return;
+        }
+        case "edit": {
+          const result = queue.edit(command.id, command.text);
+          write(result.ok ? `Edited ${result.entry.id} (${entryKind(result.entry.input)}, position kept): ${describeEntry(result.entry.input)}\n` : result.message + "\n");
+          return;
+        }
+        case "resume": {
+          if (continuation.pending) { write("Resolve the pending model switch with /switch first; the queue stays as listed.\n"); return; }
+          if (!queue.resume()) { write(queue.length ? "Queue is not paused.\n" : "Queue is empty; nothing to resume.\n"); return; }
+          write(`Queue resumed: ${queue.length} pending ${queue.length === 1 ? "entry runs" : "entries run"} in order${busy ? " after the current operation" : ""}.\n`);
+          if (busy) return;
+          const next = queue.shift();
+          if (!next) return;
+          busy = true;
+          await runAndDrain(next);
+          renderHudLine();
+          return;
+        }
       }
     };
 
@@ -1556,13 +1718,24 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     const onSubmit = async (): Promise<void> => {
       const raw = buf.value;
+      // Queue management works mid-turn and during a pending switch (whose
+      // disposition asks the user to clear entries). It stays out of history:
+      // an edit can carry local shell text.
+      const queueCommand = parseQueueCommand(raw);
+      if (queueCommand) {
+        buf.clear();
+        process.stdout.write("\n");
+        await handleQueueCommand(queueCommand);
+        repaint();
+        return;
+      }
       if (continuation.pending && !raw.trim().startsWith("/switch")) {
         process.stdout.write("\nChoose /switch continue, fresh, cancel, brief, or edit first. Draft preserved.\n");
         repaint();
         return;
       }
       if (ConsoleShell.isTerminalCommand(raw)) {
-        if (busy) { process.stdout.write("\nWait for the current operation before terminal handoff.\n"); return; }
+        if (busy || queue.length) { process.stdout.write("\nFinish the active operation and resume or clear pending entries before terminal handoff.\n"); return; }
         buf.clear(); // Explicit terminal commands never enter model/history.
         busy = true; terminalOwnsInput = true;
         try { await consoleShell.terminalCommand(raw); }
@@ -1573,37 +1746,43 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       const queuePrefix = /^\s*\/queue[ \t]+/.exec(raw);
       let input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
       if (input.kind === "share") {
-        buf.clear();
-        input = consoleShell.share(input, ctx.flags.json); // Snapshot/consume before any await or queueing.
-        if (input.kind === "empty") { repaint(); return; }
+        input = consoleShell.prepareShare(input, ctx.flags.json);
+        if (input.kind === "empty") { buf.clear(); repaint(); return; }
       }
-      if (input.kind === "error") { buf.clear(); process.stdout.write((ctx.flags.json ? JSON.stringify({ type: "console_error", message: input.message }) : input.message) + "\n"); repaint(); return; }
       const commit = (): void => {
         if (input.kind === "chat") { remember(buf.value); buf.commit(buf.value); }
         else buf.clear();
       };
-      let t = input.kind === "chat" || input.kind === "attachment" ? input.text : "";
+      let t = input.kind === "chat" ? input.text : "";
       if (t && heldDraft === t && !t.startsWith("/auth")) heldDraft = null;
+      if (input.kind === "error") {
+        buf.clear(); // a usage error is reported now, never queued
+        process.stdout.write("\n" + input.message + "\n");
+        repaint();
+        return;
+      }
       if (input.kind !== "chat" && input.kind !== "empty") {
-        buf.clear(); // shell commands never enter chat history or prompt context
+        // Shell commands never enter chat history or prompt context. A
+        // rejected enqueue keeps the draft in the composer.
         if (busy) {
-          queue.push(input);
-          process.stdout.write(`\n⏳ Local shell queued (${queue.length}).\n`);
+          if (enqueueInput(input)) buf.clear();
           return;
         }
+        buf.clear();
         process.stdout.write("\n");
         busy = true;
-        await runAndDrain(input);
+        await runAndDrain(queue.allocate(input));
         renderHudLine(); repaint();
         return;
       }
       // ── mid-turn Enter: bypass commands + type-ahead queueing ──
       if (busy) {
         if (t.startsWith("/steer ")) {
-          steering = t.slice(7).trim() || steering;
           remember(buf.value);
           buf.commit(buf.value);
-          if (steering) process.stdout.write(`\n🎯 Steering set: "${steering}"\n`);
+          // Acknowledged through the channel: accepted/applied by the running
+          // turn, refused, or deferred to the next turn — never assumed.
+          steerChannel.steer(t.slice(7)).catch(() => { /* acks are best-effort output */ });
           return;
         }
         if (t.startsWith("/btw ")) {
@@ -1617,11 +1796,15 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           return;
         }
         if (t.startsWith("/queue ")) t = t.slice(7).trim();
+        if (!t || t.startsWith("/")) {
+          remember(buf.value);
+          buf.commit(buf.value);
+          if (t) process.stdout.write("\nSlash commands are not queued; run it after the current operation (↑ recalls it).\n");
+          return;
+        }
+        if (!enqueueInput({ kind: "chat", text: t })) return;
         remember(buf.value);
         buf.commit(buf.value);
-        if (!t || t.startsWith("/")) return; // other slashes wait for the turn
-        queue.push({ kind: "chat", text: t });
-        process.stdout.write(`\n⏳ Queued (${queue.length}): "${previewLine(t)}"\n`);
         return;
       }
 
@@ -1654,7 +1837,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           }
         } else if (command === "continue" || command === "fresh") {
           if (queue.length) {
-            process.stdout.write(`Switch paused: ${queue.length} queued entries remain. Cancel and finish them first.\n`);
+            process.stdout.write(`Switch paused: ${queue.length} queued entries remain. Review them with /queue; remove them with /queue remove <id> or /queue clear.\n`);
           } else if (process.env["AETHER_BACKEND"] && (await resolveBackend(ctx)) !== pending.target.destination) {
             process.stdout.write("Switch blocked: AETHER_BACKEND pins a different destination.\n");
           } else {
@@ -1684,9 +1867,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       if (t.startsWith("/steer ") || t === "/steer") {
         const guidance = t.slice(6).trim();
         if (!guidance) { process.stdout.write("usage: /steer <guidance>\n"); repaint(); return; }
-        steering = guidance;
-        process.stdout.write(`🎯 Steering set: "${guidance}"\n`);
-        repaint(); return;
+        // No turn is running: kept, in order, for the next one (the ack repaints).
+        steerChannel.steer(guidance).catch(() => { /* acks are best-effort output */ });
+        return;
       }
       if (t.startsWith("/btw ") || t === "/btw") {
         const note = t.slice(4).trim();
@@ -1712,6 +1895,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       busy = true;
       if (t.startsWith("/")) {
         slashAbort = new AbortController();
+        runningSlash = `slash command ${sanitizeServerText(t.split(/\s/, 1)[0] ?? "")}`;
         if (t === "/auth" || t.startsWith("/auth ")) {
           const sub = t.slice(5).trim().toLowerCase() || "status";
           try {
@@ -1721,11 +1905,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               const pending = authRepair.takeContinuation();
               if (pending) {
                 process.stdout.write(`Continuing saved task ${pending.turnId} after explicit request.\n`);
-                await runAndDrain({ kind: "chat", text: pending.instruction }, true);
+                await runAndDrain(queue.allocate({ kind: "chat", text: pending.instruction }), true);
               } else process.stdout.write("No safely rejected task is ready. Use /auth status for details.\n");
             } else if (sub === "new") {
               process.stdout.write(authRepair.startNewConversation());
-              queue.length = 0; steering = null; btwNotes.length = 0;
+              discardQueue("new conversation"); steerChannel.clearNextTurn(); btwNotes.length = 0;
             } else if (sub === "draft") {
               if (buf.value) process.stdout.write("Current draft is still in the input line; clear it before restoring the earlier draft.\n");
               else if (!heldDraft) process.stdout.write("No earlier type-ahead draft is saved.\n");
@@ -1735,7 +1919,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
             if (isAbortError(err)) process.stdout.write("Login cancelled. Task and draft preserved.\n");
             else printError(err, ctx.cfg.baseUrl);
           } finally {
-            slashAbort = null; busy = false;
+            slashAbort = null; busy = false; runningSlash = null;
           }
           if (!buf.value && heldDraft && sub !== "draft") buf.insert(heldDraft);
           renderHudLine(); repaint();
@@ -1746,6 +1930,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         try {
           const res = await handleSlash(ctx, t, process.stdout, slashAbort.signal);
           if (res.exit) {
+            discardQueue("session ended"); // entries held after a failure are listed, not lost silently
             cleanup();
             resolve(0);
             return;
@@ -1767,8 +1952,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           }
         } catch (err) {
           if (isAbortError(err)) {
-            queue.length = 0;
             process.stdout.write(theme.dim("✗ canceled") + "\n");
+            discardQueue("command cancelled");
           } else {
             printError(err, ctx.cfg.baseUrl);
           }
@@ -1777,13 +1962,15 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           setupOwnsInput = false;
           busy = false;
           slashAbort = null;
+          runningSlash = null;
         }
-        if (queue.length && !continuation.pending) { busy = true; await runAndDrain(queue.shift()!); }
+        const next = continuation.pending ? undefined : queue.shift();
+        if (next) { busy = true; await runAndDrain(next); }
         renderHudLine();
         repaint();
         return;
       }
-      await runAndDrain({ kind: "chat", text: t });
+      await runAndDrain(queue.allocate({ kind: "chat", text: t }));
       renderHudLine();
       repaint();
     };
@@ -2022,6 +2209,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   });
 }
 
+const LINE_MODE_QUEUE_NOTE = "Line mode has no pending queue: each input line runs in order after the previous one finishes, so there is nothing to list, edit, remove, clear, or resume. /queue <task> runs the task as the next line.\n";
+
 /** Non-TTY fallback (pipes / CI): a line-oriented readline loop — no raw-mode
  *  key decoding since there's no real terminal to own. `inflight` still wires
  *  Ctrl+C to cancel the current turn/slash-command rather than killing the
@@ -2037,7 +2226,16 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
   process.on("SIGINT", onSigint);
   try {
     if (p) process.stdout.write(p + consoleShell.prompt());
-    for await (const line of rl) {
+    for await (const rawLine of rl) {
+    // Line mode reads the next line only after the previous one finished, so
+    // there is never a pending queue: `/queue <task>` simply runs in order.
+    if (parseQueueCommand(rawLine)) {
+      process.stdout.write(LINE_MODE_QUEUE_NOTE);
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
+    const queuePrefix = /^\s*\/queue[ \t]+/.exec(rawLine);
+    const line = queuePrefix ? rawLine.slice(queuePrefix[0].length) : rawLine;
     if (continuation.pending && !line.trim().startsWith("/switch")) {
       process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");
       if (p) process.stdout.write(p + consoleShell.prompt());
@@ -2045,10 +2243,15 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     }
     if (ConsoleShell.isTerminalCommand(line)) { await consoleShell.terminalCommand(line); continue; }
     let input = classifyConsoleInput(line);
+    const sharedShellResult = input.kind === "share";
     if (input.kind === "share") input = consoleShell.share(input, true);
-    const sharedShellResult = input.kind === "attachment";
-    if (input.kind === "error") { process.stdout.write((ctx.flags.json ? JSON.stringify({ type: "console_error", message: input.message }) : input.message) + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
-    let t = input.kind === "chat" || input.kind === "attachment" ? input.text : "";
+    if (input.kind === "error") { process.stdout.write(input.message + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
+    if (input.kind === "profile") {
+      if (consoleShell.profileCommand(input)) skillOpts = { ...skillOpts, exec: consoleShell.exec };
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
+    let t = input.kind === "chat" ? input.text : "";
     let authReplay = false;
     if (continuation.pending && !t.startsWith("/switch")) {
       process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");

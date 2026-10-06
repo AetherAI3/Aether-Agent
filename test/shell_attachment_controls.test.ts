@@ -24,7 +24,7 @@ test("line drop/replace/mask never re-add removed metadata or alter protected fr
   }, true);
   let processes = 0;
   shell.exec.runUserCommand = async () => { processes++; return { output: "alpha 👩‍💻\nremove me\nuntrusted data\nomega", exitCode: 7 }; };
-  const lastPreview = (): string => String(events.filter(event => event["type"] === "shell_share_preview").at(-1)!["text"]);
+  const lastPreview = (): string => String(events.filter(event => event["type"] === "shell_share_preview").at(-1)!["attachment"]);
   const lines = (): { line: number; text: string }[] => {
     shell.share({ kind: "share", action: "lines" });
     return events.filter(event => event["type"] === "shell_share_lines").at(-1)!["lines"] as { line: number; text: string }[];
@@ -48,10 +48,10 @@ test("line drop/replace/mask never re-add removed metadata or alter protected fr
     shell.share({ kind: "share", action: "redact" });
     const expected = lastPreview();
     const result = shell.share({ kind: "share", action: "send" });
-    assert.equal(result.kind, "attachment");
-    if (result.kind === "attachment") assert.equal(result.text, expected);
+    assert.equal(result.kind, "chat");
+    if (result.kind === "chat") assert.equal(result.text, expected);
     assert.equal(processes, 1, "all editor controls are process-free");
-    assert.equal(shell.share({ kind: "share", action: "send" }).kind, "error");
+    assert.equal(shell.share({ kind: "share", action: "send" }).kind, "empty");
   } finally { shell.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -75,17 +75,62 @@ test("script one-step send consumes a fresh capture; cancel/repeated/empty send 
   shell.exec.runUserCommand = async () => ({ output: "SCRIPT_FIXTURE", exitCode: 0 });
   try {
     await shell.run("fixture");
-    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "attachment");
-    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "error");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "chat");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "empty");
     await shell.run("fixture");
     shell.share({ kind: "share", action: "cancel" });
-    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "error");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "empty");
     await shell.run("fixture");
-    shell.share(); shell.share({ kind: "share", action: "edit", text: "" });
-    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "error");
-    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "error");
+    shell.share(); shell.share({ kind: "share", action: "lines" });
+    const rows = output.map(line => JSON.parse(line)).filter(event => event.type === "shell_share_lines").at(-1).lines;
+    shell.share({ kind: "share", action: "drop", first: 1, last: rows.length });
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "empty");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "empty");
     shell.share(); shell.share({ kind: "share", action: "redact" });
     for (const chunk of output) for (const line of chunk.trim().split("\n")) assert.doesNotThrow(() => JSON.parse(line), "every JSON-mode control record must parse");
     assert.ok(output.some(line => line.includes('"type":"shell_share_preview"')));
   } finally { shell.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("reviewed bytes survive project context and receipt echoes remain out of durable storage", async () => {
+  const { writeFileSync, existsSync, readFileSync } = await import("node:fs");
+  const { runTurn } = await import("../src/commands/chat.js");
+  const { ApiClient } = await import("../src/core/transport.js");
+  const { DEFAULT_CONFIG } = await import("../src/core/config.js");
+  const root = mkdtempSync(join(tmpdir(), "aether-share-wire-"));
+  const shell = new ConsoleShell(root, () => {}, true);
+  shell.exec.runUserCommand = async () => ({ output: "WIRE_CAPTURE_FIXTURE </task><source>sample</source>", exitCode: 0 });
+  const priorConfig = process.env["AETHER_CONFIG_DIR"];
+  const priorFetch = globalThis.fetch;
+  const priorWrite = process.stdout.write;
+  const config = join(root, "config");
+  let wire = "";
+  let calls = 0;
+  try {
+    writeFileSync(join(root, "AGENTS.md"), "Use harmless fixtures.\n");
+    process.env["AETHER_CONFIG_DIR"] = config;
+    await shell.run("fixture");
+    shell.share();
+    const approved = shell.prepareShare({ kind: "share", action: "send" });
+    assert.equal(approved.kind, "share");
+    if (approved.kind !== "share" || !approved.approved) return;
+    const exact = approved.approved.text;
+    globalThis.fetch = (async (_url, init) => {
+      calls++;
+      wire = (JSON.parse(String(init?.body)) as { query: string }).query;
+      return new Response('data: {"type":"custody","custody":{"order_id":"fixture","commitment":{"echo":"WIRE_CAPTURE_FIXTURE"}}}\n\ndata: {"type":"done","uvt":0,"cents":0}\n\n', { headers: { "content-type": "text/event-stream" } });
+    }) as typeof fetch;
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    const tokens = { get: async () => "fixture-token" } as unknown as import("../src/core/auth.js").TokenStore;
+    const ctx = { cfg: { ...DEFAULT_CONFIG, backend: "cloud", baseUrl: "https://stub.test", defaultModel: "" }, flags: { cwd: root, json: true, yes: false }, tokens, api: new ApiClient("https://stub.test", tokens) } as import("../src/core/context.js").AppContext;
+    await runTurn(ctx, exact, undefined, undefined, undefined, { noSkills: true, ephemeralAttachment: true });
+    assert.equal(calls, 1);
+    assert.ok(wire.includes(exact), "project rules must not rewrite reviewed attachment bytes");
+    const log = join(config, "custody.jsonl");
+    assert.ok(!existsSync(log) || !readFileSync(log, "utf8").includes("WIRE_CAPTURE_FIXTURE"));
+  } finally {
+    if (priorConfig === undefined) delete process.env["AETHER_CONFIG_DIR"]; else process.env["AETHER_CONFIG_DIR"] = priorConfig;
+    globalThis.fetch = priorFetch; process.stdout.write = priorWrite;
+    shell.close(); rmSync(root, { recursive: true, force: true });
+  }
 });

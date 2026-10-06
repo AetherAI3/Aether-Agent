@@ -99,13 +99,15 @@ Explain the failing test
 /shell-result send
 ```
 
-`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` stages and previews the exact bounded attachment, including the command, captured directory, exit status, and any omitted bytes. Edit it with `drop`, `replace`, `mask`, or `redact`, then choose `/shell-result send` or `/shell-result cancel`. Redaction helps identify common secrets but does not guarantee their removal. A later shell command cannot change the staged attachment. In pipes and JSON sessions, `/shell-result send` can explicitly send one fresh capture without an interactive prompt. A staged preview takes precedence. Sending, cancelling or emptying a selection consumes that eligibility; another send cannot silently restage it. The complete attachment, including metadata and framing, is capped at 8 KiB.
+`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` stages and previews the exact bounded attachment, including the command, captured directory, exit status, and any omitted bytes. Edit it with `drop`, `replace`, `mask`, or `redact`, then choose `/shell-result send` or `/shell-result cancel`. Redaction helps identify common secrets but does not guarantee their removal. The complete attachment, including metadata, stays within 8 KiB. Send freezes the reviewed bytes, so later edits or commands cannot change a queued attachment. Preview controls remain local while a turn is busy. For pipes and JSON sessions, `/shell-result send` explicitly sends one fresh capture; repeated, cancelled or empty sends cannot silently restage it.
 
 | Platform | Local shell | Interactive programs |
 |---|---|---|
 | **Linux** | Persistent Bash: keeps cwd, exports, and functions. | `/terminal python3` starts a terminal with input and resize support. Requires Python 3 and TTY input/output. |
 | **macOS** | Persistent Bash: keeps cwd, exports, and functions. | Use an external terminal. |
-| **Windows** | Fresh `cmd.exe` per command; cwd and exports do not persist. | Use an external terminal. |
+| **Windows** | One-shot `cmd.exe` by default. `/shell-profile use powershell` explicitly starts a persistent PowerShell session for cwd, environment values, and functions. | Use an external terminal. |
+
+On Windows, run `/shell-profile list` to see the installed executable and version before choosing PowerShell. `/shell-profile status` shows the active profile and cwd; `/shell-profile use cmd` returns to the compatibility profile. Switching or `/shell-reset` discards shell state without replaying commands. PowerShell commands keep their own quoting and syntax; Bash commands are not translated.
 
 **Shell:** Ctrl+C cancels the command; `/shell-reset` starts fresh after cancellation or failure. Commands wait for an active model/tool turn to finish.
 **Linux terminal:** Ctrl+] returns to chat; `/terminal-attach` reconnects; `/terminal-stop` ends it. Local tools pause while that terminal is running, including when detached.
@@ -141,6 +143,10 @@ readiness for the signed-in account. `aether doctor --live` checks the same
 read-only Cloud contract; plain `aether doctor` leaves account readiness
 unverified. A saved DM is reported as admitted only when Cloud confirms
 message admission.
+In `aether agent chat`, `/help` lists commands for the selected agent and
+`/refresh` checks the shared conversation again. The header shows Cloud DM sync
+separately from ATS local setup. Transcript messages show their time and any
+reported admission state; a saved message is not an admitted run.
 
 ATS is the trading adapter for account agents. Create a workspace with `aether agent create ATS Atlas`; guided setup covers memory, strategies, and data settings.
 
@@ -161,7 +167,7 @@ ATS requires the separate Python engine and policy consent. This build does not 
 
 [**Aether Code**](https://app.aethersystems.net/) is the browser coding app alongside Web Chat and Design Lab. It uses the same Aether account; the CLI also works independently with local Ollama. Coding sessions stay on their host, while managed agents share their Online conversations.
 
-**Remote viewing (`aether rc`) is a source candidate.** The observer bridge is on `main`; a live Cloud viewer journey (Windows and Linux hosts, phone viewer) was recorded on 2026-10-06, and `aether rc start` still needs an operator-enrolled device ([#300](https://github.com/AetherAI3/aether-agent/issues/300)). It is designed to let a browser or phone watch a redacted terminal run through a link or QR code. The viewer has observation access only. [Remote viewing status and controls](docs/REMOTE_VIEWING.md).
+**Remote viewing (`aether rc`) is a source candidate.** The observer bridge is on `main`; a live Cloud viewer journey (Windows and Linux hosts, phone viewer) was recorded on 2026-10-06. `aether rc start` now requests a separate owner-scoped RC identity and does not require operator device enrollment; an ordinary-account deployed journey still needs qualification. It is designed to let a browser or phone watch a redacted terminal run through a link or QR code. The viewer has observation access only. [Remote viewing status and controls](docs/REMOTE_VIEWING.md).
 
 ## Privacy and control
 

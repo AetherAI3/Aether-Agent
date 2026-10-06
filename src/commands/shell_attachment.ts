@@ -84,6 +84,12 @@ export class ShellAttachmentPreview {
     }
     return this.edit(this.pending.body);
   }
+  /** Restore only an unadmitted Send snapshot; never overwrite a newer preview. */
+  restore(attachment: ShellAttachment): boolean {
+    if (this.pending) return false;
+    this.pending = attachment;
+    return true;
+  }
   cancel(): void { this.pending = null; }
   send(): ShellAttachment | string {
     const pending = this.pending;

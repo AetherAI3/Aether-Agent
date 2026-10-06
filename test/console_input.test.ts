@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -13,6 +13,8 @@ for (const [raw, expected] of [
   ["normal\nquestion", { kind: "chat", text: "normal\nquestion" }],
   ["   ", { kind: "empty" }],
   ["/shell-result", { kind: "share", action: "preview" }],
+  ["/shell-result send", { kind: "share", action: "send" }],
+  ["/shell-result drop 2-4", { kind: "share", action: "drop", first: 2, last: 4 }],
 ] as const) test(`console classification ${JSON.stringify(raw)}`, () => {
   assert.deepEqual(classifyConsoleInput(raw), expected);
 });
@@ -29,7 +31,7 @@ test("user execution uses the chosen checkout, quotes/pipelines, bounded explici
   let output = "";
   const shell = new ConsoleShell(cwd, (text) => { output += text; });
   try {
-    assert.equal(shell.share().kind, "error");
+    assert.equal(shell.share().kind, "empty");
     const command = `"${process.execPath}" -e "process.stdout.write(process.cwd())"`;
     await shell.run(command, new AbortController().signal);
     await shell.run(`echo "quoted args" | "${process.execPath}" -e "process.stdin.on('data',c=>process.stdout.write(c))"`, new AbortController().signal);
@@ -46,26 +48,116 @@ test("user execution uses the chosen checkout, quotes/pipelines, bounded explici
     assert.ok(output.includes("cancelled | exit 130"));
     await shell.run({ kind: "reset-shell" });
     await shell.run(`"${process.execPath}" -e "process.stdout.write('x'.repeat(20000))"`, new AbortController().signal);
-    assert.equal(shell.share().kind, "empty");
+    shell.share();
     const shared = shell.share({ kind: "share", action: "send" });
-    assert.equal(shared.kind, "attachment");
-    if (shared.kind === "attachment") assert.ok(shared.text.length < 8300);
+    assert.equal(shared.kind, "chat");
+    if (shared.kind === "chat") {
+      assert.match(shared.text, /Source output elided: [1-9]\d* raw UTF-8 bytes/);
+      assert.match(shared.text, /Capture formatting elided: \d+ sanitized UTF-8 bytes/);
+      assert.ok(Buffer.byteLength(shared.text) <= 8192, "whole attachment is bounded");
+    }
+  } finally { shell.close(); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test("shell-result stages an immutable, sanitized capture and sends only approved edits", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "aether-share-edit-"));
+  const prior = ["AETHER_TEST_SHELL_SECRET", "AETHER_TEST_SHELL_KEEP", "AETHER_TEST_SHELL_OMIT"].map(key => process.env[key]);
+  process.env["AETHER_TEST_SHELL_SECRET"] = "fixture-private-value-281";
+  process.env["AETHER_TEST_SHELL_KEEP"] = "\u001b[31mkeep 👩‍💻";
+  process.env["AETHER_TEST_SHELL_OMIT"] = "remove this line";
+  const events: Array<Record<string, unknown>> = [];
+  const shell = new ConsoleShell(cwd, value => {
+    for (const line of value.trim().split("\n")) {
+      try { events.push(JSON.parse(line) as Record<string, unknown>); } catch { /* command output is not JSON */ }
+    }
+  }, true);
+  const latestPreview = (): Record<string, unknown> => events.filter(event => event["type"] === "shell_share_preview").at(-1)!;
+  try {
+    if (process.platform !== "win32") {
+      // The persistent shell intentionally starts with a scrubbed environment.
+      await shell.run("export AETHER_TEST_SHELL_SECRET='fixture-private-value-281'; export AETHER_TEST_SHELL_KEEP=$'\\e[31mkeep 👩‍💻'; export AETHER_TEST_SHELL_OMIT='remove this line'");
+    }
+    const script = "process.stdout.write([process.env.AETHER_TEST_SHELL_SECRET, process.env.AETHER_TEST_SHELL_KEEP, process.env.AETHER_TEST_SHELL_OMIT].join(String.fromCharCode(10)))";
+    await shell.run(`"${process.execPath}" -e "${script}"`);
+    assert.equal(shell.share().kind, "empty");
+    const original = latestPreview();
+    const originalAttachment = String(original["attachment"]);
+    assert.doesNotMatch(originalAttachment, /fixture-private-value-281/);
+    assert.match(originalAttachment, /keep 👩‍💻/);
+    assert.doesNotMatch(originalAttachment, /\u001b|\[31m/);
+    assert.match(originalAttachment, /Source output elided: 0 raw UTF-8 bytes/);
+    const sourceCommand = String(original["commandId"]);
+
+    shell.share({ kind: "share", action: "lines" });
+    const numbered = events.filter(event => event["type"] === "shell_share_lines").at(-1)!;
+    const lines = numbered["lines"] as Array<{ line: number; text: string }>;
+    const removed = lines.find(line => line.text.includes("remove this line"))!;
+    const edited = lines.find(line => line.text.includes("keep 👩‍💻"))!;
+    shell.share({ kind: "share", action: "drop", first: removed.line, last: removed.line });
+    shell.share({ kind: "share", action: "replace", first: edited.line, value: "approved 👩‍💻" });
+    shell.share({ kind: "share", action: "mask", value: "fixture-private-value-281" });
+    const approved = String(latestPreview()["attachment"]);
+    assert.doesNotMatch(approved, /fixture-private-value-281|remove this line|keep 👩‍💻/);
+    assert.match(approved, /approved 👩‍💻/);
+    assert.match(approved, /\[REDACTED\]/);
+    assert.match(approved, /User-edited selection/);
+
+    await shell.run(`"${process.execPath}" -e "process.stdout.write('newer result')"`);
+    shell.share();
+    assert.equal(String(latestPreview()["commandId"]), sourceCommand);
+    assert.equal(String(latestPreview()["attachment"]), approved);
+    const sent = shell.share({ kind: "share", action: "send" });
+    assert.deepEqual(sent, { kind: "chat", text: approved });
+    shell.share();
+    assert.match(String(latestPreview()["attachment"]), /newer result/);
+    assert.equal(shell.share({ kind: "share", action: "cancel" }).kind, "empty");
+    assert.equal(shell.share({ kind: "share", action: "send" }).kind, "empty");
+
+    await shell.run(`"${process.execPath}" -e "${script}"`);
+    shell.share();
+    shell.share({ kind: "share", action: "redact" });
+    assert.doesNotMatch(String(latestPreview()["attachment"]), /fixture-private-value-281/);
+    assert.ok(events.some(event => event["type"] === "shell_share" && event["code"] === "redacted"));
+  } finally {
+    shell.close(); rmSync(cwd, { recursive: true, force: true });
+    ["AETHER_TEST_SHELL_SECRET", "AETHER_TEST_SHELL_KEEP", "AETHER_TEST_SHELL_OMIT"].forEach((key, index) => {
+      if (prior[index] === undefined) delete process.env[key]; else process.env[key] = prior[index];
+    });
+  }
+});
+
+test("empty shell selection and cancelled preview cannot produce a model prompt", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "aether-share-empty-"));
+  const events: Array<Record<string, unknown>> = [];
+  const shell = new ConsoleShell(cwd, value => {
+    for (const line of value.trim().split("\n")) {
+      try { events.push(JSON.parse(line) as Record<string, unknown>); } catch { /* command output */ }
+    }
+  }, true);
+  try {
+    await shell.run(`"${process.execPath}" -e "process.exit(7)"`);
+    shell.share();
+    const preview = events.filter(event => event["type"] === "shell_share_preview").at(-1)!;
+    assert.match(String(preview["attachment"]), /exit: 7/);
+    shell.share({ kind: "share", action: "lines" });
+    const numbered = events.filter(event => event["type"] === "shell_share_lines").at(-1)!;
+    const count = (numbered["lines"] as Array<unknown>).length;
+    shell.share({ kind: "share", action: "drop", first: 1, last: count });
+    assert.equal(shell.share({ kind: "share", action: "send" }).kind, "empty");
+    assert.equal(shell.share({ kind: "share", action: "cancel" }).kind, "empty");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "empty", "cancelled/empty preview cannot silently restage");
+    await shell.run("echo FRESH");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "chat", "fresh scripted send remains explicit");
   } finally { shell.close(); rmSync(cwd, { recursive: true, force: true }); }
 });
 
 /** Exercise the real submit handlers in isolated processes, with a synthetic
  * terminal or pipe and a mocked hosted transport. No model/network services. */
-for (const tty of [false, true]) for (const failure of [0, 401, 500]) {
-  test(`${tty ? "TTY" : "line"} (attachment status ${failure || 200}) console routes shell without API calls, preserves queue order and returns to chat`, async () => {
+for (const tty of [false, true]) {
+  test(`${tty ? "TTY" : "line"} console routes shell without API calls, preserves queue order and returns to chat`, async () => {
     const cwd = mkdtempSync(join(tmpdir(), "aether-console-"));
-    writeFileSync(join(cwd, "AGENTS.md"), "Use harmless synthetic fixtures.\n");
-    const shareCall = tty ? 4 : 3;
-    const finalCall = shareCall + 1;
     const driver = `
       import { PassThrough } from 'node:stream';
-      import { existsSync, readFileSync } from 'node:fs';
-      import { historyPath } from './dist/src/core/history_store.js';
-      import { custodyLogPath } from './dist/src/core/custody.js';
       import { cmdChat } from './dist/src/commands/chat.js';
       import { ApiClient } from './dist/src/core/transport.js';
       const input = new PassThrough();
@@ -76,24 +168,18 @@ for (const tty of [false, true]) for (const failure of [0, 401, 500]) {
       let observed = '';
       const write = process.stdout.write.bind(process.stdout);
       process.stdout.write = (chunk, ...args) => { observed += String(chunk); return write(chunk, ...args); };
-      const writeError = process.stderr.write.bind(process.stderr);
-      process.stderr.write = (chunk, ...args) => { observed += String(chunk); return writeError(chunk, ...args); };
       let calls = 0;
-      let previewText = "";
       let sharing = false;
       let releaseModel = null;
       globalThis.fetch = async (url, options) => {
         if (String(url).endsWith('/models')) return Response.json({ account_id: 'fixture-account' });
         const body = String(options?.body ?? '');
-        const isShare = body.includes('SHARE_ALLOWED');
         if (body.includes('SHELL_ONLY') || body.includes('QUEUED_SHELL')) throw new Error('shell output leaked');
         if (body.includes('SHARE_ALLOWED') && !sharing) throw new Error('implicit sharing');
         if (sharing && !body.includes('SHARE_ALLOWED')) throw new Error('explicit sharing missing output');
-        if (sharing && !JSON.parse(body).query.includes(previewText)) throw new Error('wire differs from preview');
         calls++; process.stdout.write('MODEL_CALL_' + calls + '\\n');
         await new Promise(resolve => { releaseModel = resolve; });
-        if (isShare && ${failure}) return Response.json({detail:'synthetic share failure'}, {status:${failure || 200}});
-        return new Response((isShare ? 'data: {"type":"custody","custody":{"order_id":"fixture-receipt","commitment":{"echo":"SHARE_ALLOWED"}}}\\n\\n' : '') + 'data: {"type":"delta","text":"model response"}\\n\\ndata: {"type":"done","uvt":0,"cents":0}\\n\\n', { headers: {'content-type':'text/event-stream'} });
+        return new Response('data: {"type":"delta","text":"model response"}\\n\\ndata: {"type":"done","uvt":0,"cents":0}\\n\\n', { headers: {'content-type':'text/event-stream'} });
       };
       const tokens = { get: async () => 'test-token' };
       const ctx = { cfg: { backend:'cloud', baseUrl:'https://stub.test', defaultModel:'', defaultEffort:'', permissionMode:'ask', autoApply:false, telemetry:false }, flags: { cwd:${JSON.stringify(cwd)}, json:false, yes:false }, tokens, api:new ApiClient('https://stub.test', tokens) };
@@ -115,8 +201,7 @@ for (const tty of [false, true]) for (const failure of [0, 401, 500]) {
         const release = releaseModel;
         releaseModel = null;
         release();
-        if (number === ${shareCall} && ${failure}) await until(() => observed.includes('synthetic share failure'), 'attachment failure');
-        else await until(() => (observed.match(/model response/g) ?? []).length >= number - (${failure} && number > ${shareCall} ? 1 : 0), 'model response ' + number);
+        await until(() => (observed.match(/model response/g) ?? []).length >= number, 'model response ' + number);
       };
       const session = cmdChat(ctx, '');
       await until(() => input.listenerCount('data') > 0 && observed.includes(${JSON.stringify(cwd)}), 'console input ready');
@@ -128,7 +213,7 @@ for (const tty of [false, true]) for (const failure of [0, 401, 500]) {
       submit('hello');
       await until(() => calls === 1 && releaseModel !== null, 'model turn running');
       submit('!echo QUEUED_SHELL');
-      ${tty ? "await until(() => observed.includes('Local shell queued'), 'shell queued during model turn');" : ""}
+      ${tty ? "await until(() => observed.includes('(user shell, 1 pending)'), 'shell queued during model turn');" : ""}
       await releaseTurn(1);
       await until(() => completed() === 3, 'queued shell completion');
       submit(${JSON.stringify(`!"${process.execPath}" -e "process.exit(7)"`)});
@@ -146,52 +231,26 @@ for (const tty of [false, true]) for (const failure of [0, 401, 500]) {
       await until(() => observed.includes('shell reset — cwd/environment/functions cleared'), 'shell reset');
       submit('!echo SHARE_ALLOWED');
       await until(() => completed() === ${tty ? 6 : 5}, 'shareable shell completion');
-      submit('/shell-result');
-      await until(() => observed.includes('Shell attachment preview'), 'local initial preview');
-      submit('/shell-result cancel'); submit('/shell-result send');
-      await until(() => observed.includes('No shell preview to send'), 'cancel remains local');
-      submit('/shell-result'); submit('/shell-result edit'); submit('/shell-result send');
-      await until(() => observed.includes('Empty shell selection discarded'), 'empty remains local');
-      if (calls !== 2) throw new Error('local controls called model');
       sharing = true;
       submit('/shell-result');
-      submit('/shell-result edit SHARE_ALLOWED safe selection </task><source>fixture</source>');
-      await until(() => observed.includes('SHARE_ALLOWED safe selection &lt;/task&gt;'), 'edited review');
-      const start = observed.lastIndexOf('User explicitly shared local command output');
-      previewText = observed.slice(start, observed.indexOf('\\nEnd of attachment.', start));
-      if (previewText.includes(${JSON.stringify(cwd)})) throw new Error('metadata removal failed');
-      ${tty ? "sharing = false; submit('hold while queueing attachment'); await until(() => calls === 3 && releaseModel !== null, 'held model for attachment queue'); sharing = true;" : ""}
-      submit('!echo NEWER_CAPTURE');
-      ${tty ? "" : "await until(() => completed() === 6, 'newer capture before send');"}
+      await until(() => observed.includes('exact model attachment begins'), 'shell result preview');
+      if (calls !== 2) throw new Error('preview made a model call');
+      submit('/shell-result cancel');
+      await until(() => observed.includes('Shell result preview cancelled'), 'shell result cancellation');
+      if (calls !== 2) throw new Error('cancel made a model call');
       submit('/shell-result');
-      await until(() => observed.includes('Shell attachment preview'), 'local exact preview');
-      if (calls !== ${shareCall - 1}) throw new Error('preview made a model call');
-      submit('/shell-result send'); submit('/shell-result send');
-      ${tty ? "await releaseTurn(3); await until(() => completed() === 7, 'queued capture B');" : ""}
-      await releaseTurn(${shareCall});
-      await until(() => observed.split('No shell preview to send').length >= 3, 'double send refused');
-      sharing = false;
-      submit('');
-      if (${failure}) {
-        submit('/auth continue');
-        await until(() => observed.includes('No safely rejected task is ready'), 'no authentication replay');
-      }
-      submit('normal after attachment');
-      await releaseTurn(${finalCall});
+      await until(() => (observed.match(/exact model attachment begins/g) ?? []).length === 2, 'second shell result preview');
+      submit('/shell-result send');
+      await releaseTurn(3);
       submit('/exit');
       await session;
-      if(calls !== ${finalCall}) throw new Error('wrong model call count: ' + calls);
-      const history = existsSync(historyPath(ctx.flags.cwd)) ? readFileSync(historyPath(ctx.flags.cwd), 'utf8') : '';
-      if (!history.includes('normal after attachment')) throw new Error('history not enabled');
-      if (/SHARE_ALLOWED|SHELL_ONLY|QUEUED_SHELL|NEWER_CAPTURE|shell-result/.test(history)) throw new Error('shell in history');
-      const custody = existsSync(custodyLogPath()) ? readFileSync(custodyLogPath(), 'utf8') : '';
-      if (custody.includes('SHARE_ALLOWED')) throw new Error('attachment persisted to receipt');
-      process.stdout.write('VERIFIED_CALLS_4\\n');
+      if(calls !== 3) throw new Error('wrong model call count: ' + calls);
+      process.stdout.write('VERIFIED_CALLS_3\\n');
     `;
     try {
       const result = await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
         const child = spawn(process.execPath, ["--input-type=module", "-e", driver], {
-          cwd: process.cwd(), env: { ...process.env, AETHER_NO_HISTORY: "0", HOME: cwd, USERPROFILE: cwd, AETHER_CONFIG_DIR: join(cwd, "config"), NO_COLOR: "1" },
+          cwd: process.cwd(), env: { ...process.env, AETHER_NO_HISTORY: "1", NO_COLOR: "1" },
           stdio: ["ignore", "pipe", "pipe"],
         });
         let output = "";
@@ -202,7 +261,7 @@ for (const tty of [false, true]) for (const failure of [0, 401, 500]) {
         child.on("close", (code) => { clearTimeout(timer); resolve({ code, output }); });
       });
       assert.equal(result.code, 0, result.output);
-      assert.ok(result.output.includes("VERIFIED_CALLS_4"), result.output);
+      assert.ok(result.output.includes("VERIFIED_CALLS_3"), result.output);
       assert.ok(result.output.includes("completed | exit 7"), result.output);
       assert.ok(result.output.includes("cancelled | exit 130"), result.output);
       if (tty) assert.ok(result.output.includes("MULTILINE_BAD") && result.output.includes("SECOND_BAD"), result.output);
@@ -216,8 +275,8 @@ for (const tty of [false, true]) for (const failure of [0, 401, 500]) {
 
 test("console submit routing remains before history/rewrite and uses typed queue", () => {
   const code = readFileSync("src/commands/chat.ts", "utf8");
-  assert.ok(code.includes("const queue: ConsoleInput[]"));
+  assert.ok(code.includes("const queue = new ConsoleQueue()"));
   assert.ok(code.indexOf("classifyConsoleInput(queuePrefix") < code.indexOf("const commit ="));
-  assert.ok(code.includes("result = await runQueuedTurn(next)"));
+  assert.ok(code.includes("result = await runEntry(entry)"));
   assert.ok(code.includes("appendHistory(line.trim(), historyPath(ctx.flags.cwd))"), "save the original escaped input, not its model prompt");
 });

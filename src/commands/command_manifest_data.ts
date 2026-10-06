@@ -4050,6 +4050,46 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:shell-profile",
+    "surface": "slash",
+    "name": "shell-profile",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "[list|status|use cmd|use powershell]",
+    "summary": "inspect or switch the local console shell profile",
+    "detailedHelp": "/shell-profile lists executable and version readiness; /shell-profile status shows the active profile, session and cwd. On Windows, /shell-profile use powershell opts into a persistent native PowerShell process; /shell-profile use cmd restores one-shot cmd.exe. Switching discards shell state and staged results without replay. Linux/macOS keep persistent Bash.",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "local-write",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.shell-profile",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:shell-profile",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "shell-profile",
+      "usage": "/shell-profile [list|status|use cmd|use powershell]",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; explicit Windows PowerShell opt-in with cmd compatibility."
+    }
+  },
+  {
     "key": "slash:shell-result",
     "surface": "slash",
     "name": "shell-result",
@@ -4057,7 +4097,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "compatibilityAliases": [],
     "deprecatedAliases": [],
     "summary": "preview and edit a bounded local shell result before sharing it",
-    "detailedHelp": "/shell-result previews the exact bounded attachment without contacting a model. Use /shell-result lines to inspect numbered rows; drop <first>[-<last>], replace <line> <text>, mask <literal>, redact, or edit the whole body to update the staged snapshot. /shell-result send shares that snapshot; /shell-result cancel discards it. Pipes and JSON sessions allow explicit one-step send of a fresh capture; a staged preview takes precedence. Sent/cancelled/empty captures never silently restage on repeated send. The complete attachment stays within 8 KiB. A newer command never replaces a staged preview. Redaction is an aid, not a guarantee.",
+    "detailedHelp": "/shell-result previews the exact bounded attachment without contacting a model. Use /shell-result lines to inspect numbered rows; drop <first>[-<last>], replace <line> <text>, mask <literal>, or redact to edit the staged snapshot. /shell-result send shares that snapshot; /shell-result cancel discards it. In pipes or JSON sessions, /shell-result send is the explicit one-step send form. The whole attachment stays within 8 KiB. Send freezes reviewed bytes before queueing; later edits/commands cannot replace them. Preview controls remain local while busy. Repeated/cancelled/empty script sends cannot silently restage. Redaction is an aid, not a guarantee.",
     "section": "Steering",
     "hidden": false,
     "permissionClass": "network",
@@ -4290,9 +4330,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "<task>",
-    "summary": "queue a task (runs when current finishes)",
-    "detailedHelp": "/queue <task>\nqueue a task (runs when current finishes)",
+    "args": "[<task>|list|edit <id> <task>|remove <id>|clear|resume]",
+    "summary": "queue a task, or inspect/edit/remove/clear pending entries",
+    "detailedHelp": "/queue <task>\nqueue a task (runs when current finishes)\n/queue | /queue list\nshow the running entry and pending entries with ids, types and the queue bound\n/queue edit <id> <task>\nreplace a pending chat entry, or a user shell entry with !<command>; position and type are kept\n/queue remove <id> | /queue clear\ndiscard pending entries; they never run\n/queue resume\nrun entries kept after a failed turn, in order\nQueue commands are local and never call a model or start a process.",
     "section": "Steering",
     "hidden": false,
     "permissionClass": "unknown",
@@ -4314,7 +4354,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "queue",
-      "usage": "/queue <task>",
+      "usage": "/queue [<task>|list|edit <id> <task>|remove <id>|clear|resume]",
       "visible": true,
       "disposition": "generated"
     },
@@ -4331,8 +4371,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "compatibilityAliases": [],
     "deprecatedAliases": [],
     "args": "<guidance>",
-    "summary": "mid-task steering for the next turn",
-    "detailedHelp": "/steer <guidance>\nmid-task steering for the next turn",
+    "summary": "steer the running turn if its brain acknowledges it, else the next turn",
+    "detailedHelp": "/steer <guidance>\nsteer the running turn if its brain acknowledges it, else the next turn\nDuring a local turn the note goes to the running brain and is reported as accepted, applied (naming the boundary and any tool calls withheld), or refused. A hosted chat turn has no live control acknowledgement, so the note is kept for the next turn and reported as deferred. Steering never changes tool permissions or approves anything. Use /btw for a side note.",
     "section": "Steering",
     "hidden": false,
     "permissionClass": "unknown",

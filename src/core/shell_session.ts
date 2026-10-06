@@ -6,6 +6,7 @@ import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { BoundedOutput } from "./bounded_output.js";
 import { childEnv } from "./child_env.js";
+import type { ShellProfile } from "./shell_profiles.js";
 import type { RunOptions, ToolResult } from "./tool_executor.js";
 
 export interface ShellCommandEvent {
@@ -16,17 +17,56 @@ export interface ShellCommandEvent {
   cwd: string;
   state: "running" | "completed" | "cancelled" | "lost";
   exitCode?: number;
+  profile?: ShellProfile;
 }
 
 const quote = (value: string): string => "'" + value.replaceAll("'", "'\\''") + "'";
 
-/** Console-owned, non-interactive Bash. No credentials or rc files inherited.
+// -EncodedCommand is only the fixed host-owned reader. Each user command is
+// passed as base64 UTF-16 data over stdin and evaluated once in this process,
+// so Set-Location, environment variables and functions retain native scope.
+const POWERSHELL_READER = String.raw`
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+$ErrorActionPreference = 'Continue'
+$ProgressPreference = 'SilentlyContinue'
+while ($true) {
+  $packet = [Console]::In.ReadLine()
+  if ($null -eq $packet) { break }
+  $split = $packet.IndexOf(':')
+  if ($split -le 0) { continue }
+  $commandId = $packet.Substring(0, $split)
+  try {
+    $commandText = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($packet.Substring($split + 1)))
+    $global:LASTEXITCODE = 0
+    $errorCount = $Error.Count
+    Invoke-Expression $commandText | Out-String -Stream | ForEach-Object { [Console]::Out.WriteLine($_) }
+    if ($LASTEXITCODE -ne 0) { $status = [int]$LASTEXITCODE }
+    elseif ($Error.Count -gt $errorCount) { $status = 1 }
+    else { $status = 0 }
+  } catch {
+    [Console]::Error.WriteLine($_.ToString())
+    $status = 1
+  }
+  $path = (Get-Location).ProviderPath
+  $encodedPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($path))
+  $frame = [char]30 + $commandId + [char]31 + $status + [char]31 + $encodedPath + [char]30
+  [Console]::Out.Write($frame)
+  [Console]::Error.Write($frame)
+  [Console]::Out.Flush()
+  [Console]::Error.Flush()
+}
+`;
+
+/** Console-owned non-interactive Bash or opted-in Windows PowerShell.
+ * No credentials or profile/rc files inherited.
  * File tools continue resolving at workspaceRoot, regardless of shell cwd.
  * This is session control, not an OS sandbox for arbitrary shell commands.
  */
 export class ShellSession {
   readonly workspaceRoot: string;
-  readonly shell = "/bin/bash";
+  readonly profile: ShellProfile;
+  readonly shell: string;
   id = randomUUID();
   cwd: string;
   state: "ready" | "lost" | "closed" = "ready";
@@ -39,8 +79,11 @@ export class ShellSession {
   private failActive: ((reason: string) => void) | null = null;
   private readonly rootIdentity: string;
 
-  constructor(root: string, private readonly onEvent?: (event: ShellCommandEvent) => void) {
+  constructor(root: string, private readonly onEvent?: (event: ShellCommandEvent) => void,
+    profile: ShellProfile = process.platform === "win32" ? "cmd" : "bash", executable?: string) {
     this.workspaceRoot = realpathSync(resolve(root));
+    this.profile = profile;
+    this.shell = executable ?? (profile === "bash" ? "/bin/bash" : profile === "cmd" ? (process.env["ComSpec"] ?? "cmd.exe") : "powershell.exe");
     this.cwd = this.workspaceRoot;
     const stat = statSync(this.workspaceRoot);
     this.rootIdentity = `${stat.dev}:${stat.ino}`;
@@ -86,18 +129,26 @@ export class ShellSession {
     const fail = this.failActive;
     const child = this.child;
     this.child = null;
-    if (!child?.pid) { fail?.(reason); return; }
+    if (!child?.pid || child.exitCode !== null || child.signalCode !== null) { fail?.(reason); return; }
     const pid = child.pid;
-    try { process.kill(-pid, "SIGTERM"); } catch { /* already gone */ }
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      killer.on("error", () => { try { child.kill(); } catch { /* already gone */ } });
+      killer.unref();
+    } else {
+      try { process.kill(-pid, "SIGTERM"); } catch { /* already gone */ }
+    }
     // Reap all descendants, including ones which ignored TERM. Do not replay.
     const escalation = setTimeout(() => {
-      try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
+      if (process.platform === "win32") { try { child.kill(); } catch { /* already gone */ } }
+      else { try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ } }
       fail?.(reason);
-    }, 200);
+    }, process.platform === "win32" ? 500 : 200);
     if (!fail) escalation.unref();
   }
 
   private start(): ChildProcess {
+    if (this.profile === "powershell") return this.startPowerShell();
     if (process.platform !== "linux" && process.platform !== "darwin") {
       throw new Error("persistent shell requires Linux/macOS Bash; this console does not fall back silently");
     }
@@ -126,8 +177,148 @@ export class ShellSession {
     return child;
   }
 
+  private startPowerShell(): ChildProcess {
+    if (process.platform !== "win32") throw new Error("PowerShell profile requires Windows");
+    const encoded = Buffer.from(POWERSHELL_READER, "utf16le").toString("base64");
+    const child = spawn(this.shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], {
+      cwd: this.workspaceRoot, env: childEnv(), windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.child = child;
+    child.stdin?.on("error", error => { if (this.child === child) this.stop(`PowerShell input failed: ${error.message}`); });
+    child.on("error", error => { if (this.child === child) this.stop(`PowerShell spawn failed: ${error.message}`); });
+    child.on("exit", (code, signal) => {
+      if (this.child === child) this.stop(`PowerShell exited (${signal ?? code ?? "unknown"}); state lost`);
+    });
+    child.stdout?.on("data", () => {});
+    child.stderr?.on("data", () => {});
+    return child;
+  }
+
+  private runPowerShellInSlot(command: string, origin: ShellCommandEvent["origin"], options: RunOptions): Promise<ToolResult> {
+    if (!this.active) throw new Error("shell command requires the local execution slot");
+    if (!command.trim()) return Promise.resolve({ output: "[empty shell command]", exitCode: 1 });
+    if (options.signal?.aborted) return Promise.resolve({ output: "[aborted before start]", exitCode: 130 });
+    if (this.state !== "ready") return Promise.resolve({ output: "[shell state lost; use /shell-reset to start fresh; command not replayed]", exitCode: 1 });
+    try {
+      if (realpathSync(this.workspaceRoot) !== this.workspaceRoot) throw new Error("workspace root replaced");
+      const stat = statSync(this.workspaceRoot);
+      if (`${stat.dev}:${stat.ino}` !== this.rootIdentity) throw new Error("workspace root replaced");
+    } catch {
+      this.stop("approved workspace is no longer accessible");
+      return Promise.resolve({ output: "[approved workspace changed; command refused; open a new console]", exitCode: 1 });
+    }
+    this.revision++;
+    const commandId = randomUUID();
+    const event = { sessionId: this.id, commandId, origin, command, profile: this.profile };
+    const emit = (state: ShellCommandEvent["state"], exitCode?: number): void => {
+      this.onEvent?.({ ...event, cwd: this.cwd, state, ...(exitCode !== undefined ? { exitCode } : {}) });
+    };
+    let child: ChildProcess;
+    try { child = this.child ?? this.start(); }
+    catch (error) {
+      this.state = "lost";
+      emit("lost", 1);
+      return Promise.resolve({ output: `[PowerShell unavailable: ${String(error)}; use /shell-profile list]`, exitCode: 1 });
+    }
+    emit("running");
+    return new Promise<ToolResult>(settle => {
+      const marker = `\x1e${commandId}\x1f`;
+      const output = new BoundedOutput();
+      let completed = false;
+      let stdoutDone = false, stderrDone = false;
+      let code: number | null = null, cwd: string | null = null;
+      let verdict = 1;
+      const retain = (text: string): void => {
+        if (!text) return;
+        output.append(text);
+        options.onOutput?.(text);
+      };
+      const readStream = (stream: Readable, end: () => void): (() => void) => {
+        const decoder = new StringDecoder("utf8");
+        let pending = "";
+        let inFrame = false;
+        const read = (chunk: Buffer): void => {
+          pending += decoder.write(chunk);
+          if (!inFrame) {
+            const begin = pending.indexOf(marker);
+            if (begin < 0) {
+              let safe = Math.max(0, pending.length - marker.length + 1);
+              if (safe > 0 && /[\uD800-\uDBFF]/.test(pending[safe - 1]!)) safe--;
+              retain(pending.slice(0, safe)); pending = pending.slice(safe);
+              return;
+            }
+            retain(pending.slice(0, begin));
+            pending = pending.slice(begin + marker.length);
+            inFrame = true;
+          }
+          const frameEnd = pending.indexOf("\x1e");
+          if (frameEnd < 0) {
+            if (pending.length > 16_384) this.stop("PowerShell control frame overflow");
+            return;
+          }
+          const fields = pending.slice(0, frameEnd).split("\x1f");
+          if (fields.length !== 2 || !/^-?\d+$/.test(fields[0] ?? "")) {
+            this.stop("PowerShell control frame invalid"); return;
+          }
+          if (code === null) {
+            code = Number(fields[0]);
+            cwd = Buffer.from(fields[1]!, "base64").toString("utf8");
+          }
+          pending = "";
+          stream.off("data", read);
+          end();
+        };
+        stream.on("data", read);
+        return () => {
+          stream.off("data", read);
+          const rest = pending + decoder.end();
+          if (!inFrame) retain(rest);
+        };
+      };
+      const finish = (result: ToolResult, state: ShellCommandEvent["state"]): void => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", abort);
+        cleanupOut(); cleanupErr();
+        result.output += output.render();
+        Object.defineProperty(result, "capture", {
+          value: { observedBytes: output.observedBytes, omittedBytes: output.omittedBytes },
+        });
+        this.failActive = null;
+        emit(state, result.exitCode);
+        settle(result);
+      };
+      const check = (): void => {
+        if (code === null || cwd === null || !stdoutDone || !stderrDone || completed) return;
+        let physical: string;
+        try { physical = realpathSync(cwd); }
+        catch { this.stop("PowerShell cwd is no longer accessible"); return; }
+        const root = this.workspaceRoot.toLowerCase(), actual = physical.toLowerCase();
+        if (actual !== root && !actual.startsWith(root + sep.toLowerCase())) {
+          this.stop("PowerShell cwd outside approved workspace"); return;
+        }
+        this.cwd = physical;
+        finish({ output: `[exit ${code}]\n`, exitCode: code }, "completed");
+      };
+      const cleanupOut = readStream(child.stdout!, () => { stdoutDone = true; check(); });
+      const cleanupErr = readStream(child.stderr!, () => { stderrDone = true; check(); });
+      this.failActive = reason => finish({
+        output: `[${reason}; shell state lost; use /shell-reset; command not replayed]\n`, exitCode: verdict,
+      }, verdict === 130 ? "cancelled" : "lost");
+      const abort = (): void => { verdict = 130; this.stop("aborted"); };
+      options.signal?.addEventListener("abort", abort, { once: true });
+      const timer = setTimeout(() => { verdict = 124; this.stop("PowerShell command timed out"); }, options.timeoutMs ?? 900_000);
+      timer.unref();
+      const encoded = Buffer.from(command, "utf16le").toString("base64");
+      child.stdin!.write(`${commandId}:${encoded}\n`);
+    });
+  }
+
   /** Called only while holding withSlot. Preserves variables/functions/cwd. */
   runInSlot(command: string, origin: ShellCommandEvent["origin"], options: RunOptions = {}): Promise<ToolResult> {
+    if (this.profile === "powershell") return this.runPowerShellInSlot(command, origin, options);
     if (!this.active) throw new Error("shell command requires the local execution slot");
     if (!command.trim()) return Promise.resolve({ output: "[empty shell command]", exitCode: 1 });
     if (options.signal?.aborted) return Promise.resolve({ output: "[aborted before start]", exitCode: 130 });
@@ -144,7 +335,7 @@ export class ShellSession {
     }
     this.revision++;
     const commandId = randomUUID();
-    const event = { sessionId: this.id, commandId, origin, command, cwd: this.cwd };
+    const event = { sessionId: this.id, commandId, origin, command, cwd: this.cwd, profile: this.profile };
     const emit = (state: ShellCommandEvent["state"], exitCode?: number): void => {
       this.onEvent?.({ ...event, cwd: this.cwd, state, ...(exitCode !== undefined ? { exitCode } : {}) });
     };

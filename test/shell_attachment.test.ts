@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BoundedOutput } from "../src/core/bounded_output.js";
-import { classifyConsoleInput } from "../src/commands/console_input.js";
 import { captureShellResult, ShellAttachmentPreview, SHELL_ATTACHMENT_BODY_BYTES, sanitizeShellAttachment } from "../src/commands/shell_attachment.js";
 import { fenceSafe } from "../src/core/skills/run_session.js";
 
@@ -81,12 +80,3 @@ test("UTF-8 bounds report omitted bytes at every cut without replacement charact
   assert.ok(result.text.endsWith("FINAL SUMMARY"));
 });
 
-test("explicit script send and all preview controls classify before chat/history", () => {
-  for (const action of ["preview", "send", "cancel", "edit"] as const) {
-    const result = classifyConsoleInput(`/shell-result ${action}`);
-    assert.equal(result.kind, "share");
-    if (result.kind === "share") assert.equal(result.action, action);
-  }
-  assert.deepEqual(classifyConsoleInput("/shell-result edit line one\nline two"), { kind: "share", action: "edit", text: "line one\nline two" });
-  assert.equal(classifyConsoleInput("/shell-result send arbitrary").kind, "error");
-});

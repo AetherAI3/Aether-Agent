@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:473c81160b9dc898982fd36f0375b098ddb176a1606f64e96523016b414f4cbb -->
+<!-- manifest-digest: sha256:a535be0a97ba8f1858cd7a0bb92aa45f7f31738eb29c5990e388d9f51f884241 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -483,6 +483,12 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 ### Steering
 
+#### `/shell-profile [list|status|use cmd|use powershell]`
+
+inspect or switch the local console shell profile
+
+Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `slash.shell-profile`
+
 #### `/shell-result`
 
 preview and edit a bounded local shell result before sharing it
@@ -519,15 +525,15 @@ show the current local terminal ID and state
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-status`
 
-#### `/queue <task>`
+#### `/queue [<task>|list|edit <id> <task>|remove <id>|clear|resume]`
 
-queue a task \(runs when current finishes\)
+queue a task, or inspect/edit/remove/clear pending entries
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.queue`
 
 #### `/steer <guidance>`
 
-mid\-task steering for the next turn
+steer the running turn if its brain acknowledges it, else the next turn
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.steer`
 

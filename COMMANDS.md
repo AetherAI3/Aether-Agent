@@ -26,11 +26,11 @@ aether                                  # no args = interactive REPL
 <!-- SLASH-COMMANDS:START -->
 `help`, `auth`, `models`, `model`, `switch`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`,
 `voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`,
-`code-review`, `writing-skills`, `writing-plans`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`, `btw`,
-`pin`, `drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`, `workflow`, `workflow-templates`,
-`workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`, `broadcast`, `gather`,
-`scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`, `frame`, `re-frame`,
-`videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`, `ats`
+`code-review`, `writing-skills`, `writing-plans`, `shell-profile`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`,
+`btw`, `pin`, `drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`, `workflow`,
+`workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`, `broadcast`,
+`gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`, `frame`,
+`re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`, `ats`
 <!-- SLASH-COMMANDS:END -->
 
 ## Runtime capability requirements
@@ -565,7 +565,7 @@ Each starts an agent loop in the REPL.
 | Command | Action |
 |---|---|
 | `/queue <task>` | Queue a task to run when the current one finishes. |
-| `/steer <guidance>` | Mid-task steering applied on the next turn. |
+| `/steer <guidance>` | Steer the running local turn; reported as accepted, applied (with the boundary reached and any tool calls withheld), or refused. A hosted chat turn cannot acknowledge live steering, so the note is deferred to the next turn and says so. Never changes tool permissions. |
 | `/btw <note>` | Contextual side note (accumulates into context). |
 
 ### Context & limits
