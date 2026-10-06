@@ -4,36 +4,56 @@ on:
   release:
     types:
       - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Candidate version tag; publication requires this tag to name the exact workflow source
+        required: true
+        default: v0.4.0
+        type: string
+      dry_run:
+        description: Qualify and pack without publishing
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: npm-production-${{ github.event.release.tag_name }}
+  group: npm-production-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  prepare:
+    # Manual preparation executes only the reviewed main workflow. Release source
+    # is additionally required to belong to main or the exact v0.3 maintenance head.
+    if: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
+    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 25
-    environment: npm-production
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+    outputs:
+      source_sha: ${{ steps.packet.outputs.source_sha }}
+      tarball_sha256: ${{ steps.packet.outputs.tarball_sha256 }}
+      node_version: ${{ steps.packet.outputs.node_version }}
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      EXPECTED_SOURCE_SHA: ${{ github.sha }}
     steps:
-      - name: Checkout immutable release tag
+      - name: Checkout immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Verify release commit belongs to a trusted release line
         shell: bash
         run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
           git fetch --no-tags origin main release/0.3
 
           if git merge-base --is-ancestor HEAD origin/main; then
@@ -60,6 +80,9 @@ jobs:
 
       - name: Audit dependencies
         run: npm audit --audit-level=high
+
+      - name: Verify tarball integrity boundaries
+        run: node --test scripts/npm-release-packet.test.mjs
 
       - name: Test release source
         run: npm test
@@ -93,6 +116,135 @@ jobs:
           prefix="$RUNNER_TEMP/aether-install"
           node dist/scripts/packed-repl-auth-smoke.js "$prefix/lib/node_modules/aether-agents/dist/src/main.js"
 
+      - name: Record exact tested package digest
+        id: packet
+        env:
+          AETHER_RELEASE_SOURCE_SHA: ${{ github.sha }}
+        run: node scripts/npm-release-packet.mjs create
+
+      - name: Upload preparation evidence
+        id: evidence_upload
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-preparation-${{ env.RELEASE_TAG }}-${{ github.sha }}
+          path: |
+            ${{ steps.pack.outputs.tarball }}
+            aether-agents.cdx.json
+            pack-metadata.json
+            npm-release-packet.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record preparation evidence in logs
+        if: always()
+        env:
+          AETHER_EXPECTED_SHA: ${{ github.sha }}
+          AETHER_EVIDENCE_JOB: npm-release-preparation
+          AETHER_UPLOAD_OUTCOMES: preparation=${{ steps.evidence_upload.outcome }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: node scripts/ci-interim-evidence.mjs "$TARBALL" aether-agents.cdx.json pack-metadata.json npm-release-packet.json
+
+      - name: Require preparation artifact upload
+        if: ${{ always() && steps.evidence_upload.outcome != 'success' }}
+        run: exit 1
+
+  publish:
+    needs: prepare
+    if: ${{ github.event_name == 'release' || !inputs.dry_run }}
+    # npm OIDC and provenance require a supported cloud-hosted builder/publisher.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      EXPECTED_SOURCE_SHA: ${{ github.sha }}
+      PREPARED_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+    steps:
+      - name: Checkout immutable release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release commit belongs to a trusted release line
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$EXPECTED_SOURCE_SHA" = "$PREPARED_SOURCE_SHA"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$EXPECTED_SOURCE_SHA"
+          git fetch --no-tags origin main release/0.3
+
+          if git merge-base --is-ancestor HEAD origin/main; then
+            exit 0
+          fi
+
+          if [[ "$RELEASE_TAG" =~ ^v0\.3\.[0-9]+$ ]] && \
+             test "$(git rev-parse HEAD)" = "$(git rev-parse origin/release/0.3)"; then
+            exit 0
+          fi
+
+          echo "Release commit is not on main or the exact v0.3 maintenance head" >&2
+          exit 1
+
+      - name: Set up Node.js and npm registry
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ needs.prepare.outputs.node_version }}
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Build release source on the cloud-hosted runner
+        run: npm run build
+
+      - name: Verify tag, production policy, and package allowlist
+        run: npm run verify:production -- --tag "$RELEASE_TAG"
+
+      - name: Generate CycloneDX SBOM
+        run: npm sbom --sbom-format cyclonedx > aether-agents.cdx.json
+
+      - name: Build immutable npm tarball
+        id: pack
+        shell: bash
+        run: |
+          npm pack --json --ignore-scripts > pack-metadata.json
+          tarball="$(node -e "const fs=require('node:fs');const p=JSON.parse(fs.readFileSync('pack-metadata.json','utf8'));process.stdout.write(p[0].filename)")"
+          test -n "$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test exact tarball
+        shell: bash
+        run: |
+          prefix="$RUNNER_TEMP/aether-install"
+          npm install --global --prefix "$prefix" "${{ steps.pack.outputs.tarball }}" --ignore-scripts
+          test "$("$prefix/bin/aether" --version)" = "${RELEASE_TAG#v}"
+          "$prefix/bin/aether" --help > /dev/null
+
+      - name: Recover installed interactive chat from a stalled 401
+        shell: bash
+        run: |
+          prefix="$RUNNER_TEMP/aether-install"
+          node dist/scripts/packed-repl-auth-smoke.js "$prefix/lib/node_modules/aether-agents/dist/src/main.js"
+
+      - name: Require rebuilt tarball to match tested bytes
+        env:
+          AETHER_RELEASE_SOURCE_SHA: ${{ github.sha }}
+          AETHER_EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball_sha256 }}
+        run: node scripts/npm-release-packet.mjs verify
+
       - name: Attest package provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -106,6 +258,7 @@ jobs:
             ${{ steps.pack.outputs.tarball }}
             aether-agents.cdx.json
             pack-metadata.json
+            npm-release-packet.json
           if-no-files-found: error
           retention-days: 90
 
