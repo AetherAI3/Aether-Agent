@@ -76,6 +76,33 @@ const MAX_STRING_LENGTH = 1024;
 const MAX_LIST_ITEMS = 64;
 
 const ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\|\/|~[\\/])/;
+/**
+ * Git's project-relative path form, with traversal and machine paths refused.
+ *
+ * At least as strict as Cloud's display/1 `files` rule, which refuses ANY
+ * leading "~" as a home path — so a legitimate `~$Report.docx` (an Office lock
+ * file) at the checkout root is refused here too. Anything this accepts that
+ * Cloud refuses is a 400 that wedges the outbox.
+ */
+export function isSafeRelativePath(value: string): boolean {
+  return value.length > 0 && value.length <= 512 &&
+    !ABSOLUTE_PATH.test(value) && !value.startsWith("~") && !value.includes(":") &&
+    !/[\\\u0000-\u001f\u007f]/.test(value) &&
+    value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+/**
+ * The size of `value` as the broker measures it: canonical JSON with
+ * ensure_ascii, where every UTF-16 unit at or above 0x80 is a six-byte `\uXXXX`
+ * escape. UTF-8 under-counts non-ASCII text by up to 3x, and a payload the
+ * broker finds over its bound is a 400 that keeps the batch.
+ */
+export function brokerJsonBytes(value: unknown): number {
+  const json = JSON.stringify(value) ?? "";
+  let bytes = 0;
+  for (let index = 0; index < json.length; index += 1) bytes += json.charCodeAt(index) < 0x80 ? 1 : 6;
+  return bytes;
+}
 // C0 controls and DEL, built without literal control characters in the source.
 const CONTROL_CHARS = new RegExp(
   `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`,
@@ -145,6 +172,18 @@ export function sanitizeRemotePayload(
   options: SanitizeOptions,
 ): Record<string, unknown> | null {
   if (!isViewerEventType(eventType)) return null;
+  if (eventType === "diff_summary") {
+    const files = payload["files"];
+    if (files !== undefined && (!Array.isArray(files) || files.some((path: unknown) =>
+      typeof path !== "string" || !isSafeRelativePath(path)))) return null;
+    // Cloud's display/1 contract REQUIRES all three counts. A payload missing
+    // one is a 400, and a rejected batch stays at the head of the outbox and
+    // blocks every later event, so it is refused here before durable enqueue.
+    for (const key of ["files_changed", "insertions", "deletions"]) {
+      const count = payload[key];
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return null;
+    }
+  }
   const allowed = RC_ALLOWED_KEYS[eventType];
   const env = options.env ?? process.env;
   const out: Record<string, unknown> = {};
@@ -175,7 +214,7 @@ export function sanitizeRemotePayload(
   }
 
   if (Object.keys(out).length === 0) return null;
-  if (Buffer.byteLength(JSON.stringify(out), "utf8") > RC_MAX_PAYLOAD_BYTES) return null;
+  if (brokerJsonBytes(out) > RC_MAX_PAYLOAD_BYTES) return null;
   return out;
 }
 
