@@ -5,12 +5,10 @@
 import type { CatalogItem } from "../types.js";
 import type { Writable } from "node:stream";
 import { theme } from "./theme.js";
-import {
-  orange, green, darkBlue, brightWhite, lightBlue,
-  box, stripAnsi,
-} from "./box.js";
+import { orange, green, darkBlue, brightWhite, lightBlue, box } from "./box.js";
 import { decodeKey, splitKeys, type Key } from "./keys.js";
 import { registerRestore } from "./restore.js";
+import { sanitizeTerm, sliceVisible, visibleWidth } from "./text.js";
 
 const ALT_ON = "\x1b[?1049h";
 const ALT_OFF = "\x1b[?1049l";
@@ -98,64 +96,176 @@ export function currentIndex(
 
 // ── Rendering ─────────────────────────────────
 
-const BOX_WIDTH = 64;
+type FlatItem = { item: CatalogItem; groupIdx: number };
 
-/** Render the full picker menu as a single string. */
-export function renderPicker(
-  groups: ModelGroup[],
-  _flat: { item: CatalogItem; groupIdx: number }[],
-  selectedIdx: number,
-): string {
-  const innerWidth = BOX_WIDTH - 6; // account for │  ...  │
-  const lines: string[] = [];
-
-  // Title row
-  lines.push(theme.bold("  Select Model"));
-
-  // Separator
-  lines.push(theme.dim("  " + "\u2500".repeat(innerWidth - 2)));
-
-  let flatIdx = 0;
-  for (const group of groups) {
-    // Group header
-    lines.push("  " + group.color(group.label));
-
-    for (const item of group.items) {
-      const orb = flatIdx === selectedIdx ? GREEN_ORB : DIM_ORB;
-      const name = flatIdx === selectedIdx ? theme.bold(item.label) : item.label;
-      const id = theme.dim(item.id);
-      const locked = !item.available ? theme.dim(" \uD83D\uDD12") : "";
-
-      // Build line: "  ●  Opus      claude-opus-4"
-      const left = `  ${orb}  ${name}`;
-      const right = `${id}${locked}`;
-
-      // Pad between name and id
-      const leftLen = stripAnsi(left).length;
-      const rightLen = stripAnsi(right).length;
-      const pad = Math.max(1, innerWidth - leftLen - rightLen);
-
-      lines.push(left + " ".repeat(pad) + right);
-      flatIdx++;
-    }
-
-    // Blank separator between groups (not after the last)
-    if (group !== groups[groups.length - 1]) {
-      lines.push("");
-    }
-  }
-
-  // Footer
-  lines.push("");
-  lines.push(
-    theme.dim("  \u2191\u2193 navigate  \u21B5 select  Esc cancel"),
-  );
-
-  return box(lines, { width: BOX_WIDTH });
+export interface ModelPickerState {
+  mode: "list" | "filter";
+  query: string;
+  /** Stable catalogue identity, even while a filter hides the selected row. */
+  selectedId: string | null;
+  scroll: number;
+  savedQuery: string | null;
 }
 
-const GREEN_ORB = theme.enabled ? "\x1b[38;5;46m\u25cf\x1b[0m" : "*"; // ● green
-const DIM_ORB   = theme.dim("\u25cb");                                   // ○ dim
+export interface ModelPickerRenderOptions {
+  width?: number;
+  height?: number;
+  query?: string;
+  scroll?: number;
+  mode?: "list" | "filter";
+}
+
+/** Search only the fetched list; catalogue IDs never change with filtering. */
+export function filterModels(flat: readonly FlatItem[], query: string): FlatItem[] {
+  const q = sanitizeTerm(query).trim().toLowerCase();
+  if (!q) return [...flat];
+  return flat.filter(({ item }) =>
+    [item.label, item.id, item.provider ?? ""]
+      .some((part) => sanitizeTerm(part).toLowerCase().includes(q)));
+}
+
+export function modelPickerPageSize(height: number): number {
+  // Border, title, search, selected-detail, and controls always stay visible.
+  return Math.max(1, height - 6);
+}
+
+export function initialModelPickerState(flat: readonly FlatItem[], activeId?: string): ModelPickerState {
+  const selectedId = activeId && flat.some(({ item }) => item.id === activeId)
+    ? activeId : flat[0]?.item.id ?? null;
+  return { mode: "list", query: "", selectedId, scroll: 0, savedQuery: null };
+}
+
+function visibleIndex(state: ModelPickerState, rows: readonly FlatItem[]): number {
+  return rows.findIndex(({ item }) => item.id === state.selectedId);
+}
+
+function settle(state: ModelPickerState, rows: readonly FlatItem[], page: number): ModelPickerState {
+  const index = visibleIndex(state, rows);
+  const maxScroll = Math.max(0, rows.length - page);
+  let scroll = Math.max(0, Math.min(maxScroll, state.scroll));
+  if (index >= 0 && index < scroll) scroll = index;
+  if (index >= scroll + page) scroll = index - page + 1;
+  return { ...state, scroll };
+}
+
+export type ModelPickerAction = "none" | "render" | "choose" | "cancel";
+
+export function reduceModelPicker(
+  state: ModelPickerState,
+  key: Key,
+  flat: readonly FlatItem[],
+  page: number,
+): { state: ModelPickerState; action: ModelPickerAction } {
+  if (key.kind === "interrupt" || key.kind === "eof") return { state, action: "cancel" };
+  const rows = filterModels(flat, state.query);
+  const move = (delta: number): { state: ModelPickerState; action: ModelPickerAction } => {
+    const index = visibleIndex(state, rows);
+    const next = index < 0 ? (delta < 0 ? rows.length - 1 : 0)
+      : Math.max(0, Math.min(rows.length - 1, index + delta));
+    return { state: settle({ ...state, selectedId: rows[next]?.item.id ?? state.selectedId }, rows, page), action: "render" };
+  };
+  if (state.mode === "filter") {
+    switch (key.kind) {
+      case "char": {
+        const query = sanitizeTerm(state.query + key.value);
+        return { state: settle({ ...state, query, scroll: 0 }, filterModels(flat, query), page), action: "render" };
+      }
+      case "backspace": {
+        const query = [...state.query].slice(0, -1).join("");
+        return { state: settle({ ...state, query, scroll: 0 }, filterModels(flat, query), page), action: "render" };
+      }
+      case "kill-start":
+        return { state: settle({ ...state, query: "", scroll: 0 }, flat, page), action: "render" };
+      case "submit":
+        return { state: { ...state, mode: "list", savedQuery: null }, action: "render" };
+      case "escape": {
+        const query = state.savedQuery ?? "";
+        return { state: settle({ ...state, mode: "list", query, savedQuery: null, scroll: 0 }, filterModels(flat, query), page), action: "render" };
+      }
+      default:
+        return { state, action: "none" };
+    }
+  }
+  switch (key.kind) {
+    case "up": return move(-1);
+    case "down": return move(1);
+    case "home": return { state: settle({ ...state, selectedId: rows[0]?.item.id ?? state.selectedId }, rows, page), action: "render" };
+    case "end": return { state: settle({ ...state, selectedId: rows.at(-1)?.item.id ?? state.selectedId }, rows, page), action: "render" };
+    case "submit": return { state, action: visibleIndex(state, rows) < 0 ? "none" : "choose" };
+    case "escape": return { state, action: "cancel" };
+    case "kill-start": return { state: settle({ ...state, query: "", scroll: 0 }, flat, page), action: "render" };
+    case "char":
+      if (key.value === "/") return { state: { ...state, mode: "filter", savedQuery: state.query }, action: "render" };
+      return { state, action: "none" };
+    default: return { state, action: "none" };
+  }
+}
+
+function clipped(value: string, width: number): string {
+  if (width <= 0) return "";
+  const clean = sanitizeTerm(value).replace(/\s+/g, " ").trim();
+  return visibleWidth(clean) <= width ? clean : sliceVisible(clean, Math.max(0, width - 1)) + "…";
+}
+
+function selectedDetail(item: CatalogItem | undefined): string {
+  if (!item) return "Move to a result to select it";
+  const lock = item.available ? "" : item.enabled
+    ? `LOCKED: requires ${item.tier_min ?? "account access"} · `
+    : "LOCKED: provider unavailable · ";
+  return `${lock}ID ${item.id}`;
+}
+
+/** A bounded frame: every row fits the measured terminal width and height. */
+export function renderPicker(
+  _groups: ModelGroup[],
+  flat: FlatItem[],
+  selectedIdx: number,
+  opts: ModelPickerRenderOptions = {},
+): string {
+  const width = Math.max(6, Math.min(opts.width ?? 64, 100));
+  const height = Math.max(3, opts.height ?? 24);
+  const rows = filterModels(flat, opts.query ?? "");
+  const selected = flat[selectedIdx]?.item;
+  const selectedVisible = rows.findIndex(({ item }) => item.id === selected?.id);
+  const page = modelPickerPageSize(height);
+  const scroll = Math.max(0, Math.min(Math.max(0, rows.length - page), opts.scroll ?? 0));
+  const inner = width - 6;
+  const compact = width < 68;
+  const lines: string[] = [];
+  lines.push(theme.bold(clipped(`Select Model · ${rows.length}/${flat.length}`, inner)));
+  const query = sanitizeTerm(opts.query ?? "");
+  lines.push(theme.cyan(clipped(`Search ${query || "(press /)"}${opts.mode === "filter" ? "▌" : ""}`, inner)));
+  if (rows.length === 0) {
+    lines.push(theme.dim(clipped("No models match. Backspace or Ctrl+U clears search.", inner)));
+  } else {
+    for (let i = scroll; i < Math.min(rows.length, scroll + page); i++) {
+      const item = rows[i]!.item;
+      const active = i === selectedVisible;
+      const marker = active ? ">" : " ";
+      const lock = item.available ? "" : " [locked]";
+      const label = sanitizeTerm(item.label).replace(/\s+/g, " ").trim();
+      const id = sanitizeTerm(item.id).replace(/\s+/g, " ").trim();
+      let body: string;
+      if (compact) {
+        body = clipped(`${marker} ${label} · ${id}${lock}`, inner);
+      } else {
+        const provider = sanitizeTerm(item.provider ?? "");
+        const left = clipped(`${marker} ${label}${provider ? ` · ${provider}` : ""}${lock}`, Math.floor(inner * 0.58));
+        const right = clipped(id, inner - visibleWidth(left) - 1);
+        body = left + " ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(right))) + right;
+      }
+      lines.push(active ? theme.bold(body) : body);
+    }
+  }
+  // Keep the footer visible even when there are no results. On very short
+  // terminals omit detail before ever allowing a wrapped or off-screen row.
+  if (height >= 7) lines.push(theme.dim(clipped(selectedDetail(selectedVisible < 0 ? undefined : selected), inner)));
+  lines.push(theme.dim(clipped(opts.mode === "filter"
+    ? compact ? "type · Enter apply · Esc back · ^U clear" : "Type to filter · Enter apply · Esc restore · Ctrl+U clear"
+    : compact ? "↑↓ / search ↵ pick Esc cancel" : "↑↓ move · PgUp/PgDn page · / search · Enter select · Esc cancel", inner)));
+  if (height < 7) return lines.slice(0, height).map((line) => clipped(line, width)).join("\n");
+  return box(lines, { width });
+}
 
 // ── Interactive picker ────────────────────────
 
@@ -174,6 +284,7 @@ const DIM_ORB   = theme.dim("\u25cb");                                   // ○ 
 export async function pickModel(
   items: CatalogItem[],
   out: Writable,
+  activeId?: string,
 ): Promise<CatalogItem | null | undefined> {
   if (items.length === 0) {
     out.write(theme.dim("no models available.") + "\n");
@@ -182,7 +293,8 @@ export async function pickModel(
 
   // In non-TTY mode (pipe, CI), arrow-key navigation is impossible.
   // Degrade gracefully: return null so the caller can fall back to a flat list.
-  if (!process.stdin.isTTY) {
+  if (!process.stdin.isTTY || (out as Writable & { isTTY?: boolean }).isTTY === false ||
+      (out === process.stdout && !process.stdout.isTTY)) {
     return null;
   }
 
@@ -197,43 +309,60 @@ export async function pickModel(
   const oldListeners = process.stdin.rawListeners("data");
   process.stdin.removeAllListeners("data");
 
-  let selectedIdx = 0;
-  const total = flat.length;
+  let state = initialModelPickerState(flat, activeId);
+  const dimensions = (): { width: number; height: number } => {
+    const terminal = out as Writable & { columns?: number; rows?: number };
+    return {
+      width: terminal.columns ?? process.stdout.columns ?? 64,
+      height: terminal.rows ?? process.stdout.rows ?? 24,
+    };
+  };
+  const frame = (): string => {
+    const { width, height } = dimensions();
+    const selectedIdx = currentIndex(flat, state.selectedId ?? undefined);
+    return renderPicker(groups, flat, selectedIdx, {
+      width, height, query: state.query, scroll: state.scroll, mode: state.mode,
+    });
+  };
+  state = settle(state, flat, modelPickerPageSize(dimensions().height));
 
   // Alt-screen, not 2J: the user's scrollback (the conversation they're
   // mid-way through) survives the picker and reappears on exit.
-  out.write(ALT_ON + "\x1b[H");
-  out.write(renderPicker(groups, flat, selectedIdx) + "\n");
   const unregister = registerRestore(() => {
-    process.stdout.write(ALT_OFF + CURSOR_SHOW);
+    out.write(ALT_OFF + CURSOR_SHOW);
   });
+  try {
+    out.write(ALT_ON + "\x1b[?25l\x1b[H");
+    out.write(frame() + "\n");
+  } catch {
+    unregister();
+    for (const l of oldListeners) process.stdin.on("data", l as (...args: unknown[]) => void);
+    try { out.write(ALT_OFF + CURSOR_SHOW); } catch { /* output failed */ }
+    try { out.write(theme.dim("  picker error — kept current session.") + "\n"); } catch { /* output failed */ }
+    return undefined;
+  }
 
   return new Promise((resolve) => {
+    let done = false;
     // Returns true when the picker is finished (resolved) and onKey must stop.
     const handleOne = (k: Key): boolean => {
-      switch (k.kind) {
-        case "up":
-          selectedIdx = (selectedIdx - 1 + total) % total;
-          rerender();
-          return false;
-        case "down":
-          selectedIdx = (selectedIdx + 1) % total;
-          rerender();
-          return false;
-        case "submit": {
-          const picked = flat[selectedIdx]!;
-          cleanup();
-          resolve(picked.item);
+      const { height } = dimensions();
+      const step = reduceModelPicker(state, k, flat, modelPickerPageSize(height));
+      state = step.state;
+      switch (step.action) {
+        case "choose": {
+          const picked = filterModels(flat, state.query).find(({ item }) => item.id === state.selectedId);
+          finish(picked?.item ?? null);
           return true;
         }
-        case "interrupt":
-        case "eof":
-        case "escape":
-          cleanup();
-          resolve(null);
+        case "cancel":
+          finish(null);
           return true;
+        case "render":
+          rerender();
+          return false;
         default:
-          return false; // ignore other keys
+          return false;
       }
     };
 
@@ -241,7 +370,21 @@ export async function pickModel(
       try {
         // Tokenize: held-arrow key-repeat arrives as one batched chunk.
         for (const seq of splitKeys(chunk.toString("utf8"))) {
-          if (handleOne(decodeKey(seq))) return;
+          if (seq === "\x1b[5~" || seq === "\x1b[6~") {
+            const rows = filterModels(flat, state.query);
+            const index = visibleIndex(state, rows);
+            const page = modelPickerPageSize(dimensions().height);
+            const direction = seq === "\x1b[5~" ? -1 : 1;
+            const next = index < 0 ? (direction < 0 ? rows.length - 1 : 0)
+              : Math.max(0, Math.min(rows.length - 1, index + direction * page));
+            state = settle({ ...state, selectedId: rows[next]?.item.id ?? state.selectedId }, rows, page);
+            rerender();
+            continue;
+          }
+          const key = decodeKey(seq);
+          const keys: Key[] = key.kind === "char"
+            ? [...key.value].map((value): Key => ({ kind: "char", value })) : [key];
+          for (const one of keys) if (handleOne(one)) return;
         }
       } catch {
         // If anything throws in the key handler (render, decode), bail out
@@ -251,29 +394,52 @@ export async function pickModel(
         // deliberate Escape and skip ITS OWN generic "kept current session."
         // message — resolving null there produced two back-to-back lines
         // for a single fault.
-        cleanup();
-        out.write(theme.dim("  picker error — kept current session.") + "\n");
-        resolve(undefined);
+        finish(undefined);
+        try { out.write(theme.dim("  picker error — kept current session.") + "\n"); } catch { /* output failed */ }
       }
     };
 
     const rerender = (): void => {
       // Home + redraw + erase-below: stale rows can't survive a shrinking menu.
       out.write("\x1b[H");
-      out.write(renderPicker(groups, flat, selectedIdx));
+      out.write(frame());
       out.write("\n\x1b[0J");
     };
 
     const cleanup = (): void => {
-      out.write(ALT_OFF + CURSOR_SHOW); // back to the real screen, scrollback intact
       unregister();
       process.stdin.removeListener("data", onKey);
+      out.removeListener?.("resize", onResize);
       // Re-attach the REPL's original listeners
       for (const l of oldListeners) {
         process.stdin.on("data", l as (...args: unknown[]) => void);
       }
+      try { out.write(ALT_OFF + CURSOR_SHOW); } catch { /* output already failed */ }
     };
 
-    process.stdin.on("data", onKey);
+    const finish = (value: CatalogItem | null | undefined): void => {
+      if (done) return;
+      done = true;
+      try { cleanup(); } finally { resolve(value); }
+    };
+
+    const onResize = (): void => {
+      try {
+        const rows = filterModels(flat, state.query);
+        state = settle(state, rows, modelPickerPageSize(dimensions().height));
+        rerender();
+      } catch {
+        finish(undefined);
+        try { out.write(theme.dim("  picker error — kept current session.") + "\n"); } catch { /* output failed */ }
+      }
+    };
+
+    try {
+      process.stdin.on("data", onKey);
+      out.on?.("resize", onResize);
+    } catch {
+      finish(undefined);
+      try { out.write(theme.dim("  picker error — kept current session.") + "\n"); } catch { /* output failed */ }
+    }
   });
 }
