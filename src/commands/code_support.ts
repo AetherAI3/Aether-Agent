@@ -20,6 +20,9 @@ import { renderDiff } from "../ui/diff.js";
 import { kaomoji } from "../ui/kaomoji.js";
 import { theme, errTheme } from "../ui/theme.js";
 import { TaskLedger } from "../ui/ledger.js";
+import { sanitizeServerText } from "../core/transport.js";
+import type { TurnOutcome, TurnTerminalState } from "../core/turn_lifecycle.js";
+import type { CheckReading } from "../core/verify_gate.js";
 
 // The engine's fixed reasoning pipeline - seeded into the task ledger so the run
 // shows broad multi-step progress (n/7) instead of one opaque task.
@@ -66,29 +69,94 @@ export function fmtDuration(secs: number): string {
 }
 
 /**
- * The one line a user actually needs at the end of `aether code` — verdict,
- * blast radius, clock. The failing-test count was already computed by the
- * verify gate but only ever shown to the log file; this surfaces it.
- * `unverified` explains how to become verified.
+ * How an `aether agent` run ended: the canonical turn outcome, what the host's
+ * check actually did, and — when something other than the check decided the
+ * outcome — the turn-level cause. The footer, the JSON outcome and the session
+ * record are all rendered from this one value, so they cannot disagree.
  */
-export function runSummary(
-  status: "ok" | "incomplete" | "unverified",
-  remaining: number,
-  filesChanged: number,
-  secs: number,
-): string {
+export interface CodeRunReport {
+  outcome: TurnOutcome;
+  check: CheckReading;
+  /** Why the turn ended when the check did not decide it (a cancellation, a
+   * model timeout, a refusal, a dropped stream); null when the check did. */
+  cause: string | null;
+}
+
+/** The parts of a report the footer reads. */
+export interface RunSummaryInput {
+  outcome: Pick<TurnOutcome, "state" | "hint">;
+  check: CheckReading;
+  cause: string | null;
+}
+
+/** Long server text must not wrap the verdict line. */
+const MAX_CAUSE_CHARS = 120;
+
+function clipped(text: string): string {
+  const clean = sanitizeServerText(text);
+  if (clean.length <= MAX_CAUSE_CHARS) return clean;
+  const cut = clean.slice(0, MAX_CAUSE_CHARS - 1);
+  const space = cut.lastIndexOf(" ");
+  // Prefer a word boundary unless it would discard most of the text.
+  const head = space > MAX_CAUSE_CHARS * 0.6 ? cut.slice(0, space) : cut;
+  return head.trimEnd() + "…";
+}
+
+function verdict(state: TurnTerminalState): string {
+  switch (state) {
+    case "succeeded":
+      return `${errTheme.green("✓")} ok`;
+    case "cancelled":
+      return `${errTheme.yellow("■")} cancelled`;
+    case "timed_out":
+      return `${errTheme.red("✗")} timed out`;
+    case "failed":
+      return `${errTheme.red("✗")} failed`;
+    case "incomplete":
+      return `${errTheme.red("✗")} incomplete`;
+  }
+}
+
+/** What the check did, in words. Only a completed non-zero check is failing. */
+function checkPhrase(check: CheckReading): string {
+  switch (check.state) {
+    case "passed":
+      return "tests green";
+    case "failed":
+      return check.failing !== null && check.failing > 0
+        ? `${check.failing} test${check.failing === 1 ? "" : "s"} failing`
+        : `check failed (exit ${check.exitCode ?? "?"})`;
+    case "timed_out":
+    case "cancelled":
+    case "launch_failed":
+      return `verification: ${clipped(check.reason)}`;
+    case "not_run":
+    case "unconfigured":
+      return "verification not run";
+  }
+}
+
+/**
+ * The one line a user actually needs at the end of `aether agent` — verdict,
+ * cause, what the check did, blast radius, clock. Rendered from the turn
+ * outcome plus the check reading, never inferred from a failing count: a run
+ * that was cancelled, timed out, or refused before its check says so, and says
+ * "verification not run". `unverified` explains how to become verified.
+ */
+export function runSummary(report: RunSummaryInput, filesChanged: number, secs: number): string {
+  const { outcome, check, cause } = report;
   const files = `${filesChanged} file${filesChanged === 1 ? "" : "s"} changed`;
   const dur = fmtDuration(secs);
-  if (status === "ok") return `${errTheme.green("✓")} ok · ${files} · tests green · ${dur}`;
-  if (status === "incomplete") {
-    const failing =
-      remaining > 0 ? `${remaining} test${remaining === 1 ? "" : "s"} failing` : "tests failing";
-    return `${errTheme.red("✗")} incomplete · ${failing} · ${files} · ${dur}`;
+  if (outcome.state === "succeeded") return `${verdict("succeeded")} · ${files} · ${checkPhrase(check)} · ${dur}`;
+  if (cause === null && check.state === "unconfigured") {
+    return (
+      `${errTheme.dim("—")} unverified · ${files} · ${dur}  ` +
+      errTheme.dim('⤷ pass --test-cmd "npm test" to make the run prove itself')
+    );
   }
-  return (
-    `${errTheme.dim("—")} unverified · ${files} · ${dur}  ` +
-    errTheme.dim('⤷ pass --test-cmd "npm test" to make the run prove itself')
-  );
+  const parts = [verdict(outcome.state), ...(cause ? [clipped(cause)] : []), checkPhrase(check), files, dur];
+  const hint = outcome.hint ? "  " + errTheme.dim(`⤷ ${clipped(outcome.hint)}`) : "";
+  return parts.join(" · ") + hint;
 }
 
 export async function stageGate(brain: Brain, io: PromptIO, stage: string): Promise<void> {

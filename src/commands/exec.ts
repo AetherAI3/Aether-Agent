@@ -94,7 +94,11 @@ function allowed(permission: ExecPermission, tool: string, declared: ReadonlySet
   return { ok: true, reason: "declared-and-authorized" };
 }
 
-function verificationStatus(result: ToolResult | null, configured: boolean): VerifyOutcome {
+/** The headless terminal frame serializes this object whole, so it keeps its
+ * pre-#275 key set; the `aether agent` check reading is not part of that contract. */
+type HeadlessVerification = Omit<VerifyOutcome, "check">;
+
+function verificationStatus(result: ToolResult | null, configured: boolean): HeadlessVerification {
   if (!configured) return { status: "unverified", remaining: 0, exitCode: -1 };
   if (result?.exitCode === 0) return { status: "ok", remaining: 0, exitCode: 0 };
   return { status: "incomplete", remaining: 0, exitCode: result?.exitCode || 1 };
@@ -522,7 +526,7 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
     brain.close();
   }
 
-  let verification: VerifyOutcome;
+  let verification: HeadlessVerification;
   let verificationOutput = "[cancelled before verification]";
   let verificationAuthoritative = false;
   let verificationCommitBound = false;

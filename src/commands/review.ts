@@ -396,7 +396,13 @@ export async function runReview(
     deps.out.write(result.output.endsWith("\n") ? result.output : result.output + "\n");
     deps.out.write(`  Tests:   ${result.reading.status} — ${result.reading.reason}\n`);
     if (!result.written) {
-      deps.out.write(theme.dim("  nothing was recorded — this run cannot be attributed to a working tree.\n"));
+      deps.out.write(
+        theme.dim(
+          result.completed
+            ? "  nothing was recorded — this run cannot be attributed to a working tree.\n"
+            : "  nothing was recorded — the check did not run to completion.\n",
+        ),
+      );
     }
     return result.reading.status === "verified" ? 0 : 1;
   }

@@ -20,7 +20,8 @@
 // interface verify_gate.ts uses, and the same ToolExecutor in production. No
 // command string is assembled or interpreted here.
 
-import { parseFailCount, type VerifyRunner } from "./verify_gate.js";
+import { parseFailCount, readCheck, type VerifyRunner } from "./verify_gate.js";
+import type { RunOptions, ToolResult } from "./tool_executor.js";
 import {
   VERIFICATION_RECORD_VERSION,
   classifyVerification,
@@ -38,22 +39,30 @@ export interface VerifyRunResult {
   /** The raw output of the run, for the caller to render or discard. */
   output: string;
   exitCode: number;
+  /** False when the check never ran to completion (no command, killed at its
+   * deadline, or cancelled) — as opposed to a completed run whose tree moved. */
+  completed: boolean;
 }
 
 export interface VerifyRunOptions {
   now?: string;
+  /** Cancellation and deadline for the check process, forwarded unchanged. */
+  run?: RunOptions;
 }
 
 /**
  * Run the verification command and record what it proved, about which tree.
  *
- * Returns the reading the rail should display. Three outcomes, and none of them
+ * Returns the reading the rail should display. Four outcomes, and none of them
  * is a guess:
  *
  *  - the tree held still and the command exited 0 → "verified", recorded;
  *  - the tree held still and it did not          → "failed", recorded;
  *  - the tree moved while it ran                 → "unknown", NOT recorded,
- *    with a reason saying the run cannot be attributed to any tree.
+ *    with a reason saying the run cannot be attributed to any tree;
+ *  - the check never completed (killed at its deadline or cancelled)
+ *    → "unknown", NOT recorded: it proves nothing about the tree, so an
+ *    earlier record about the same tree stands.
  */
 export async function verifyAndRecord(
   exec: VerifyRunner,
@@ -69,12 +78,24 @@ export async function verifyAndRecord(
       written: null,
       output: "",
       exitCode: -1,
+      completed: false,
     };
   }
 
   const before = treeIdentity(run, root);
-  const result = await exec.executeAsync("run_tests", { command: trimmed });
+  const result = await exec.executeAsync("run_tests", { command: trimmed }, options.run);
   const after = treeIdentity(run, root);
+
+  const check = readCheck(trimmed, result, options.run?.signal?.aborted === true);
+  if (check.state !== "passed" && check.state !== "failed") {
+    return {
+      reading: { status: "unknown", reason: `${check.reason} — nothing was verified`, record: null },
+      written: null,
+      output: result.output,
+      exitCode: result.exitCode,
+      completed: false,
+    };
+  }
 
   if (before.digest !== after.digest || before.head !== after.head) {
     return {
@@ -86,6 +107,7 @@ export async function verifyAndRecord(
       written: null,
       output: result.output,
       exitCode: result.exitCode,
+      completed: true,
     };
   }
 
@@ -102,5 +124,27 @@ export async function verifyAndRecord(
 
   // Classified through the same function a later read would use, so the status
   // shown now and the status shown in ten minutes come from one implementation.
-  return { reading: classifyVerification(record, after), written: record, output: result.output, exitCode: result.exitCode };
+  return {
+    reading: classifyVerification(record, after),
+    written: record,
+    output: result.output,
+    exitCode: result.exitCode,
+    completed: true,
+  };
+}
+
+/**
+ * A VerifyRunner that records every check it runs through verifyAndRecord, so
+ * the result `aether agent` reports is the result `aether review` reads back —
+ * with the same attribution and staleness rules, from the same single writer.
+ * The caller still receives the raw result and classifies it itself.
+ */
+export function recordingRunner(exec: VerifyRunner, run: Runner, root: string): VerifyRunner {
+  return {
+    async executeAsync(_name: string, args: Record<string, unknown>, options?: RunOptions): Promise<ToolResult> {
+      const command = typeof args["command"] === "string" ? args["command"] : "";
+      const result = await verifyAndRecord(exec, run, root, command, options ? { run: options } : {});
+      return { output: result.output, exitCode: result.exitCode };
+    },
+  };
 }

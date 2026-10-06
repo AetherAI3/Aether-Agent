@@ -97,6 +97,16 @@ One host loop drives a pluggable brain: cloud (UVT-metered) by default,
 every tool call locally, and verifies the result itself — the final status is
 derived from your test command's exit code, never the brain's self-report.
 Every run ends with a verdict line: `✓ ok · 4 files changed · tests green · 3m12s`.
+The line is rendered from how the turn ended plus what the check actually did.
+Only a check that ran to completion and exited non-zero reads as failing
+(`2 tests failing`, or `check failed (exit 2)` when no count can be parsed). A
+run that is cancelled, times out, hits the model output limit, is refused, or
+loses its connection names that reason and says `verification not run`; a check
+that itself times out or is cancelled says so instead of reporting a red run.
+With `--json`, the final `turn_outcome` record carries the same reading under
+`verification` (`state`, `exit_code`, `failing`, `reason`), and so does the
+session manifest. In a git checkout, a completed check is also recorded for
+`aether review`, bound to the tree it ran against.
 
 | Flag | Meaning |
 |---|---|

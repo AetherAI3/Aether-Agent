@@ -6,6 +6,7 @@ import type { BrainEvent } from "../src/core/brain_protocol.js";
 import { MeaningfulProgressTimeoutError, ModelOutputLimitError, TurnDeadlineError } from "../src/core/errors.js";
 import type { ToolExecutor } from "../src/core/tool_executor.js";
 import type { ToolResult } from "../src/core/tool_executor.js";
+import type { CheckReading, VerifyOutcome } from "../src/core/verify_gate.js";
 import {
   CODE_MEANINGFUL_PROGRESS_TIMEOUT_ENV,
   DEFAULT_CODE_MEANINGFUL_PROGRESS_TIMEOUT_MS,
@@ -21,6 +22,25 @@ const task: TaskCommand = {
   cwd: ".",
   poolGb: 5,
 };
+
+const GREEN_CHECK: VerifyOutcome = {
+  status: "ok",
+  remaining: 0,
+  exitCode: 0,
+  check: { state: "passed", exitCode: 0, failing: 0, reason: "npm test exited 0" },
+};
+const UNCONFIGURED_CHECK: CheckReading = {
+  state: "unconfigured",
+  exitCode: null,
+  failing: null,
+  reason: "no --test-cmd was given",
+};
+const failedCheck = (failing: number): CheckReading => ({
+  state: "failed",
+  exitCode: 1,
+  failing,
+  reason: "npm test exited 1",
+});
 
 const noExec = {
   executeAsync: async (): Promise<ToolResult> => ({ output: "", exitCode: 0 }),
@@ -47,13 +67,13 @@ test("coding turn keeps one correlation id and brain done is advisory until host
     "late frames cannot rewrite the terminal advisory",
   );
 
-  const outcome = turn.settle({ status: "ok", remaining: 0, exitCode: 0 });
+  const outcome = turn.settle(GREEN_CHECK);
   assert.equal(outcome.state, "succeeded");
   assert.equal(outcome.turnId, "turn-code-fixed");
-  assert.deepEqual(turn.settle({ status: "error", remaining: 9, exitCode: 1 }), outcome);
+  assert.deepEqual(turn.settle({ status: "error", remaining: 9, exitCode: 1, check: failedCheck(9) }), outcome);
 
   let line = "";
-  emitCodeTurnOutcome(outcome, true, (chunk) => {
+  emitCodeTurnOutcome(turn.report!, true, (chunk) => {
     line += chunk;
   });
   const record = JSON.parse(line) as Record<string, unknown>;
@@ -69,11 +89,19 @@ test("coding turn keeps one correlation id and brain done is advisory until host
 test("coding turn refuses success for red, missing, or unavailable host verification", () => {
   const red = new CodeTurnLifecycle("red", { id: "turn-red" });
   red.observe({ type: "done", ok: true, result: "looks good", remaining: 0, reason: "" });
-  assert.equal(red.settle({ status: "incomplete", remaining: 2, exitCode: 1 }).state, "incomplete");
+  assert.equal(
+    red.settle({ status: "incomplete", remaining: 2, exitCode: 1, check: failedCheck(2) }).state,
+    "incomplete",
+  );
 
   const unverified = new CodeTurnLifecycle("no gate", { id: "turn-unverified" });
   unverified.observe({ type: "done", ok: true, result: "looks good", remaining: 0, reason: "unverified" });
-  const unverifiedOutcome = unverified.settle({ status: "unverified", remaining: 0, exitCode: -1 });
+  const unverifiedOutcome = unverified.settle({
+    status: "unverified",
+    remaining: 0,
+    exitCode: -1,
+    check: UNCONFIGURED_CHECK,
+  });
   assert.equal(unverifiedOutcome.state, "incomplete");
   assert.equal(unverifiedOutcome.exitCode, 1);
 
@@ -86,14 +114,14 @@ test("coding turn treats EOF and error as failures even when the checkout happen
   const eof = new CodeTurnLifecycle("eof", { id: "turn-eof" });
   eof.observe({ type: "monologue", text: "partial output", depth: 0 });
   eof.noteIncompleteEof();
-  const eofOutcome = eof.settle({ status: "ok", remaining: 0, exitCode: 0 });
+  const eofOutcome = eof.settle(GREEN_CHECK);
   assert.equal(eofOutcome.state, "incomplete");
   assert.equal(eofOutcome.partialOutput, true);
   assert.match(eofOutcome.message, /terminal frame/i);
 
   const errored = new CodeTurnLifecycle("error", { id: "turn-error" });
   errored.observe({ type: "error", msg: "brain exploded" });
-  const errorOutcome = errored.settle({ status: "ok", remaining: 0, exitCode: 0 });
+  const errorOutcome = errored.settle(GREEN_CHECK);
   assert.equal(errorOutcome.state, "failed");
   assert.match(errorOutcome.message, /brain exploded/i);
 });
