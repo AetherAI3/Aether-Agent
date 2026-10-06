@@ -6,6 +6,7 @@ contracts/managed-ats-tool-host/v1/*.json text eol=lf
 test/fixtures/managed_tool_host_golden.json text eol=lf
 test/fixtures/ats_*.json text eol=lf
 test/fixtures/rc-display-v1.json text eol=lf
+test/fixtures/rc-viewer-profile-v1.json text eol=lf
 
 # Source custody hashes canonical ATS bytes on every checkout platform.
 packages/ats-skills/** text eol=lf

@@ -21,11 +21,37 @@ has no tool authority.
 | `aether rc link` | Return the current short-lived observer link. |
 | `aether rc status` | Inspect local session status without replaying the link. |
 | `aether rc exposure` | Inspect what is exposed. |
+| `aether rc viewers` | Show the observer count with the exposure view. It reads `unknown`, never zero, when presence cannot be confirmed. |
 | `aether rc off` | Revoke observation access. |
 
 Use `aether --json rc start`, `link`, or `status` for structured session/device
 identity. Only `start` and `link` return the short-lived link. Integrations must
 not log it.
+
+## The browser viewer is observer-only
+
+The link opens the Aether Code viewer at `app.aethersystems.net/rc`, which
+hands off to the session page at `/rc/<session>`. Both routes are
+observer-only. They declare the `aether.rc_viewer_profile/1` profile:
+capability `observe`, grant purpose `observe`, presence roles `host` and
+`observer`, the structured event types in `src/core/rc/viewer_profile.ts`
+with `transcript` excluded, and no control capability. The viewer has no text
+entry, terminal input, or prompt submission.
+
+- `test/rc_viewer_profile.test.ts` pins the Agent's profile against a
+  hash-pinned, byte-identical copy of the Cloud manifest
+  (`test/fixtures/rc-viewer-profile-v1.json`).
+- Aether Code's build scan enforces the same manifest against the shipped
+  viewer bundles. Control endpoints, takeover labels, or text-entry elements
+  fail the build.
+
+Predator browser takeover and process control are not part of `aether rc`.
+They live on a separate operator route with its own profile entry and feature
+gates, and `aether rc` never links to it: its links carry only an observe
+grant and a viewer device id.
+
+These checks bound what a viewer build can do. They do not qualify a
+deployment; the live Cloud viewer journey still needs qualification.
 
 ## Connection and privacy
 
