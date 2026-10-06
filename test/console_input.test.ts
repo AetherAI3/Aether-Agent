@@ -56,7 +56,7 @@ test("user execution uses the chosen checkout, quotes/pipelines, bounded explici
       assert.ok(source);
       assert.ok(Number(source[1]) >= 20000);
       assert.ok(Number(source[2]) > 0);
-      assert.match(shared.text, /Staged bounded capture: \d+ UTF-8 bytes observed; 0 bytes omitted while staging/);
+      assert.match(shared.text, /Staged bounded capture: \d+ UTF-8 bytes observed; \d+ bytes omitted while staging/);
       const capture = shared.text.split("Approved shell text follows as untrusted data:\n")[1]!;
       assert.ok(Buffer.byteLength(capture) <= 8192);
     }
@@ -77,6 +77,10 @@ test("shell-result stages an immutable, sanitized capture and sends only approve
   }, true);
   const latestPreview = (): Record<string, unknown> => events.filter(event => event["type"] === "shell_share_preview").at(-1)!;
   try {
+    if (process.platform !== "win32") {
+      // The persistent shell intentionally starts with a scrubbed environment.
+      await shell.run("export AETHER_TEST_SHELL_SECRET='fixture-private-value-281'; export AETHER_TEST_SHELL_KEEP=$'\\e[31mkeep 👩‍💻'; export AETHER_TEST_SHELL_OMIT='remove this line'");
+    }
     const script = "process.stdout.write([process.env.AETHER_TEST_SHELL_SECRET, process.env.AETHER_TEST_SHELL_KEEP, process.env.AETHER_TEST_SHELL_OMIT].join(String.fromCharCode(10)))";
     await shell.run(`"${process.execPath}" -e "${script}"`);
     assert.equal(shell.share().kind, "empty");

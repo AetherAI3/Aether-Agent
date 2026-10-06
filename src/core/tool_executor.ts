@@ -354,11 +354,12 @@ export class ToolExecutor {
       };
       signal?.addEventListener("abort", onAbort, { once: true });
 
-      const finish = (result: ToolResult): void => {
+      const finish = (result: ToolResult, capture?: ToolResult["capture"]): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
+        if (capture) Object.defineProperty(result, "capture", { value: capture });
         resolve(result);
       };
 
@@ -373,15 +374,15 @@ export class ToolExecutor {
         const body = output.render();
         const capture = { observedBytes: output.observedBytes, omittedBytes: output.omittedBytes };
         if (verdict === "timeout") {
-          finish({ output: `[timeout after ${Math.round(timeoutMs / 1000)}s]\n${body}`, exitCode: 124, capture });
+          finish({ output: `[timeout after ${Math.round(timeoutMs / 1000)}s]\n${body}`, exitCode: 124 }, capture);
           return;
         }
         if (verdict === "aborted") {
-          finish({ output: `[aborted]\n${body}`, exitCode: 130, capture });
+          finish({ output: `[aborted]\n${body}`, exitCode: 130 }, capture);
           return;
         }
         const exit = code ?? (sig ? 1 : 1);
-        finish({ output: `[exit ${exit}]\n${body}`, exitCode: exit, capture });
+        finish({ output: `[exit ${exit}]\n${body}`, exitCode: exit }, capture);
       });
     });
   }
