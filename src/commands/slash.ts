@@ -188,6 +188,9 @@ export async function handleSlash(
     case "shell-reset":
       out.write("/shell-reset belongs to the local coding console; submit it there to discard shell state.\n");
       break;
+    case "shell-profile":
+      out.write("/shell-profile belongs to the local coding console; use it there to inspect or switch the shell profile.\n");
+      break;
     case "exit":
     case "quit":
       return { exit: true };

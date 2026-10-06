@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:528c55f5f15ba474ef4fb931cea11a1f1275bd261aa7503c08bd9ad09b230e51 -->
+<!-- manifest-digest: sha256:f4e871943389ef5a5056286b260f28b965b9ba1dfd02e070d54d9d7669b52ab2 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -482,6 +482,12 @@ write plan to \.hermes/plans/
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.writing-plans`
 
 ### Steering
+
+#### `/shell-profile [list|status|use cmd|use powershell]`
+
+inspect or switch the local console shell profile
+
+Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `slash.shell-profile`
 
 #### `/shell-result`
 
