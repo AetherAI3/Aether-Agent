@@ -94,10 +94,11 @@ A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-c
 Explain the failing test
 !npm test
 /shell-result
+/shell-result send
 Help me fix it
 ```
 
-`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` explicitly shares the latest result with the next model turn; review it for secrets first.
+`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` opens a local preview of the exact bounded attachment. Review all text and metadata; `/shell-result edit <replacement text>` replaces the body, `/shell-result send` sends that reviewed snapshot once, and `/shell-result cancel` discards it. Redaction helps but cannot guarantee secrets are absent. The same explicit commands work in pipes without interactive prompts.
 
 | Platform | Local shell | Interactive programs |
 |---|---|---|

@@ -49,8 +49,26 @@ tools. Online account-agent and ATS chats remain separate surfaces.
   Ctrl+C cancels the active command/turn and discards its queued follow-ups;
   typing ahead retains the newer composer draft.
 - Shell commands and results are excluded from chat history and hosted prompts.
-  `/shell-result` explicitly shares up to 8 KiB of the latest user result as
-  untrusted data. Reset clears that result.
+  `/shell-result` stages a memory-only preview of at most 8 KiB, including
+  immutable untrusted-data framing, an opaque capture ID, command/session IDs,
+  captured cwd, exit status, and UTF-8 omission information. The displayed
+  attachment is exactly the attachment submitted on `/shell-result send`;
+  ordinary project instructions may surround it in the model request.
+  `/shell-result edit <replacement text>` replaces the entire editable body,
+  allowing command/cwd/secret-bearing lines to be removed. The preview updates
+  after sanitation/redaction; edits retain an explicit edited-selection notice
+  and capture omission count. Empty selections and `/shell-result cancel` make
+  zero model requests. Oversized edits are refused without changing the draft.
+  Redaction is an aid, not a guarantee: review all output and metadata.
+  A later command cannot replace a staged preview. To preview the latest capture,
+  cancel the existing draft first. Send consumes the draft before queueing, so a
+  repeated send cannot submit it twice. Reset/exit clear unsent previews.
+  TTY and pipe mode use the same explicit commands; pipes never wait for a
+  confirmation prompt. In scripts, preview then use `/shell-result send`.
+  Neither previews, shell commands, nor edited attachment bodies enter ordinary
+  chat history or durable custody receipts/support exports. A failed send is not
+  copied into the chat composer or saved for authentication replay; stage and
+  review again to retry. Later chat prompts do not automatically include it.
   Ordinary chat history still honors `AETHER_NO_HISTORY=1`.
 
 ## Interactive Linux terminal

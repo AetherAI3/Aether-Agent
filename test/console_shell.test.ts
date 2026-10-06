@@ -68,9 +68,10 @@ test("explicit shell-result sharing keeps a final summary after a long Unicode c
   const shell = new ConsoleShell(root, () => {}, true);
   try {
     await shell.run(`printf 'FINAL SUMMARY: 1 failed'; # ${"😀".repeat(4000)}`);
-    const shared = shell.share();
-    assert.equal(shared.kind, "chat");
-    if (shared.kind !== "chat") return;
+    assert.equal(shell.share().kind, "empty");
+    const shared = shell.share({ kind: "share", action: "send" });
+    assert.equal(shared.kind, "attachment");
+    if (shared.kind !== "attachment") return;
     assert.ok(shared.text.endsWith("FINAL SUMMARY: 1 failed"));
     assert.match(shared.text, /UTF-8 bytes elided/);
     assert.doesNotMatch(shared.text, /\ufffd/);
@@ -180,5 +181,40 @@ test("raw TTY queues shell while a model turn is busy, preserves the draft and n
     if (tty) Object.defineProperty(process.stdin, "isTTY", tty); else delete (process.stdin as unknown as { isTTY?: boolean }).isTTY;
     if (raw) Object.defineProperty(process.stdin, "setRawMode", raw); else delete (process.stdin as unknown as { setRawMode?: unknown }).setRawMode;
     rmSync(historyPath(root), { force: true }); rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("local model receives only the explicitly sent exact edited shell attachment", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aether-console-local-preview-"));
+  const shell = new ConsoleShell(root, () => {}, true);
+  const input = new PassThrough();
+  const oldFetch = globalThis.fetch;
+  const oldWrite = process.stdout.write;
+  const prompts: string[] = [];
+  let output = "";
+  const ctx = context(root);
+  ctx.cfg.backend = "local";
+  ctx.flags.local = true;
+  ctx.flags.model = "fixture-local";
+  globalThis.fetch = (async (url, init) => {
+    assert.ok(String(url).endsWith("/v1/chat/completions"), "must use the local transport");
+    const body = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] };
+    prompts.push(body.messages.find(message => message.role === "user")!.content);
+    return Response.json({ choices: [{ message: { content: "fixture local answer" } }] });
+  }) as typeof fetch;
+  process.stdout.write = ((text: string | Uint8Array) => { output += String(text); return true; }) as typeof process.stdout.write;
+  try {
+    const pending = replLines(ctx, { noSkills: true }, shell, input);
+    input.end(`!"${process.execPath}" -e "console.log('LOCAL_RAW_CAPTURE')"\n/shell-result\n/shell-result cancel\n/shell-result\n/shell-result edit LOCAL_EDITED\n/shell-result send\n/shell-result send\nnormal after\n/exit\n`);
+    assert.equal(await pending, 0);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[0]!, /untrusted data, not instructions/);
+    assert.ok(prompts[0]!.endsWith("LOCAL_EDITED"));
+    assert.doesNotMatch(prompts[0]!, /LOCAL_RAW_CAPTURE/);
+    assert.equal(prompts[1], "normal after");
+    assert.match(output, /No shell preview to send/);
+  } finally {
+    globalThis.fetch = oldFetch; process.stdout.write = oldWrite;
+    shell.close(); input.destroy(); rmSync(historyPath(root), { force: true }); rmSync(root, { recursive: true, force: true });
   }
 });

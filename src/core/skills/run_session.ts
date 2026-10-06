@@ -123,7 +123,7 @@ const row = (label: string, value: string): string => sanitizeForTransport(label
  * payload assertions depend on it).
  */
 const FENCE = /<\/?(?:project_rules|source|conflict|skills|skill|resource|host_policy|task|note)\b[^>]*>/gi;
-function fenceSafe(text: string): string {
+export function fenceSafe(text: string): string {
   // Escape the WHOLE matched tag, attributes included. The previous form kept
   // only a capture group and re-emitted it as a closing tag, which silently
   // rewrote any opening tag it matched into a closing one and dropped its

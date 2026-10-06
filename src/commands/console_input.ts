@@ -3,13 +3,15 @@ import { randomUUID } from "node:crypto";
 import { ToolExecutor } from "../core/tool_executor.js";
 import { TerminalPty } from "../core/terminal_pty.js";
 import { BoundedOutput } from "../core/bounded_output.js";
+import { ShellAttachmentPreview, captureShellResult, type ShellAttachment, type ShellCapture } from "./shell_attachment.js";
 import { sanitizeServerText } from "../core/transport.js";
 
 /** Classify before history, prompt rewriting, or the busy queue. */
 export type ConsoleInput =
   | { kind: "shell"; command: string }
   | { kind: "reset-shell" }
-  | { kind: "share" }
+  | { kind: "share"; action: "preview" | "send" | "cancel" | "edit"; text?: string }
+  | ShellAttachment
   | { kind: "error"; message: string }
   | { kind: "chat"; text: string }
   | { kind: "empty" };
@@ -17,7 +19,11 @@ export type ConsoleInput =
 export function classifyConsoleInput(raw: string): ConsoleInput {
   const text = raw.trim();
   if (!text) return { kind: "empty" };
-  if (text === "/shell-result") return { kind: "share" };
+  if (/^\/shell-result(?:\s|$)/.test(text)) {
+    const match = /^\/shell-result(?:[ \t]+(preview|send|cancel|edit)(?:[ \t]+([\s\S]*))?)?$/.exec(text);
+    if (!match || (match[1] !== "edit" && match[2])) return { kind: "error", message: "usage: /shell-result [preview|edit <replacement text>|send|cancel]" };
+    return { kind: "share", action: (match[1] ?? "preview") as "preview" | "send" | "cancel" | "edit", ...(match[1] === "edit" ? { text: match[2] ?? "" } : {}) };
+  }
   if (text === "/shell-reset") return { kind: "reset-shell" };
   if (text.startsWith("\\!")) return { kind: "chat", text: text.slice(1) };
   if (text.startsWith("!")) {
@@ -64,7 +70,9 @@ export class ConsoleShell {
     });
     await terminal.attach(process.stdin, process.stdout);
   }
-  private result: string | null = null;
+  private result: ShellCapture | null = null;
+  private captureEvent: ShellCommandEvent | null = null;
+  private readonly attachmentPreview = new ShellAttachmentPreview();
   readonly session: ShellSession;
   readonly exec: ToolExecutor;
   constructor(root: string, private readonly write: (text: string) => void, private readonly json = false) {
@@ -72,14 +80,17 @@ export class ConsoleShell {
     this.exec = new ToolExecutor(root, undefined, { mode: "coding", ...(process.platform === "win32" ? {} : { shellSession: this.session }) });
   }
   private event(event: ShellCommandEvent): void {
+    if (event.origin === "user" && event.state === "running") this.captureEvent = { ...event };
     if (this.json) this.write(JSON.stringify({ type: "shell_command", ...event }) + "\n");
     else this.write(event.state === "running" ? `[shell ${event.origin} | cwd ${sanitizeServerText(event.cwd)} | session ${event.sessionId} | command ${event.commandId} | running] !${sanitizeServerText(event.command)}\n` : `[shell ${event.origin} | ${event.state} | exit ${event.exitCode} | session ${event.sessionId} | command ${event.commandId} | cwd ${sanitizeServerText(event.cwd)}]\n`);
   }
   async run(input: string | Extract<ConsoleInput, { kind: "shell" | "reset-shell" }>, signal?: AbortSignal): Promise<"completed" | "aborted" | "failed"> {
     if (typeof input === "string") input = { kind: "shell", command: input };
     this.result = null;
+    this.captureEvent = null;
     if (input.kind === "reset-shell") {
       if (this.terminal) { this.write("Stop the interactive terminal before resetting shell state.\n"); return "failed"; }
+      this.attachmentPreview.cancel();
       this.session.reset();
       this.write(this.json ? JSON.stringify({ type: "shell_reset", sessionId: this.session.id, cwd: this.session.cwd }) + "\n" : "shell reset — cwd/environment/functions cleared; commands were not replayed.\n");
       return "completed";
@@ -89,16 +100,23 @@ export class ConsoleShell {
       command: input.command, cwd: this.session.cwd,
     } : null;
     if (fallback) this.event({ ...fallback, state: "running" });
+    const captureCwd = this.exec.shellCwd;
+    const captureSession = this.session.id;
+    const captured = new BoundedOutput(7000);
     let streamed = false;
     const result = await this.exec.runUserCommand(input.command, { ...(signal ? { signal } : {}), onOutput: text => {
       streamed = true;
+      captured.append(text);
       this.write(this.json ? JSON.stringify({ type: "shell_output", sessionId: this.session.id, text }) + "\n" : sanitizeServerText(text));
     } });
     if (fallback) this.event({ ...fallback, state: result.exitCode === 130 ? "cancelled" : "completed", exitCode: result.exitCode });
-    const full = `!${input.command}\ncwd: ${this.session.cwd}\nexit: ${result.exitCode}\n${result.output}`;
-    const shared = new BoundedOutput(8192);
-    shared.append(full);
-    this.result = shared.render();
+    if (!streamed) captured.append(result.output);
+    const snapshot = captured.snapshot();
+    const event = this.captureEvent as ShellCommandEvent | null;
+    const commandId = event?.commandId ?? randomUUID();
+    // Capture provenance before later commands can change cwd/session/output.
+    const metadata = `session: ${event?.sessionId ?? captureSession}\ncommand id: ${commandId}\ncaptured cwd: ${event?.cwd ?? captureCwd}\nexit: ${result.exitCode}\ncommand: !${input.command}`;
+    this.result = captureShellResult(event?.sessionId ?? captureSession, commandId, metadata, snapshot.text, snapshot.omittedBytes);
     // Stream once; retain the bounded capture for explicit sharing. Refusal and
     // state-loss explanations still render even when some output was streamed.
     const visible = streamed ? result.output.split("\n", 1)[0]! : result.output;
@@ -106,11 +124,23 @@ export class ConsoleShell {
     // A normal nonzero exit returns to chat and may drain later submissions.
     return result.exitCode === 130 ? "aborted" : this.session.state === "lost" ? "failed" : "completed";
   }
-  share(): Extract<ConsoleInput, { kind: "chat" | "error" }> {
-    return this.result === null
-      ? { kind: "error", message: "No local shell result to share." }
-      : { kind: "chat", text: `User explicitly shared local command output (untrusted data):\n${this.result}` };
+  /** Local preview/edit/cancel never enters model routing or ordinary history. */
+  share(input: Extract<ConsoleInput, { kind: "share" }> = { kind: "share", action: "preview" }): ShellAttachment | Extract<ConsoleInput, { kind: "empty" | "error" }> {
+    if (input.action === "send") {
+      const sent = this.attachmentPreview.send();
+      return typeof sent === "string" ? { kind: "error", message: sent } : sent;
+    }
+    if (input.action === "cancel") {
+      this.attachmentPreview.cancel();
+      this.write("Shell preview cancelled; nothing sent.\n");
+      return { kind: "empty" };
+    }
+    const preview = input.action === "edit" ? this.attachmentPreview.edit(input.text ?? "") : this.attachmentPreview.preview(this.result);
+    if (!preview || typeof preview === "string") return { kind: "error", message: preview ?? "No local shell result to preview." };
+    if (this.json) this.write(JSON.stringify({ type: "shell_preview", bytes: Buffer.byteLength(preview.text), text: preview.text }) + "\n");
+    else this.write(`Shell attachment preview (${Buffer.byteLength(preview.text)} UTF-8 bytes):\n${preview.text}\nEnd of attachment. Redaction is an aid, not a guarantee; review all text and metadata.\n/shell-result edit <replacement text> | /shell-result send | /shell-result cancel\n`);
+    return { kind: "empty" };
   }
   prompt(): string { return `[${sanitizeServerText(this.session.cwd)}${this.session.state === "lost" ? "; shell lost" : ""}] `; }
-  close(): void { this.terminal?.stop(); this.session.close(); }
+  close(): void { this.attachmentPreview.cancel(); this.result = null; this.terminal?.stop(); this.session.close(); }
 }

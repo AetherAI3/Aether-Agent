@@ -109,6 +109,8 @@ interface ChatJsonResponse {
 export interface TurnSkillOptions {
   explicitSkill?: string;
   noSkills?: boolean;
+  /** Reviewed shell content must not enter durable receipt/export storage. */
+  ephemeralAttachment?: boolean;
   /** Local console authority, never serialized to Cloud. */
   exec?: ToolExecutor;
   /** Host-observed results only; no model text or shell output. */
@@ -535,7 +537,7 @@ export async function runTurn(
         ) + "\n",
       );
     }
-    return await runCloudTurn(ctx, brief, lifecycle, boundedSignal.signal, onFrame, onPulsePaint, deadlineAt, deadlineMs);
+    return await runCloudTurn(ctx, brief, lifecycle, boundedSignal.signal, onFrame, onPulsePaint, deadlineAt, deadlineMs, skillOpts.ephemeralAttachment !== true);
   } catch (err) {
     const outcome = finalizeThrownTurn(lifecycle, err, ctx.cfg.baseUrl);
     if (err instanceof ChatTurnError) throw err;
@@ -561,6 +563,7 @@ async function runCloudTurn(
   onPulsePaint?: (frame: string) => void,
   deadlineAt = Date.now() + chatTurnDeadlineMs(),
   deadlineMs = chatTurnDeadlineMs(),
+  persistCustody = true,
 ): Promise<TurnOutcome> {
   beginConnecting(lifecycle);
   const reg = getRegistry();
@@ -685,7 +688,7 @@ async function runCloudTurn(
       // turn id so a reconnect replaying it cannot count the same turn twice,
       // and only from the server's own number — never estimated from tokens.
       if (frame.type === "done") getRegistry().settleTurn(lifecycle.id, frame.uvt);
-      if (frame.type === "custody") appendCustody(frame.custody);
+      if (frame.type === "custody" && persistCustody) appendCustody(frame.custody);
 
       if (frame.type === "tool_call") {
         noteWaitingForTool(lifecycle);
@@ -1353,11 +1356,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     /** Run one turn without sacrificing an existing type-ahead draft. */
     const runQueuedTurn = async (input: ConsoleInput, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
-      const sharedShellResult = input.kind === "share";
-      if (input.kind === "share") input = consoleShell.share();
+      const sharedShellResult = input.kind === "attachment";
+      if (input.kind === "share") return "completed"; // Preview controls are resolved at submission, never at execution.
       if (input.kind === "error") { process.stdout.write(input.message + "\n"); return "completed"; }
       if (input.kind === "empty") return "completed";
-      if (input.kind !== "chat") {
+      if (input.kind !== "chat" && input.kind !== "attachment") {
         turnAbort = new AbortController();
         try {
           const result = await consoleShell.run(input, turnAbort.signal);
@@ -1380,7 +1383,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         if (await resolveBackend(ctx) === "cloud") {
           if (authRepair.submissionBlocked) {
             process.stdout.write("Account changed or could not be verified. Use /auth new before sending another hosted task.\n");
-            if (!buf.value) buf.insert(text);
+            if (!sharedShellResult && !buf.value) buf.insert(text);
             return "failed";
           }
           await authRepair.captureAccount();
@@ -1443,7 +1446,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               viewerOpen = false;
               break;
           }
-        }, redrawInput, { ...skillOpts, onToolResult: tool => toolResults.push(tool) });
+        }, redrawInput, { ...skillOpts, ephemeralAttachment: sharedShellResult, onToolResult: tool => toolResults.push(tool) });
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authContinuation);
         if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
@@ -1468,7 +1471,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         // server's error frame (frame() runs before runTurn throws) — only
         // genuinely unrendered failures (network, fallback-leg errors) need
         // printError's own "✗" line, or the user sees the error twice.
-        const authFailure = await resolveBackend(ctx) === "cloud"
+        const authFailure = !sharedShellResult && await resolveBackend(ctx) === "cloud"
           && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts);
         if (authFailure && buf.value) heldDraft = buf.value;
         if (authFailure && !ctx.flags.json) {
@@ -1488,7 +1491,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         // commit() clears the submitted line before the request starts. Put it
         // back only when the user has not typed ahead; otherwise preserve their
         // newer draft and leave the failed submission in history for recall.
-        const recovered = authFailure ? buf.value : recoverSubmittedPrompt(text, buf.value);
+        const recovered = sharedShellResult || authFailure ? buf.value : recoverSubmittedPrompt(text, buf.value);
         if (recovered !== buf.value) {
           buf.clear();
           buf.insert(recovered);
@@ -1505,7 +1508,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         let result = await runQueuedTurn(input, authContinuation);
         while (result === "completed" && queue.length > 0) {
           const next = queue.shift()!;
-          const preview = next.kind === "chat" ? next.text : next.kind === "shell" ? "!" + next.command : next.kind === "share" ? "/shell-result" : "/shell-reset";
+          const preview = next.kind === "chat" ? next.text : next.kind === "shell" ? "!" + next.command : next.kind === "attachment" ? "reviewed shell attachment" : "/shell-reset";
           process.stdout.write(`\n→ Queued: "${previewLine(preview)}"\n`);
           result = await runQueuedTurn(next);
         }
@@ -1568,12 +1571,18 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         return;
       }
       const queuePrefix = /^\s*\/queue[ \t]+/.exec(raw);
-      const input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
+      let input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
+      if (input.kind === "share") {
+        buf.clear();
+        input = consoleShell.share(input); // Snapshot/consume before any await or queueing.
+        if (input.kind === "empty") { repaint(); return; }
+      }
+      if (input.kind === "error") { buf.clear(); process.stdout.write(input.message + "\n"); repaint(); return; }
       const commit = (): void => {
         if (input.kind === "chat") { remember(buf.value); buf.commit(buf.value); }
         else buf.clear();
       };
-      let t = input.kind === "chat" ? input.text : "";
+      let t = input.kind === "chat" || input.kind === "attachment" ? input.text : "";
       if (t && heldDraft === t && !t.startsWith("/auth")) heldDraft = null;
       if (input.kind !== "chat" && input.kind !== "empty") {
         buf.clear(); // shell commands never enter chat history or prompt context
@@ -2036,10 +2045,10 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     }
     if (ConsoleShell.isTerminalCommand(line)) { await consoleShell.terminalCommand(line); continue; }
     let input = classifyConsoleInput(line);
-    const sharedShellResult = input.kind === "share";
-    if (input.kind === "share") input = consoleShell.share();
+    if (input.kind === "share") input = consoleShell.share(input);
+    const sharedShellResult = input.kind === "attachment";
     if (input.kind === "error") { process.stdout.write(input.message + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
-    let t = input.kind === "chat" ? input.text : "";
+    let t = input.kind === "chat" || input.kind === "attachment" ? input.text : "";
     let authReplay = false;
     if (continuation.pending && !t.startsWith("/switch")) {
       process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");
@@ -2085,7 +2094,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
       if (p) process.stdout.write(p + consoleShell.prompt());
       continue;
     }
-    if (historyEnabled() && line.trim() !== "/shell-result") appendHistory(line.trim(), historyPath(ctx.flags.cwd));
+    if (historyEnabled() && !sharedShellResult) appendHistory(line.trim(), historyPath(ctx.flags.cwd));
     if (t === "/auth" || t.startsWith("/auth ")) {
       inflight = new AbortController();
       try {
@@ -2155,7 +2164,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
           if (frame.type === "tool_call") receipts.push(sanitizeServerText(`tool call ${frame.toolCallId} (${frame.name})`));
           if (frame.type === "tool_result_ack") receipts.push(sanitizeServerText(`tool result ${frame.toolCallId}`));
         }
-      }, undefined, { ...skillOpts, onToolResult: tool => toolResults.push(tool) });
+      }, undefined, { ...skillOpts, ephemeralAttachment: sharedShellResult, onToolResult: tool => toolResults.push(tool) });
       const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
       continuation.recordTurn(t, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authReplay);
       if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
@@ -2166,7 +2175,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
         const outcome = turnOutcomeForError(err);
         if (ctx.flags.json && outcome) process.stdout.write(turnOutcomeJson(outcome) + "\n");
         else process.stderr.write("\n" + errTheme.dim("✗ canceled — turn discarded") + "\n");
-      } else if (await resolveBackend(ctx) === "cloud" && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts)) {
+      } else if (!sharedShellResult && await resolveBackend(ctx) === "cloud" && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts)) {
         if (!ctx.flags.json) process.stderr.write("✗ Hosted credential rejected (401). Task saved. Use /auth login; /auth status shows the credential source.\n");
         printed = true;
       } else if (err instanceof ChatTurnError) {
