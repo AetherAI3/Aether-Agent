@@ -3101,8 +3101,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "compatibilityAliases": [],
     "deprecatedAliases": [],
     "args": "<n|id>",
-    "summary": "switch model (no arg → picker)",
-    "detailedHelp": "/model <n|id>\nswitch model (no arg → picker)",
+    "summary": "choose a model, then continue this task or start fresh",
+    "detailedHelp": "/model <n|id> also accepts ollama:tag. At the idle console, review the task brief and choose /switch continue, /switch fresh, or /switch cancel.",
     "section": "Session",
     "hidden": false,
     "permissionClass": "unknown",
@@ -3134,6 +3134,27 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "disposition": "existing",
       "note": null
     }
+  },
+  {
+    "key": "slash:switch",
+    "surface": "slash",
+    "name": "switch",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "<subcommand>",
+    "summary": "review and decide a pending model switch",
+    "detailedHelp": "/switch brief shows the exact continuation brief. /switch edit goal|constraints|outstanding <text> revises it. /switch continue sends it with the next turn; /switch fresh clears task context; /switch cancel keeps the current session.",
+    "section": "Session",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": { "state": "runtime-dependent", "capabilityRequirements": [] },
+    "telemetryName": "slash.switch",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": { "id": "handler:slash:switch", "kind": "host", "module": "src/commands/slash.ts", "symbol": "handleSlash" },
+    "docs": { "kind": "manifest", "module": "src/commands/command_manifest_data.ts", "symbol": "COMMAND_MANIFEST_SOURCE", "target": "switch", "usage": "/switch <subcommand>", "visible": true, "disposition": "generated" },
+    "release": { "disposition": "new", "note": null }
   },
   {
     "key": "slash:agent",

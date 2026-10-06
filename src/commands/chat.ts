@@ -88,6 +88,7 @@ import {
 import type { WorkflowViewerState } from "../ui/workflow_viewer.js";
 import type { StreamFrame } from "../core/stream.js";
 import type { BrainEvent } from "../core/brain_protocol.js";
+import { ConsoleTaskContinuation, accountFingerprint, consoleWorkspaceState, observedWorkspaceChanges, type ModelTarget, type ObservedTool } from "./model_continuation.js";
 
 // Key decoding lives in ui/keys.ts (shared with pickers/viewers); re-exported
 // here so existing imports keep working.
@@ -110,6 +111,8 @@ export interface TurnSkillOptions {
   noSkills?: boolean;
   /** Local console authority, never serialized to Cloud. */
   exec?: ToolExecutor;
+  /** Host-observed results only; no model text or shell output. */
+  onToolResult?: (tool: ObservedTool) => void;
 }
 
 export const DEFAULT_CHAT_TURN_DEADLINE_MS = 30 * 60_000;
@@ -516,7 +519,7 @@ export async function runTurn(
       getRegistry().markLocalUnmetered();
       // The signal used to be dropped here, so the REPL Ctrl+C controller could
       // not reach a local turn at all: the abort fired and nothing observed it.
-      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, ...(skillOpts.exec ? { exec: skillOpts.exec } : {}) }, run.guard);
+      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, ...(skillOpts.exec ? { exec: skillOpts.exec } : {}), ...(skillOpts.onToolResult ? { onToolResult: skillOpts.onToolResult } : {}) }, run.guard);
     }
     // The cloud REPL turn streams from /agent/chat/stream, where the SERVER runs
     // the tools. This host executes nothing on that path, so it can enforce
@@ -803,6 +806,7 @@ export interface LocalTurnDeps {
   /** Repeated-failure budget (#285). Default: one per turn, bound to the
    * workspace. `false` disables it for a deliberate embed. */
   failureBudget?: ToolFailureBudget | false;
+  onToolResult?: (tool: ObservedTool) => void;
 }
 
 export async function runLocalTurn(
@@ -923,6 +927,11 @@ export async function runLocalTurn(
         const call = { name: ev.name, args: ev.args };
         const key = operationKey(call, { policy: Boolean(refusal), ...(prepared?.ok ? { binding: prepared.binding } : {}) });
         const deliver = (result: ToolResult, origin: ToolFailureOrigin | null): void => {
+          if (origin === "execution") deps.onToolResult?.({
+            name: ev.name,
+            ...(typeof ev.args["path"] === "string" ? { path: ev.args["path"] } : {}),
+            exitCode: result.exitCode,
+          });
           if (origin) failures?.record(key, call, result, origin);
           const note = origin ? failures?.repeatNote(key) : null;
           brain.sendToolResult(ev.id, note && result.exitCode !== 0 ? { ...result, output: `${result.output}\n${note}` } : result);
@@ -1054,6 +1063,33 @@ export function applyRestart(flags: GlobalFlags, r: { model?: string; agent?: st
     flags.agent = r.agent;
     flags.model = undefined;
   }
+}
+
+async function consoleContinuationState(ctx: AppContext): Promise<ReturnType<typeof consoleWorkspaceState>> {
+  const opened = openRunSession({ projectRoot: ctx.flags.cwd, prompt: "", noSkills: true, allowIncompleteInstructionDiscovery: true });
+  const rulesDigest = opened.ok ? opened.run.session.provenance.instructionGraphDigest : "rules-unavailable";
+  return consoleWorkspaceState(ctx.flags.cwd, accountFingerprint(await ctx.tokens.get()), rulesDigest);
+}
+
+function applyModelTarget(ctx: AppContext, target: ModelTarget): void {
+  applyRestart(ctx.flags, { model: target.id });
+  ctx.flags.local = target.destination === "local";
+  ctx.cfg.backend = target.destination;
+}
+
+async function currentConsoleModel(ctx: AppContext): Promise<string> {
+  if (ctx.flags.model) return ctx.flags.model;
+  if ((await resolveBackend(ctx)) === "local") return localModelId(resolveLocalModel(undefined, ctx.cfg.localModel ?? ""));
+  return ctx.cfg.defaultModel || "auto";
+}
+
+function switchDisposition(target: ModelTarget, brief: string, queueCount: number, draftSaved = false): string {
+  return `Model switch pending: ${target.label} (${target.destination}).\n` +
+    (queueCount ? `Queued entries: ${queueCount}; they stay queued and will not replay across this switch. Cancel and finish them first.\n` : "Queued entries: none.\n") +
+    `Unsent draft: ${draftSaved ? "saved; restored after continue, fresh, or cancel; never sent automatically" : "none"}.\n` +
+    (target.contextWindow !== null && target.contextWindow < 2_048 ? "This target's context window is too small for continuation; choose fresh or cancel.\n" : "") +
+    `Exact continuation brief for review:\n${brief}\n` +
+    `Choose /switch continue, /switch fresh, or /switch cancel. Edit with /switch edit goal|constraints|outstanding <text>; /switch brief shows it again.\n`;
 }
 
 /** Build a prompt with optional steering and btw context prepended.
@@ -1199,9 +1235,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let consoleWrite = (text: string): void => { process.stdout.write(text); };
   const consoleShell = new ConsoleShell(ctx.flags.cwd, text => consoleWrite(text), ctx.flags.json);
   skillOpts = { ...skillOpts, exec: consoleShell.exec };
-  if (!process.stdin.isTTY) return replLines(ctx, skillOpts, consoleShell, process.stdin, authRepair);
+  const continuation = new ConsoleTaskContinuation(await consoleContinuationState(ctx));
+  if (!process.stdin.isTTY) return replLines(ctx, skillOpts, consoleShell, process.stdin, authRepair, continuation);
 
   const buf = new InputBuffer();
+  let switchDraft = "";
   const histPath = historyPath(ctx.flags.cwd);
   if (historyEnabled()) buf.loadHistory(loadHistory(histPath));
   const remember = (line: string): void => {
@@ -1311,7 +1349,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     };
 
     /** Run one turn without sacrificing an existing type-ahead draft. */
-    const runQueuedTurn = async (input: ConsoleInput, continuation = false): Promise<"completed" | "aborted" | "failed"> => {
+    const runQueuedTurn = async (input: ConsoleInput, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
+      const sharedShellResult = input.kind === "share";
       if (input.kind === "share") input = consoleShell.share();
       if (input.kind === "error") { process.stdout.write(input.message + "\n"); return "completed"; }
       if (input.kind === "empty") return "completed";
@@ -1324,13 +1363,16 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         } finally { turnAbort = null; }
       }
       const text = input.text;
-      const built = continuation ? { prompt: text, steering, btwNotes } : buildPromptContext(text, steering, btwNotes);
-      if (!continuation) { steering = built.steering; btwNotes.length = 0; }
+      const built = authContinuation ? { prompt: text, steering, btwNotes } : buildPromptContext(text, steering, btwNotes);
+      const beforeChanges = observedWorkspaceChanges(ctx.flags.cwd);
+      const toolResults: ObservedTool[] = [];
+      if (!authContinuation) { steering = built.steering; btwNotes.length = 0; }
       viewerState = createViewerState();
       viewerOpen = false;
       viewerLastLines = 0;
       turnAbort = new AbortController();
       const receipts: string[] = [];
+      let submittedPrompt = built.prompt;
       try {
         if (await resolveBackend(ctx) === "cloud") {
           if (authRepair.submissionBlocked) {
@@ -1339,9 +1381,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
             return "failed";
           }
           await authRepair.captureAccount();
-          authRepair.markHostedTurnStarted();
         }
-        const outcome = await runTurn(ctx, built.prompt, turnAbort.signal, (f) => {
+        const nextPrompt = continuation.promptForNextTurn(built.prompt, continuation.hasAcceptedBrief ? await consoleContinuationState(ctx) : undefined);
+        submittedPrompt = nextPrompt;
+        if (await resolveBackend(ctx) === "cloud") authRepair.markHostedTurnStarted();
+        const outcome = await runTurn(ctx, nextPrompt, turnAbort.signal, (f) => {
           if (receipts.length < 64) {
             if (f.type === "tool_call") receipts.push(sanitizeServerText(`tool call ${f.toolCallId} (${f.name})`));
             if (f.type === "tool_result_ack") receipts.push(sanitizeServerText(`tool result ${f.toolCallId}`));
@@ -1396,7 +1440,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               viewerOpen = false;
               break;
           }
-        }, redrawInput, skillOpts);
+        }, redrawInput, { ...skillOpts, onToolResult: tool => toolResults.push(tool) });
+        const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
+        continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authContinuation);
         if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
         if (outcome.state === "cancelled") {
           queue.length = 0;
@@ -1405,6 +1451,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         }
         return "completed";
       } catch (err) {
+        const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
+        continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), "failed", !sharedShellResult && !authContinuation);
         if (isAbortError(err)) {
           // User said stop: drop the queued follow-ups too.
           queue.length = 0;
@@ -1418,7 +1466,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         // genuinely unrendered failures (network, fallback-leg errors) need
         // printError's own "✗" line, or the user sees the error twice.
         const authFailure = await resolveBackend(ctx) === "cloud"
-          && authRepair.noteFailure(err, built.prompt, turnOutcomeForError(err), receipts);
+          && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts);
         if (authFailure && buf.value) heldDraft = buf.value;
         if (authFailure && !ctx.flags.json) {
           process.stderr.write((err instanceof ChatTurnError && err.rendered ? "" : "✗ Hosted credential rejected (401). ")
@@ -1448,10 +1496,10 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       }
     };
 
-    const runAndDrain = async (input: ConsoleInput, continuation = false): Promise<void> => {
+    const runAndDrain = async (input: ConsoleInput, authContinuation = false): Promise<void> => {
       try {
         getRegistry().startAgentTimer();
-        let result = await runQueuedTurn(input, continuation);
+        let result = await runQueuedTurn(input, authContinuation);
         while (result === "completed" && queue.length > 0) {
           const next = queue.shift()!;
           const preview = next.kind === "chat" ? next.text : next.kind === "shell" ? "!" + next.command : next.kind === "share" ? "/shell-result" : "/shell-reset";
@@ -1502,6 +1550,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     const onSubmit = async (): Promise<void> => {
       const raw = buf.value;
+      if (continuation.pending && !raw.trim().startsWith("/switch")) {
+        process.stdout.write("\nChoose /switch continue, fresh, cancel, brief, or edit first. Draft preserved.\n");
+        repaint();
+        return;
+      }
       if (ConsoleShell.isTerminalCommand(raw)) {
         if (busy) { process.stdout.write("\nWait for the current operation before terminal handoff.\n"); return; }
         buf.clear(); // Explicit terminal commands never enter model/history.
@@ -1557,6 +1610,55 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         if (!t || t.startsWith("/")) return; // other slashes wait for the turn
         queue.push({ kind: "chat", text: t });
         process.stdout.write(`\n⏳ Queued (${queue.length}): "${previewLine(t)}"\n`);
+        return;
+      }
+
+      // A pending switch owns the idle boundary. A different typed draft is
+      // left in the composer, unsubmitted and unrecorded.
+      if (continuation.pending && !t.startsWith("/switch")) {
+        process.stdout.write("\nChoose /switch continue, fresh, cancel, brief, or edit first. Draft preserved.\n");
+        repaint();
+        return;
+      }
+
+      if (t.startsWith("/switch")) {
+        process.stdout.write("\n");
+        buf.clear();
+        const command = t.slice(7).trim();
+        const pending = continuation.pending;
+        if (!pending) { process.stdout.write("No model switch is pending.\n"); repaint(); return; }
+        if (command === "brief") {
+          process.stdout.write(switchDisposition(pending.target, pending.brief, queue.length, Boolean(switchDraft)));
+        } else if (command === "cancel") {
+          continuation.cancel();
+          if (switchDraft) { buf.insert(switchDraft); switchDraft = ""; }
+          process.stdout.write("Model switch cancelled; current session and draft kept.\n");
+        } else if (command.startsWith("edit ")) {
+          const match = /^edit (goal|constraints|outstanding)\s+([\s\S]*)$/.exec(command);
+          if (!match) process.stdout.write("usage: /switch edit goal|constraints|outstanding <text>\n");
+          else {
+            const revised = continuation.edit(match[1] as "goal" | "constraints" | "outstanding", match[2] ?? "");
+            if (revised) process.stdout.write(switchDisposition(revised.target, revised.brief, queue.length, Boolean(switchDraft)));
+          }
+        } else if (command === "continue" || command === "fresh") {
+          if (queue.length) {
+            process.stdout.write(`Switch paused: ${queue.length} queued entries remain. Cancel and finish them first.\n`);
+          } else if (process.env["AETHER_BACKEND"] && (await resolveBackend(ctx)) !== pending.target.destination) {
+            process.stdout.write("Switch blocked: AETHER_BACKEND pins a different destination.\n");
+          } else {
+            const now = await consoleContinuationState(ctx);
+            const result = command === "continue" ? continuation.accept(now) : continuation.fresh(now);
+            if (!result.ok) process.stdout.write(`Switch blocked: ${result.reason}.\n`);
+            else {
+              applyModelTarget(ctx, result.target);
+              if (switchDraft) { buf.insert(switchDraft); switchDraft = ""; }
+              process.stdout.write(command === "continue"
+                ? `Continuing with ${result.target.label}; the reviewed brief will be sent with the next turn. Saved draft stays unsent.\n`
+                : `Starting fresh with ${result.target.label}; prior task context cleared. Saved draft stays unsent.\n`);
+            }
+          }
+        } else process.stdout.write("usage: /switch continue|fresh|cancel|brief|edit\n");
+        repaint();
         return;
       }
 
@@ -1640,6 +1742,17 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
             applyRestart(ctx.flags, res.restart);
             process.stdout.write(theme.dim("session restarted — context cleared.\n"));
           }
+          if (res.modelSwitch) {
+            const target: ModelTarget = { id: res.modelSwitch.model, label: res.modelSwitch.label, contextWindow: res.modelSwitch.contextWindow, destination: res.modelSwitch.model.startsWith("ollama:") ? "local" : "cloud" };
+            const choice = continuation.propose(target, await currentConsoleModel(ctx), await consoleContinuationState(ctx));
+            if (choice.status === "same") process.stdout.write("Already using this model; session unchanged.\n");
+            else {
+              switchDraft = buf.value;
+              if (switchDraft) buf.clear();
+              if (choice.status === "drift") process.stdout.write(`Continuation blocked: ${choice.reason}. Fresh start remains available.\n`);
+              process.stdout.write(switchDisposition(target, choice.proposal!.brief, queue.length, Boolean(switchDraft)));
+            }
+          }
         } catch (err) {
           if (isAbortError(err)) {
             queue.length = 0;
@@ -1653,7 +1766,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           busy = false;
           slashAbort = null;
         }
-        if (queue.length) { busy = true; await runAndDrain(queue.shift()!); }
+        if (queue.length && !continuation.pending) { busy = true; await runAndDrain(queue.shift()!); }
         renderHudLine();
         repaint();
         return;
@@ -1902,8 +2015,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
  *  Ctrl+C to cancel the current turn/slash-command rather than killing the
  *  whole process (a bare non-TTY session, e.g. `ssh host aether`, still gets
  *  SIGINT delivered normally since readline isn't in terminal mode here). */
-export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {}, consoleShell = new ConsoleShell(ctx.flags.cwd, text => { process.stdout.write(text); }, ctx.flags.json), inputStream: NodeJS.ReadableStream = process.stdin, authRepair = new ConsoleAuthRepair(ctx)): Promise<number> {
+export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {}, consoleShell = new ConsoleShell(ctx.flags.cwd, text => { process.stdout.write(text); }, ctx.flags.json), inputStream: NodeJS.ReadableStream = process.stdin, authRepair = new ConsoleAuthRepair(ctx), suppliedContinuation?: ConsoleTaskContinuation): Promise<number> {
   skillOpts = { ...skillOpts, exec: consoleShell.exec };
+  const continuation = suppliedContinuation ?? new ConsoleTaskContinuation(await consoleContinuationState(ctx));
   const rl = createInterface({ input: inputStream });
   const p = ctx.flags.json ? "" : promptPrefix(userInfo().username || "you");
   let inflight: AbortController | null = null;
@@ -1912,11 +2026,51 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
   try {
     if (p) process.stdout.write(p + consoleShell.prompt());
     for await (const line of rl) {
+    if (continuation.pending && !line.trim().startsWith("/switch")) {
+      process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
     if (ConsoleShell.isTerminalCommand(line)) { await consoleShell.terminalCommand(line); continue; }
     let input = classifyConsoleInput(line);
+    const sharedShellResult = input.kind === "share";
     if (input.kind === "share") input = consoleShell.share();
     if (input.kind === "error") { process.stdout.write(input.message + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
     let t = input.kind === "chat" ? input.text : "";
+    let authReplay = false;
+    if (continuation.pending && !t.startsWith("/switch")) {
+      process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
+    if (t.startsWith("/switch")) {
+      const pending = continuation.pending;
+      const command = t.slice(7).trim();
+      if (!pending) process.stdout.write("No model switch is pending.\n");
+      else if (command === "brief") process.stdout.write(switchDisposition(pending.target, pending.brief, 0));
+      else if (command === "cancel") { continuation.cancel(); process.stdout.write("Model switch cancelled.\n"); }
+      else if (command.startsWith("edit ")) {
+        const match = /^edit (goal|constraints|outstanding)\s+([\s\S]*)$/.exec(command);
+        const revised = match ? continuation.edit(match[1] as "goal" | "constraints" | "outstanding", match[2] ?? "") : null;
+        process.stdout.write(revised ? switchDisposition(revised.target, revised.brief, 0) : "usage: /switch edit goal|constraints|outstanding <text>\n");
+      } else if (command === "continue" || command === "fresh") {
+        if (process.env["AETHER_BACKEND"] && (await resolveBackend(ctx)) !== pending.target.destination) {
+          process.stdout.write("Switch blocked: AETHER_BACKEND pins a different destination.\n");
+        } else {
+          const now = await consoleContinuationState(ctx);
+          const result = command === "continue" ? continuation.accept(now) : continuation.fresh(now);
+          if (!result.ok) process.stdout.write(`Switch blocked: ${result.reason}.\n`);
+          else {
+            applyModelTarget(ctx, result.target);
+            process.stdout.write(command === "continue"
+              ? `Continuing with ${result.target.label}; reviewed brief queued for the next turn.\n`
+              : `Starting fresh with ${result.target.label}.\n`);
+          }
+        }
+      } else process.stdout.write("usage: /switch continue|fresh|cancel|brief|edit\n");
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
     if (input.kind === "shell" || input.kind === "reset-shell") {
       inflight = new AbortController();
       try { await consoleShell.run(input, inflight.signal); }
@@ -1939,7 +2093,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
         else if (sub === "draft") process.stdout.write("No type-ahead draft is held in line mode.\n");
         else if (sub === "continue") {
           const pending = authRepair.takeContinuation();
-          if (pending) t = pending.instruction;
+          if (pending) { t = pending.instruction; authReplay = true; }
           else process.stdout.write("No safely rejected task is ready. Use /auth status for details.\n");
         } else process.stdout.write("usage: /auth [status|login|continue|new|draft]\n");
       } finally { inflight = null; }
@@ -1953,6 +2107,15 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
         if (res.restart) {
           applyRestart(ctx.flags, res.restart);
           process.stdout.write(theme.dim("session restarted — context cleared.\n\n"));
+        }
+        if (res.modelSwitch) {
+          const target: ModelTarget = { id: res.modelSwitch.model, label: res.modelSwitch.label, contextWindow: res.modelSwitch.contextWindow, destination: res.modelSwitch.model.startsWith("ollama:") ? "local" : "cloud" };
+          const choice = continuation.propose(target, await currentConsoleModel(ctx), await consoleContinuationState(ctx));
+          if (choice.status === "same") process.stdout.write("Already using this model; session unchanged.\n");
+          else {
+            if (choice.status === "drift") process.stdout.write(`Continuation blocked: ${choice.reason}. Fresh start remains available.\n`);
+            process.stdout.write(switchDisposition(target, choice.proposal!.brief, 0));
+          }
         }
       } catch (err) {
         if (isAbortError(err)) {
@@ -1969,6 +2132,9 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     inflight = new AbortController();
     let printed = false; // printError already ends with a blank line
     const receipts: string[] = [];
+    const beforeChanges = observedWorkspaceChanges(ctx.flags.cwd);
+    const toolResults: ObservedTool[] = [];
+    let submittedPrompt = t;
     try {
       if (await resolveBackend(ctx) === "cloud") {
         if (authRepair.submissionBlocked) {
@@ -1977,21 +2143,27 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
           continue;
         }
         await authRepair.captureAccount();
-        authRepair.markHostedTurnStarted();
       }
-      const outcome = await runTurn(ctx, t, inflight.signal, (frame) => {
+      const nextPrompt = continuation.promptForNextTurn(t, continuation.hasAcceptedBrief ? await consoleContinuationState(ctx) : undefined);
+      submittedPrompt = nextPrompt;
+      if (await resolveBackend(ctx) === "cloud") authRepair.markHostedTurnStarted();
+      const outcome = await runTurn(ctx, nextPrompt, inflight.signal, (frame) => {
         if (receipts.length < 64) {
           if (frame.type === "tool_call") receipts.push(sanitizeServerText(`tool call ${frame.toolCallId} (${frame.name})`));
           if (frame.type === "tool_result_ack") receipts.push(sanitizeServerText(`tool result ${frame.toolCallId}`));
         }
-      }, undefined, skillOpts);
+      }, undefined, { ...skillOpts, onToolResult: tool => toolResults.push(tool) });
+      const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
+      continuation.recordTurn(t, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authReplay);
       if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
     } catch (err) {
+      const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
+      continuation.recordTurn(t, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), "failed", !sharedShellResult && !authReplay);
       if (isAbortError(err)) {
         const outcome = turnOutcomeForError(err);
         if (ctx.flags.json && outcome) process.stdout.write(turnOutcomeJson(outcome) + "\n");
         else process.stderr.write("\n" + errTheme.dim("✗ canceled — turn discarded") + "\n");
-      } else if (await resolveBackend(ctx) === "cloud" && authRepair.noteFailure(err, t, turnOutcomeForError(err), receipts)) {
+      } else if (await resolveBackend(ctx) === "cloud" && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts)) {
         if (!ctx.flags.json) process.stderr.write("✗ Hosted credential rejected (401). Task saved. Use /auth login; /auth status shows the credential source.\n");
         printed = true;
       } else if (err instanceof ChatTurnError) {

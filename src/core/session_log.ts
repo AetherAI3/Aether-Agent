@@ -81,7 +81,7 @@ export function readRepoIdentity(cwd: string, run: Runner): RepoIdentity | undef
 const SENSITIVE_KEY =
   /token|secret|password|authorization|api[_-]?key|private[_-]?key|credential|(?:^|[_-])pat(?:$|[_-])/i;
 
-function redactInline(value: string): string {
+export function redactInline(value: string): string {
   return value
     .replace(/(bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
     .replace(/((?:token|secret|password|api[_-]?key|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")

@@ -329,9 +329,15 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 #### `/model <n|id>`
 
-switch model \(no arg → picker\)
+choose a model, then continue this task or start fresh
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.model` · Requires: `aether.catalogue`
+
+#### `/switch <subcommand>`
+
+review and decide a pending model switch
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.switch`
 
 #### `/agent <n|id>`
 
