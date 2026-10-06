@@ -277,8 +277,8 @@ for (const tty of [false, true]) {
 
 test("console submit routing remains before history/rewrite and uses typed queue", () => {
   const code = readFileSync("src/commands/chat.ts", "utf8");
-  assert.ok(code.includes("const queue: ConsoleInput[]"));
+  assert.ok(code.includes("const queue = new ConsoleQueue()"));
   assert.ok(code.indexOf("classifyConsoleInput(queuePrefix") < code.indexOf("const commit ="));
-  assert.ok(code.includes("result = await runQueuedTurn(next)"));
+  assert.ok(code.includes("result = await runEntry(entry)"));
   assert.ok(code.includes("appendHistory(line.trim(), historyPath(ctx.flags.cwd))"), "save the original escaped input, not its model prompt");
 });
