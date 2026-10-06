@@ -206,14 +206,14 @@ test("the post-tag v0.3.2 documentation is not claimed by the published archive"
   assert.match(datedRelease, /documentation changes landed after the v0\.3\.2 tag and are not in its\s+published archive/u);
 });
 
-function assertCandidatePacket(packet: string): void {
+function assertV040FrozenPacket(packet: string): void {
   const rows = parsePacketRows(packet);
-  assert.equal(onlyPacketRow(rows, "Package"), `\`${pkg.name}\``);
-  assert.equal(onlyPacketRow(rows, "Evidence state"), "`candidate`");
-  assert.equal(onlyPacketRow(rows, "Proposed tag"), `\`v${VERSION}\``);
+  assert.equal(onlyPacketRow(rows, "Package"), "`aether-agents`");
+  assert.equal(onlyPacketRow(rows, "Evidence state"), "`frozen-prerelease`");
+  assert.equal(onlyPacketRow(rows, "Proposed tag"), "`v0.4.0`");
   assert.equal(
     onlyPacketRow(rows, "Source identity"),
-    `Canonical ATS adapter commit \`${(JSON.parse(read("packages", "ats-skills-source.json")) as {revision: string}).revision}\`; per-file SHA-256 custody is recorded in \`packages/ats-skills-source.json\`. The Agent PR records its final candidate commit.`,
+    "Canonical ATS adapter commit `ecdbc5c296f28f2331aea4e031c459f1171b99ea`; per-file SHA-256 custody is recorded in `packages/ats-skills-source.json`. The Agent PR records its final candidate commit.",
   );
   assert.equal(
     onlyPacketRow(rows, "Archive evidence"),
@@ -231,22 +231,117 @@ function assertCandidatePacket(packet: string): void {
     onlyPacketRow(rows, "Publication evidence"),
     "No `v0.4.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance or registry dist-tag update is established by this packet. Published `latest` remains a separate registry fact until protected workflows complete.",
   );
+  assert.equal(
+    onlyPacketRow(rows, "Governance evidence"),
+    "Qualified legal review of `ATS_ACCEPTABLE_USE_POLICY.md` is not yet recorded. ATS publication remains withheld until that review and the real-account release canaries are attached.",
+  );
+  const normalized = packet.replace(/[\s>]+/gu, " ");
+  assert.match(normalized, /Frozen historical prerelease evidence/u);
+  assert.match(normalized, /later tagged as v0\.4\.0 at \[commit `3cf3f7255e582374426c810311149c5e8b8cebb6`\]\(https:\/\/github\.com\/AetherAI3\/Aether-Agent\/commit\/3cf3f7255e582374426c810311149c5e8b8cebb6\)/u);
+  assert.match(normalized, /\[2026-10-06 publication record\]\(2026-10-06\.md\)/u);
+  assert.match(normalized, /owner-approved one-time direct-maintainer exception/u);
+  assert.match(normalized, /No npm provenance or native GitHub success is claimed/u);
+  assert.match(normalized, /Source changes after that tag are not in the published archive/u);
+  assert.match(normalized, /candidate measurements and pending gates below remain frozen as captured; they are not post-publication evidence/u);
+  assert.match(normalized, /Publication does not satisfy the remaining native GitHub\/artifact, private ATS checkout, provider-gated or signed installer holds, or the live-service and governance boundaries recorded here/u);
 }
 
-test("the current operator packet records a source candidate without publication or live-service evidence", () => {
-  const path = join(root, "docs", "releases", `OPERATOR-PACKET-v${VERSION}.md`);
-  assert.ok(existsSync(path), `no docs/releases/OPERATOR-PACKET-v${VERSION}.md`);
-  assertCandidatePacket(readFileSync(path, "utf8"));
+test("the v0.4.0 operator packet freezes candidate evidence separately from later publication", () => {
+  const path = join(root, "docs", "releases", "OPERATOR-PACKET-v0.4.0.md");
+  assert.ok(existsSync(path), "no docs/releases/OPERATOR-PACKET-v0.4.0.md");
+  assertV040FrozenPacket(readFileSync(path, "utf8"));
 });
 
-test("the candidate packet rejects contradictory or fabricated qualification evidence", () => {
-  const packet = read("docs", "releases", `OPERATOR-PACKET-v${VERSION}.md`);
-  for (const label of ["Evidence state", "Source identity", "Archive evidence", "Hosted checks", "Live service evidence", "Publication evidence"]) {
+test("the frozen packet rejects contradictory or fabricated qualification evidence", () => {
+  const packet = read("docs", "releases", "OPERATOR-PACKET-v0.4.0.md");
+  for (const label of ["Evidence state", "Source identity", "Archive evidence", "Hosted checks", "Live service evidence", "Publication evidence", "Governance evidence"]) {
     const rows = parsePacketRows(packet);
     const existing = onlyPacketRow(rows, label);
     const mutant = packet.replace(`| ${label} | ${existing} |`, `| ${label} | verified and published |`);
-    assert.notEqual(mutant, packet, `${label} mutation must alter the candidate`);
-    assert.throws(() => assertCandidatePacket(mutant), `${label} must not fabricate evidence`);
+    assert.notEqual(mutant, packet, `${label} mutation must alter the frozen packet`);
+    assert.throws(() => assertV040FrozenPacket(mutant), `${label} must not fabricate evidence`);
+  }
+});
+
+const V040_PUBLICATION = {
+  "Package": "`aether-agents@0.4.0`",
+  "Published source commit": "`3cf3f7255e582374426c810311149c5e8b8cebb6`",
+  "Published source tree": "`cfc0b2cc4299ba782fb219e82b42955f515097d4`",
+  "Registry tarball SHA-256": "`a3550c7de43109c12b27fc3dbd5d3933091b58e87ed87cc454e6491305823229`",
+  "Registry npm integrity": "`sha512-B9iSvjlx3/B4B7Q/ooFQt6neCMch3fjdusysoCOErDqgFg45ZQiFUi0IxyckOhQ5ZCTCkPq8MsEw53ULoOqhaQ==`",
+  "Publication receipt SHA-256": "`712d9b600f6c59ed8e310012eab50c946a61c0c2e4cdabc8ebcdaef43efa1a64`",
+  "Qualification summary SHA-256": "`4a509ad5a177048eb1772e93fdb5fc39619cf8714d2f016da28cd1cb92c9aa2f`",
+  "Preparation packet SHA-256": "`18d99fc1bae2a3339c94a4fbc7cf980751d0bd86fe864572f85f334be93caa7a`",
+} as const;
+const V040_PUBLICATION_HOLDS = [
+  "Native GitHub green checks and required Actions artifacts",
+  "Native private ATS checkout access",
+  "Provider-gated skipped tests",
+  "Native signed installers",
+] as const;
+
+function assertV040Publication(record: string): void {
+  const rows = parsePacketRows(record);
+  for (const [label, expected] of Object.entries(V040_PUBLICATION)) {
+    assert.equal(onlyPacketRow(rows, label), expected, `the v0.4.0 publication has the wrong ${label}`);
+  }
+  const normalized = record.replace(/\s+/gu, " ");
+  assert.match(normalized, /verified the npm publication at `2026-10-06T12:16:12\.505835\+00:00`/u);
+  assert.match(normalized, /owner-approved one-time direct-maintainer exception/u);
+  assert.match(normalized, /No npm provenance or native GitHub success is claimed/u);
+  assert.match(normalized, /Branch rules and npm security policy were not changed by that exception/u);
+  assert.match(normalized, /remained failed on private ATS checkout and required artifact uploads/u);
+  assert.match(normalized, /passed, but its required artifact upload failed/u);
+  assert.match(normalized, /retains `npm_published: false` because it was captured before publication; the later receipt records `npm_published: true`/u);
+  assert.match(normalized, /publication alone does not satisfy its live Cloud\/ATS\/browser\/legal boundaries/u);
+  assert.match(normalized, /Source changes after the tag, including this documentation, are not in the published archive/u);
+  for (const hold of V040_PUBLICATION_HOLDS) assert.ok(record.includes(`- ${hold}\n`), `${hold} must remain held`);
+  for (const asset of ["agent-npm04-publication-receipt.json", "agent-npm04-qualification.json", "npm-release-packet.json", "SHA256SUMS"]) {
+    assert.ok(record.includes(`https://github.com/AetherAI3/Aether-Agent/releases/download/v0.4.0/${asset}`), `${asset} must link to the release evidence`);
+  }
+  for (const run of ["37459256295", "37459256510"]) {
+    assert.ok(record.includes(`https://github.com/AetherAI3/Aether-Agent/actions/runs/${run}`), `${run} must link to its scoped native result`);
+  }
+}
+
+test("the dated v0.4.0 publication binds exact bytes and retains the exception's holds", () => {
+  assertV040Publication(read("docs", "releases", "2026-10-06.md"));
+  const index = read("docs", "releases", "README.md").replace(/\s+/gu, " ");
+  assert.match(index, /\[2026-10-06\]\(2026-10-06\.md\) — released \*\*v0\.4\.0\*\*/u);
+  assert.match(index, /No npm provenance or native GitHub success is claimed; remaining qualification holds are preserved/u);
+});
+
+test("the frozen v0.4.0 record rejects stale state, contradictory identity and fabricated success", () => {
+  const packet = read("docs", "releases", "OPERATOR-PACKET-v0.4.0.md");
+  for (const [before, after] of [
+    ["| Evidence state | `frozen-prerelease` |", "| Evidence state | `candidate` |"],
+    ["| Evidence state | `frozen-prerelease` |", "| Evidence state | `candidate` |\n| Evidence state | `frozen-prerelease` |"],
+    ["No npm provenance or native GitHub success is claimed", "npm provenance and native GitHub success are verified"],
+    ["Source changes after that tag are not in the published archive", "Current main is in the published archive"],
+    ["private ATS checkout, provider-gated or signed", "completed ATS checkout, provider-gated or signed"],
+  ]) {
+    const mutant = packet.replace(before!, after!);
+    assert.notEqual(mutant, packet);
+    assert.throws(() => assertV040FrozenPacket(mutant));
+  }
+  const publication = read("docs", "releases", "2026-10-06.md");
+  for (const [label, expected] of Object.entries(V040_PUBLICATION)) {
+    const row = `| ${label} | ${expected} |`;
+    for (const changed of [`| ${label} | verified |`, `${row}\n${row}`]) {
+      const mutant = publication.replace(row, changed);
+      assert.notEqual(mutant, publication);
+      assert.throws(() => assertV040Publication(mutant), `${label} must have one exact evidence value`);
+    }
+  }
+  for (const [before, after] of [
+    ["No npm provenance or native GitHub success is claimed", "npm provenance and native GitHub success are verified"],
+    ["retains `npm_published: false`", "retains `npm_published: true`"],
+    ["required artifact upload failed", "required artifact upload passed"],
+    ...V040_PUBLICATION_HOLDS.map((hold) => [`- ${hold}`, `- Completed: ${hold}`]),
+  ]) {
+    const mutant = publication.replace(before!, after!);
+    assert.notEqual(mutant, publication);
+    assert.throws(() => assertV040Publication(mutant), `${before} must preserve the evidence boundary`);
   }
 });
 

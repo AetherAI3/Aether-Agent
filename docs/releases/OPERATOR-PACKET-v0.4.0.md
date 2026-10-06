@@ -1,13 +1,29 @@
 # Operator packet — Aether Agent v0.4.0
 
-This is a source-candidate record. It does not authorize a tag, package publish,
-production deployment or live trading. Attach evidence for the final commit
-before evaluating release readiness.
+> **Frozen historical prerelease evidence.** This packet records candidate
+> qualification for the release line later tagged as v0.4.0 at
+> [commit `3cf3f7255e582374426c810311149c5e8b8cebb6`](https://github.com/AetherAI3/Aether-Agent/commit/3cf3f7255e582374426c810311149c5e8b8cebb6).
+> The [2026-10-06 publication record](2026-10-06.md) binds the npm archive to
+> that source and records the owner-approved one-time direct-maintainer
+> exception. No npm provenance or native GitHub success is claimed.
+> Source changes after that tag are not in the published archive.
+
+The candidate measurements and pending gates below remain frozen as captured;
+they are not post-publication evidence. The registry and linked publication
+receipt establish publication separately. Publication does not satisfy the
+remaining native GitHub/artifact, private ATS checkout, provider-gated or signed
+installer holds, or the live-service and governance boundaries recorded here.
+
+## Historical candidate record
+
+At capture time this source-candidate record did not authorize a tag, package
+publish, production deployment or live trading. Final-commit evidence was
+required before evaluating release readiness.
 
 | Field | Value |
 |---|---|
 | Package | `aether-agents` |
-| Evidence state | `candidate` |
+| Evidence state | `frozen-prerelease` |
 | Proposed tag | `v0.4.0` |
 | Release scope | Shared Cloud managed-agent inventory, creation, customization and Online DM chat; guided ATS device setup, native strategy preparation and bounded browser observation. |
 | Version decision | A minor release for the new account-agent workflow and bundled ATS runtime dependency. |
