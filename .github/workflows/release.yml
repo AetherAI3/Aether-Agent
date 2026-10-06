@@ -34,6 +34,7 @@ jobs:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
       EXPECTED_SOURCE_SHA: ${{ github.sha }}
       PREPARED_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      PREPARED_NODE_VERSION: ${{ needs.prepare.outputs.node_version }}
     steps:
       - name: Checkout immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,9 +68,12 @@ jobs:
       - name: Set up Node.js and npm registry
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ needs.prepare.outputs.node_version }}
+          node-version: '>=24.6.0 <25'
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
+
+      - name: Require the qualified Node version
+        run: node -e "require('node:assert/strict').equal(process.versions.node, process.env.PREPARED_NODE_VERSION)"
 
       - name: Install dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
