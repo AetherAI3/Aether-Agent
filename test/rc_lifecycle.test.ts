@@ -25,6 +25,9 @@ import type { CommandFlags } from "../src/core/command_dispatch.js";
 import type { ApiClient } from "../src/core/transport.js";
 import type { Brain, TaskCommand } from "../src/core/brain.js";
 import type { ToolExecutor, ToolResult } from "../src/core/tool_executor.js";
+import { queueForDelivery } from "../src/core/rc/publish.js";
+import { openRcPreviewPublisher } from "../src/core/rc/preview.js";
+import { publishVerificationReading } from "../src/commands/rc_verification.js";
 
 const SESSION = "rs_" + "c".repeat(32);
 const GRANT = "rsgt_" + "d".repeat(48);
@@ -701,6 +704,42 @@ test("an unreadable or half-started RC state opens no observer and the coding ru
 
     assert.equal(await hostLoop(brain(), exec, () => {}, task), 0);
     assert.equal(calls, 0);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("a session rc start only registered publishes nothing from the standalone producers either", async () => {
+  // #227: isPublishable is the one predicate. The producers that run outside a
+  // coding run (review readings, Action Rail receipts, media commits, preview
+  // phases) share the seam in rc/publish.ts, which refuses an unattached
+  // record exactly as the coding observer does, and never touches the network.
+  const h = harness();
+  try {
+    let calls = 0;
+    const api = { postJson: () => { calls += 1; throw new Error("unexpected"); } } as unknown as ApiClient;
+    const seed = (phase: "registered" | "attached"): void => saveOutbox(h.outboxPath, createOutbox({
+      session_id: SESSION, project_ref: projectRefFor(h.dir), device_id: DEVICE,
+      epoch: 1, project_root: h.dir, start_phase: phase,
+    }));
+    const queuePlan = () => queueForDelivery({ api, outboxPath: h.outboxPath, projectRoot: h.dir }, (record) =>
+      enqueueEvent(record, "plan", { title: "build", status: "running" }) ? 1 : 0);
+
+    seed("registered");
+    const before = readFileSync(h.outboxPath, "utf8");
+    assert.equal(queuePlan().queued, 0);
+    assert.equal(openRcPreviewPublisher(api, h.dir, h.outboxPath), null);
+    await publishVerificationReading(api, h.dir, { status: "unknown", reason: "r", record: null, cause: "not_verified" }, h.outboxPath);
+    assert.equal(readFileSync(h.outboxPath, "utf8"), before, "nothing was queued for an unattached session");
+    assert.equal(calls, 0);
+
+    // The same seam does publish once the session is attached: the refusal
+    // above is the predicate, not a seam that never writes.
+    seed("attached");
+    const published = queuePlan();
+    assert.equal(published.queued, 1);
+    await published.delivery;
+    assert.deepEqual(loadOutbox(h.outboxPath, h.dir).events.map((event) => event.event_type), ["plan"]);
   } finally {
     h.cleanup();
   }
