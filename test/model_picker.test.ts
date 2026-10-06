@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { groupItems, flattenGroups, currentIndex, renderPicker, pickModel, filterModels, initialModelPickerState, reduceModelPicker, modelPickerPageSize } from "../src/ui/model_picker.js";
 import { theme } from "../src/ui/theme.js";
 import { visibleWidth, stripAnsi } from "../src/ui/text.js";
-import { handleSlash } from "../src/commands/slash.js";
+import { handleSlash, invalidateCatalog } from "../src/commands/slash.js";
 import { EventEmitter } from "node:events";
 import type { CatalogItem } from "../src/types.js";
 import type { AppContext } from "../src/core/context.js";
@@ -455,6 +455,7 @@ function fakeModelCtx(): AppContext {
 }
 
 test("showPicker: a picker fault prints exactly ONE message, not the diagnostic plus a redundant 'kept current session.'", async () => {
+  invalidateCatalog();
   const captured: { feed: ((chunk: Buffer) => void) | null } = { feed: null };
   const saved = patchStdinAsTTY((cb) => {
     captured.feed = cb;
@@ -477,10 +478,12 @@ test("showPicker: a picker fault prints exactly ONE message, not the diagnostic 
     assert.ok(faultLines[0] && /picker error/.test(faultLines[0]), "the surviving message must be pickModel's own distinct diagnostic");
   } finally {
     restoreStdin(saved);
+    invalidateCatalog();
   }
 });
 
 test("/models opens on the active model and returns that stable ID", async () => {
+  invalidateCatalog();
   const captured: { feed: ((chunk: Buffer) => void) | null } = { feed: null };
   const saved = patchStdinAsTTY((cb) => { captured.feed = cb; });
   const ctx = fakeModelCtx();
@@ -495,19 +498,26 @@ test("/models opens on the active model and returns that stable ID", async () =>
     assert.equal(result.modelSwitch?.model, "opus");
   } finally {
     restoreStdin(saved);
+    invalidateCatalog();
   }
 });
 
 test("non-TTY /models lists stable IDs and a usable selection command", async () => {
-  const ctx = fakeModelCtx();
-  const { out, writes } = fakeOut();
-  await handleSlash(ctx, "/models", out);
-  const plain = stripAnsi(writes.join(""));
-  assert.match(plain, /opus\s+opus/);
-  assert.match(plain, /switch: \/model <n\|id>/);
+  invalidateCatalog();
+  try {
+    const ctx = fakeModelCtx();
+    const { out, writes } = fakeOut();
+    await handleSlash(ctx, "/models", out);
+    const plain = stripAnsi(writes.join(""));
+    assert.match(plain, /opus\s+opus/);
+    assert.match(plain, /switch: \/model <n\|id>/);
+  } finally {
+    invalidateCatalog();
+  }
 });
 
 test("a piped output gets plain IDs even if stdin is a TTY", async () => {
+  invalidateCatalog();
   const captured: { feed: ((chunk: Buffer) => void) | null } = { feed: null };
   const saved = patchStdinAsTTY((cb) => { captured.feed = cb; });
   const { out, writes } = fakeOut();
@@ -519,5 +529,6 @@ test("a piped output gets plain IDs even if stdin is a TTY", async () => {
     assert.ok(!writes.join("").includes("\x1b[?1049h"), "no alternate-screen control bytes in pipe");
   } finally {
     restoreStdin(saved);
+    invalidateCatalog();
   }
 });
