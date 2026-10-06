@@ -236,7 +236,7 @@ export function renderPicker(
   const query = sanitizeTerm(opts.query ?? "");
   lines.push(theme.cyan(clipped(`Search ${query || "(press /)"}${opts.mode === "filter" ? "▌" : ""}`, inner)));
   if (rows.length === 0) {
-    lines.push(theme.dim(clipped("No models match. Backspace or Ctrl+U clears search.", inner)));
+    lines.push(theme.dim(clipped("No models match · Ctrl+U clears search", inner)));
   } else {
     for (let i = scroll; i < Math.min(rows.length, scroll + page); i++) {
       const item = rows[i]!.item;
@@ -262,6 +262,7 @@ export function renderPicker(
   if (height >= 7) lines.push(theme.dim(clipped(selectedDetail(selectedVisible < 0 ? undefined : selected), inner)));
   lines.push(theme.dim(clipped(opts.mode === "filter"
     ? compact ? "type · Enter apply · Esc back · ^U clear" : "Type to filter · Enter apply · Esc restore · Ctrl+U clear"
+    : rows.length === 0 ? "Ctrl+U clear search · Esc cancel"
     : compact ? "↑↓ / search ↵ pick Esc cancel" : "↑↓ move · PgUp/PgDn page · / search · Enter select · Esc cancel", inner)));
   if (height < 7) return lines.slice(0, height).map((line) => clipped(line, width)).join("\n");
   return box(lines, { width });
