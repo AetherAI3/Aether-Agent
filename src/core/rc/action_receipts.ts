@@ -38,9 +38,9 @@
 
 import { isMutation, type ActionReceipt } from "../action_rail.js";
 import type { ApiClient } from "../transport.js";
-import { flushOutbox } from "./host.js";
-import { enqueueEvent, loadOutbox, saveOutbox } from "./outbox.js";
+import { enqueueEvent } from "./outbox.js";
 import { ciEvent, prStatusEvent, RC_DISPLAY_PROJECTION_VERSION, type RcProducedEvent } from "./producers.js";
+import { queueForDelivery } from "./publish.js";
 import { sanitizeRemotePayload } from "./redaction.js";
 
 /** The plan the receipt must bind to — the stored plan `execute` was approved against. */
@@ -166,18 +166,13 @@ export function publishActionReceipt(
   try {
     const events = receiptDisplayEvents(receipt, binding, projectRoot);
     if (events.length === 0) return idle;
-    const record = loadOutbox(outboxPath, projectRoot);
-    if (!record.session_id || record.revoke_pending || record.project_root !== projectRoot) return idle;
-    let queued = 0;
-    for (const event of events) {
-      if (enqueueEvent(record, event.event_type, event.payload)) queued += 1;
-    }
-    if (queued === 0) return idle;
-    saveOutbox(outboxPath, record); // durable before any upload
-    const delivery = flushOutbox({ api, outboxPath, projectRoot }, record)
-      .then(() => undefined, () => undefined);
-    lastDelivery = delivery;
-    return { queued, delivery };
+    // The one-shot seam (rc/publish.ts): isPublishable, read-modify-write the
+    // outbox file, durable before any upload, delivery never awaited.
+    const publication = queueForDelivery({ api, outboxPath, projectRoot }, (record) =>
+      events.filter((event) => enqueueEvent(record, event.event_type, event.payload)).length);
+    if (publication.queued === 0) return idle;
+    lastDelivery = publication.delivery;
+    return publication;
   } catch {
     // A broken or unwritable outbox is an RC failure, not a Cloud action failure.
     return idle;

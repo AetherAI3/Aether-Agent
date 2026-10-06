@@ -1,12 +1,10 @@
 // Publish real preview lifecycle observations through the active RC outbox.
 //
-// Same seam as subagents.ts and the coding observer: sanitize into the durable
-// outbox first, then start an upload that nobody waits for. While an upload is
-// in flight, later observations join its in-memory record, so its receipt save
-// cannot drop them; between uploads every observation starts from the outbox
-// on disk, so this publisher never saves a stale copy over events another
-// writer queued meanwhile. (Two writers whose uploads overlap can still race;
-// a single outbox writer is the host pump's job, #223.)
+// The one-shot producer seam (rc/publish.ts): every observation reads the
+// outbox file, queues into what it read, saves (sanitized, durable before any
+// upload) and starts a delivery nobody waits for. flushOutbox re-reads the
+// file before sending and before committing receipts (#223), so this
+// publisher never saves a stale copy over events another writer queued.
 //
 // Nothing here can change a preview result. Every failure is swallowed after
 // the event is either durable in the outbox (and retried by the next flush) or
@@ -17,9 +15,10 @@ import { isDeepStrictEqual } from "node:util";
 
 import { isLoopbackUrl } from "../preview_contract.js";
 import type { ApiClient } from "../transport.js";
-import { flushOutbox, type RcHostDeps } from "./host.js";
-import { enqueueEvent, loadOutbox, saveOutbox, type OutboxRecord } from "./outbox.js";
+import type { RcHostDeps } from "./host.js";
+import { enqueueEvent, isPublishable, loadOutbox, type OutboxRecord } from "./outbox.js";
 import { previewEvent, type PreviewDisplayPhase } from "./producers.js";
+import { queueForDelivery } from "./publish.js";
 import { sanitizeRemotePayload } from "./redaction.js";
 
 export interface PreviewPhaseObservation {
@@ -48,10 +47,6 @@ export interface RcPreviewPublisher {
 export function previewPublicId(sessionId: string, instanceId: string): string {
   const digest = createHash("sha256").update(sessionId).update("\0").update(instanceId).digest("hex");
   return `preview-${digest.slice(0, 24)}`;
-}
-
-function active(record: OutboxRecord, projectRoot: string): boolean {
-  return Boolean(record.session_id) && !record.revoke_pending && record.project_root === projectRoot;
 }
 
 /** The sanitized display payload, or null when nothing publishable remains. */
@@ -89,62 +84,25 @@ export function openRcPreviewPublisher(
 ): RcPreviewPublisher | null {
   try {
     const opened = loadOutbox(outboxPath, projectRoot);
-    if (!active(opened, projectRoot)) return null;
+    if (!isPublishable(opened, projectRoot)) return null;
+    // Bound to the session it opened on: after `rc off` or a new session the
+    // seam refuses every later observation, so nothing further is published.
     const sessionId = opened.session_id;
     const deps: RcHostDeps = { api, outboxPath, projectRoot };
-    // The record an upload in flight works on. Between uploads it is re-read
-    // from disk before every enqueue: other writers (the coding observer, an
-    // orchestra or media publisher, another process) save the same file, and a
-    // copy held across their saves would erase their queued events.
-    let record = opened;
     let pending: Promise<void> = Promise.resolve();
-    let flushing = false;
-    let stopped = false;
-
-    /** The outbox on disk while it still belongs to this session, else null. */
-    const current = (): OutboxRecord | null => {
-      const onDisk = loadOutbox(outboxPath, projectRoot);
-      if (onDisk.session_id === sessionId && !onDisk.revoke_pending) return onDisk;
-      stopped = true; // `rc off` or a new session: publish nothing further
-      return null;
-    };
-
-    const flush = (): void => {
-      if (flushing || stopped) return;
-      flushing = true;
-      pending = (async () => {
-        try {
-          while (record.events.length > 0 && current()) {
-            const outcome = await flushOutbox(deps, record);
-            // Unreachable, rate limited or unproven: the batch stays durable
-            // for the next flush. Retrying here would hold the command open.
-            if (!outcome.ok || outcome.sent === 0) return;
-          }
-        } catch {
-          // Observation must never change the local preview result.
-        } finally {
-          flushing = false;
-        }
-      })();
-    };
 
     return {
       observe(observation): void {
-        if (stopped) return;
         try {
-          const onDisk = current();
-          if (!onDisk) return;
-          // An upload in flight owns `record` and saves it when its receipt
-          // lands, so joining it is what keeps this event from being dropped by
-          // that save. Otherwise start from the file, never from an older copy.
-          if (!flushing) record = onDisk;
-          const payload = displayPayload(record, observation);
-          // Offline, a repeated observation would otherwise grow the queue on
-          // every `preview status`; the viewer already has this exact frame.
-          if (!payload || alreadyQueued(record, payload)) return;
-          if (!enqueueEvent(record, "preview", payload)) return;
-          saveOutbox(outboxPath, record); // durable before any upload
-          flush(); // deliberately never awaited by the preview command
+          const publication = queueForDelivery(deps, (record) => {
+            const payload = displayPayload(record, observation);
+            // Offline, a repeated observation would otherwise grow the queue on
+            // every `preview status`; the viewer already has this exact frame.
+            if (!payload || alreadyQueued(record, payload)) return 0;
+            return enqueueEvent(record, "preview", payload) ? 1 : 0;
+          }, sessionId);
+          // Deliberately never awaited by the preview command.
+          if (publication.queued > 0) pending = publication.delivery;
         } catch {
           // A broken or unwritable outbox is an RC failure, not a preview failure.
         }

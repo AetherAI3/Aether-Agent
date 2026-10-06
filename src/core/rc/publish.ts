@@ -6,8 +6,16 @@
 // A standalone producer reads the file, queues into exactly what it read,
 // saves, and starts a delivery that nobody awaits. flushOutbox re-reads the
 // file before it sends and again before it commits receipts, so a writer
-// needs no in-flight bookkeeping of its own: whatever another writer queued
+// needs no in-memory record of anyone else's: whatever another writer queued
 // meanwhile is in the file, and is what the next flush sends.
+//
+// Within one process there is at most ONE delivery loop per outbox. A media
+// batch commits its next file while the previous upload is still in flight;
+// that publication joins the running loop (it never shares a record), and the
+// loop's next flush reads the file and carries it. Two loops would send the
+// same batch twice at once — safe (host_event_id dedupe, receipts checked
+// against the cursor at send time) but wasteful, and not what a single host
+// does.
 //
 // A coding run does NOT publish through here: its observer (commands/
 // rc_observation.ts) owns one host pump that heartbeats and delivers for the
@@ -19,7 +27,7 @@ import { isPublishable, loadOutbox, saveOutbox, type OutboxRecord } from "./outb
 export interface QueuedPublication {
   /** Events this call queued durably. */
   queued: number;
-  /** Settles when this delivery attempt ends. Never rejects; production never awaits it. */
+  /** Settles when the delivery carrying them ends. Never rejects; production never awaits it. */
   delivery: Promise<void>;
 }
 
@@ -52,17 +60,45 @@ export function queueForDelivery(
   }
 }
 
-/** Flush until the queue is empty or a flush fails. Never rejects. */
-async function deliver(deps: RcHostDeps, record: OutboxRecord): Promise<void> {
-  try {
-    while (record.events.length > 0) {
-      const outcome = await flushOutbox(deps, record);
-      // A failed flush leaves the queue durable for the next one, from any
-      // producer or the next run. No retry timer keeps a command alive.
-      if (!outcome.ok || outcome.sent === 0) return;
-    }
-  } catch {
-    // flushOutbox throws only when a receipt could not be made durable; the
-    // events are still queued on disk and are replayed, deduplicated by id.
+interface Delivery {
+  done: Promise<void>;
+  /** Someone queued while this loop ran: read the file once more before ending. */
+  again: boolean;
+}
+
+/** The running delivery loop per outbox path, in this process. */
+const deliveries = new Map<string, Delivery>();
+
+/**
+ * Flush until the outbox file is empty or a flush fails, or join the loop
+ * already doing that for this outbox. Never rejects.
+ */
+function deliver(deps: RcHostDeps, record: OutboxRecord): Promise<void> {
+  const live = deliveries.get(deps.outboxPath);
+  if (live) {
+    live.again = true;
+    return live.done;
   }
+  const delivery: Delivery = { done: Promise.resolve(), again: false };
+  delivery.done = (async () => {
+    try {
+      for (;;) {
+        delivery.again = false;
+        // flushOutbox adopts the file before sending, so each pass carries
+        // whatever any writer has queued by then.
+        const outcome = await flushOutbox(deps, record);
+        // A failed flush leaves the queue durable for the next one, from any
+        // producer or the next run. No retry timer keeps a command alive.
+        if (!outcome.ok) return;
+        if (outcome.sent === 0 && !delivery.again) return;
+      }
+    } catch {
+      // flushOutbox throws only when a receipt could not be made durable; the
+      // events are still queued on disk and are replayed, deduplicated by id.
+    } finally {
+      if (deliveries.get(deps.outboxPath) === delivery) deliveries.delete(deps.outboxPath);
+    }
+  })();
+  deliveries.set(deps.outboxPath, delivery);
+  return delivery.done;
 }
