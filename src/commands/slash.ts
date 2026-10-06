@@ -30,7 +30,7 @@ import { suggestManifestCommand } from "./command_manifest.js";
 import { printSlashHelp } from "./slash_help.js";
 import { EFFORT_TIERS, normalizeEffort, renderEffortSlider, renderCodeProArt } from "../ui/effort.js";
 import { saveConfig } from "../core/config.js";
-import { handleGoal, handleGoals } from "./goals.js";
+import { handleGoalInput, handleGoals } from "./goals.js";
 import { pickModel } from "../ui/model_picker.js";
 import { runLogsViewer } from "../ui/logs_viewer.js";
 
@@ -222,10 +222,7 @@ export async function handleSlash(
       break;
     }
     case "goal": {
-      const parts = arg.split(/\s+/);
-      const subcmd = parts[0] ?? "";
-      const rest = parts.slice(1).join(" ");
-      await handleGoal(ctx, out, subcmd.toLowerCase(), rest);
+      await handleGoalInput(ctx, out, arg);
       break;
     }
     case "goals": {

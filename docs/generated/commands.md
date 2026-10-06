@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:8ad72a114a3f04b88102c875517265f08255bf702665cc91753515bd92023b57 -->
+<!-- manifest-digest: sha256:a6782c9b02f22412eed1228630eb5cac5b23b775bbcacde2da1c70cef1f73c0c -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -575,9 +575,9 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 ### Goals & Workflows
 
-#### `/goal <desc|view|start|pause|resume|cancel|complete|note>`
+#### `/goal <command>`
 
-create/manage a goal \(agent plans phases\)
+draft, edit, and accept a repository\-grounded goal plan; work is not executed
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.goal`
 

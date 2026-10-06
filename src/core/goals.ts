@@ -26,6 +26,8 @@ export interface GoalPhase {
   status: PhaseStatus;
   tasks: GoalTask[];
   userNote: string;
+  /** User-accepted conditions for declaring this phase complete. */
+  completionCriteria?: string[];
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -41,6 +43,21 @@ export interface Goal {
   createdAt: string;
   completedAt?: string;
   cwd?: string;
+  /** Absent on plans saved before editable authoring was introduced. */
+  plan?: GoalPlan;
+}
+
+export interface GoalPlan {
+  state: "draft" | "accepted";
+  source: "repository" | "model" | "manual";
+  stack: string[];
+  relevantFiles: string[];
+  checks: string[];
+  instructions: string[];
+  assumptions: string[];
+  constraints: string[];
+  verification: { state: "known" | "unresolved"; check: string | null };
+  acceptedAt?: string;
 }
 
 // ── Store ────────────────────────────────────────────────────────────
@@ -167,6 +184,7 @@ export function newPhase(idx: number, title: string, description: string): GoalP
     status: "pending",
     tasks: [],
     userNote: "",
+    completionCriteria: [],
     createdAt: new Date().toISOString(),
   };
 }
