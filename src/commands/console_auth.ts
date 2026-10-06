@@ -104,12 +104,12 @@ export class ConsoleAuthRepair {
 
   async login(signal?: AbortSignal, noBrowser = false): Promise<string> {
     if (this.ctx.flags.local) return "Offline mode does not use hosted login.\n";
-    const before = await this.ctx.tokens.get();
     const source = await this.ctx.tokens.sourceInfo?.().catch(() => undefined);
     const result = await cmdLogin(this.ctx, { noBrowser }, undefined, signal);
     if (result !== 0 || signal?.aborted) return "Login was cancelled or failed. The task and draft are still available.\n";
     const after = await this.ctx.tokens.get();
-    if (!after || after === before && source?.source === "environment") {
+    const newSource = await this.ctx.tokens.sourceInfo?.().catch(() => undefined);
+    if (!after || (source?.source === "environment" && newSource?.source === "environment")) {
       return `Login did not replace the active environment credential. ${unsetEnvTokenCommand()}; then /auth status.\n`;
     }
     let freshId: string | null = null;
