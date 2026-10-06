@@ -12,7 +12,7 @@
 //
 // No new deps: it reuses ollamaChat + the EventQueue. close() aborts the loop.
 
-import type { Brain, BrainControlResult, TaskCommand } from "./brain.js";
+import type { Brain, BrainControlResult, SteerApplied, TaskCommand } from "./brain.js";
 import { EventQueue } from "./brain.js";
 import type { BrainEvent } from "./brain_protocol.js";
 import { TOOL_DEFINITIONS } from "./tool_registry.js";
@@ -80,6 +80,11 @@ export class OllamaBrain implements Brain {
   private readonly pauseWaiters = new Set<() => void>();
   private readonly steerQueue: string[] = [];
   private steerBytes = 0;
+  private steerListener: ((applied: SteerApplied) => void) | null = null;
+  // Where pending steering will enter: set when a reply is held back, plus the
+  // calls that reply (or the rest of a batch) selected but never emitted.
+  private steerBoundary: SteerApplied["boundary"] = "tool-results";
+  private withheld: string[] = [];
   // Incremented per model reply: tool calls batched into one reply share it.
   private round = 0;
 
@@ -133,6 +138,11 @@ export class OllamaBrain implements Brain {
     return { accepted: true, state: this.paused ? "paused" : "running" };
   }
 
+  /** Brain.onSteerApplied: told only when notes enter a real model request. */
+  onSteerApplied(listener: (applied: SteerApplied) => void): void {
+    this.steerListener = listener;
+  }
+
   /** The model reply the outstanding tool call belongs to (Brain.modelRound). */
   modelRound(): number {
     return this.round;
@@ -169,10 +179,17 @@ export class OllamaBrain implements Brain {
     await new Promise<void>((resolve) => this.pauseWaiters.add(resolve));
   }
 
+  /** Called immediately before a model request, so "applied" is never early. */
   private applySteers(messages: ChatMessage[]): number {
     const notes = this.steerQueue.splice(0);
     this.steerBytes = 0;
     for (const note of notes) messages.push({ role: "user", content: `[Operator steering]\n${note}` });
+    if (notes.length > 0) {
+      const applied: SteerApplied = { notes: notes.length, boundary: this.steerBoundary, withheldToolCalls: [...this.withheld] };
+      try { this.steerListener?.(applied); } catch { /* an observer cannot stop the run */ }
+    }
+    this.steerBoundary = "tool-results";
+    this.withheld = [];
     return notes.length;
   }
 
@@ -238,7 +255,11 @@ export class OllamaBrain implements Brain {
         // would also create an invalid conversation.
         if (this.steerQueue.length > 0) {
           if (calls.length === 0) messages.push(assistantTurn(reply));
-          this.applySteers(messages);
+          this.steerBoundary = "model-reply";
+          this.withheld.push(...calls.map((call) => call.function.name));
+          // Applied at the top of the next iteration, right before the model
+          // request. With no turn left the notes stay queued and unreported,
+          // so the host can carry them forward instead of claiming success.
           if (turn === maxTurns - 1) {
             ok = false;
             reason = "max-turns";
@@ -260,6 +281,19 @@ export class OllamaBrain implements Brain {
 
         for (const call of calls) {
           if (this.aborted) break;
+          // A steer accepted mid-batch: the rest of this batch was selected
+          // before it, so none of it is emitted. Each call still gets a tool
+          // message, or the conversation would carry an unanswered tool call.
+          if (this.steerQueue.length > 0) {
+            this.withheld.push(call.function.name);
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              name: call.function.name,
+              content: "[not executed: superseded by operator steering accepted before it ran]",
+            });
+            continue;
+          }
           const args = parseArgs(call.function.arguments);
           const waiting = this.waitForTool(call.id);
           this.queue.push({ type: "tool_call", id: call.id, name: call.function.name, args });

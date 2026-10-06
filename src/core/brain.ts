@@ -40,6 +40,26 @@ export interface Brain {
    * treated as its own round.
    */
   modelRound?(): number;
+  /**
+   * Optional: report when accepted steering actually reaches the model. A
+   * brain that cannot say so omits it, and the host never infers "applied"
+   * from an acceptance alone (#283).
+   */
+  onSteerApplied?(listener: (applied: SteerApplied) => void): void;
+}
+
+/** Where accepted steering entered the run (#283). */
+export interface SteerApplied {
+  /** Notes delivered with this model request, oldest first. */
+  notes: number;
+  /**
+   * The safe boundary reached. "model-reply": a reply that arrived after the
+   * steer was held back and never published. "tool-results": every tool call
+   * already handed to the host settled first.
+   */
+  boundary: "model-reply" | "tool-results";
+  /** Tool calls the model selected before the steer that the brain never emitted. */
+  withheldToolCalls: readonly string[];
 }
 
 // A minimal single-consumer async queue: producers push events (from a
