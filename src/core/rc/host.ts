@@ -16,15 +16,12 @@
 // secret. The specification's §5.2 custody sequence describes a surface that
 // was never built Cloud-side, and minting a local credential to satisfy it
 // would CREATE the very thing that section exists to protect -- another secret
-// at rest. So "no raw credential on disk" holds by construction here, and
-// identity is read through loadEnrollmentMetadata(), the projection that
-// cannot return either of the enrolment record's two secret fields at all.
+// at rest. So "no raw credential on disk" holds by construction here. The
+// observer-only device label comes from Cloud's authenticated, owner-scoped RC
+// identity route; it is not an SC-DEVICE enrollment or command credential.
 //
-// That last sentence is deliberately worded around those field names rather
-// than quoting them: test/rc_viewer_host.test.ts greps this directory's raw
-// source for them, and it is right to stay that strict -- a guard that has to
-// reason about which mentions are "only a comment" is a guard with an
-// exception, and exceptions are what get argued into existence later.
+// test/rc_viewer_host.test.ts scans this directory's source to ensure no RC
+// module reads the separate enrollment secrets.
 //
 // WHY EVERY FAILURE IS TYPED
 //
@@ -48,8 +45,10 @@ export const RC_HOST_SCHEMA = "aether.cli.rc/1";
  * these, so a value is added rather than renamed.
  */
 export type RcCode =
-  /** No enrolled device, so RC cannot name the machine it publishes from. */
+  /** Legacy code retained for older consumers; RC start no longer uses enrollment. */
   | "RC_NOT_ENROLLED"
+  /** RC could not obtain the owner-scoped observer device label. */
+  | "RC_IDENTITY_UNAVAILABLE"
   /** The session is gone, or this device is not its host. */
   | "RC_SESSION_NOT_FOUND"
   /** Another host already owns this session. Never a takeover. */

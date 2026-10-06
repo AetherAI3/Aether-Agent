@@ -33,7 +33,7 @@ import type { AppContext } from "../core/context.js";
 import { digestOf } from "../core/device_runtime/canonical_json.js";
 import { detectBrowserRuntime } from "../core/browser_runtime.js";
 import { McpClient } from "../core/mcp.js";
-import { loadEnrollmentMetadata } from "../core/device_runtime/identity.js";
+import { resolveRcDeviceIdentity } from "../core/rc/device_identity.js";
 import {
   RC_HOST_SCHEMA,
   RcError,
@@ -383,6 +383,8 @@ export interface RcCommandDeps {
   /** Aether connector state, or null when it could not be determined. */
   connector: () => string | null;
   enrollment: () => { device_id: string; display_name: string } | null;
+  /** RC-only Cloud identity; legacy injected enrollment is retained for fixtures. */
+  rcIdentity?: () => Promise<{ device_id: string; display_name: string }>;
   repo: (cwd: string) => RepoSummary;
   out: (text: string) => void;
   err: (text: string) => void;
@@ -553,15 +555,15 @@ function exposedNow(record: OutboxRecord, state: string): string[] {
 }
 
 function viewOf(record: OutboxRecord, deps: RcCommandDeps, cloud: RcCloudView = { kind: "unchecked" }): RcStatusView {
-  const enrolled = deps.enrollment();
+  const localIdentity = deps.enrollment();
   const browser = deps.browser();
   const host = hostState(record, cloud);
   return {
     running: Boolean(record.session_id) || Boolean(record.recovery),
     browser: browser?.code ?? null,
     connector: deps.connector(),
-    device_id: record.session_id ? record.device_id : enrolled?.device_id ?? null,
-    device_name: enrolled?.display_name ?? null,
+    device_id: record.session_id ? record.device_id : localIdentity?.device_id ?? null,
+    device_name: localIdentity?.display_name ?? null,
     session_id: record.session_id || null,
     project_ref: record.project_ref || null,
     repo: record.session_id ? deps.repo(deps.cwd) : null,
@@ -596,16 +598,6 @@ async function start(
   name: string | undefined,
   projectRef: string,
 ): Promise<number> {
-  const enrolled = deps.enrollment();
-  if (!enrolled) {
-    // Enrollment is identity, not permission: RC needs a canonical device id to
-    // name the machine an observer is watching. A self-minted one authenticates
-    // nothing, so there is deliberately no fallback here.
-    deps.err(
-      "RC_NOT_ENROLLED: run `aether device enroll` first — RC needs an enrolled device to name this machine\n",
-    );
-    return EXIT_OPERATIONAL;
-  }
   if (record.recovery) {
     deps.err(`${recoveryMessage(record)}\n`);
     return EXIT_OPERATIONAL;
@@ -628,6 +620,21 @@ async function start(
     return EXIT_OPERATIONAL;
   }
 
+  let identity: { device_id: string; display_name: string } | null;
+  try {
+    identity = deps.rcIdentity ? await deps.rcIdentity() : deps.enrollment();
+  } catch (error) {
+    const status = (error as { status?: unknown } | null)?.status;
+    deps.err(status === 401 || status === 403
+      ? "RC_NOT_AUTHORIZED: this account is not enabled for remote viewing\n"
+      : "RC_IDENTITY_UNAVAILABLE: Cloud could not confirm an RC device identity; check remote-viewing availability and retry\n");
+    return EXIT_OPERATIONAL;
+  }
+  if (!identity) {
+    deps.err("RC_IDENTITY_UNAVAILABLE: Cloud did not confirm an RC device identity\n");
+    return EXIT_OPERATIONAL;
+  }
+
   const repo = deps.repo(deps.cwd);
   const sessionName = name?.trim() || `${repo.repo}@${repo.branch}`;
 
@@ -636,7 +643,7 @@ async function start(
   try {
     sessionId = (await registerSession(hostDeps, {
       project_ref: projectRef,
-      device_id: enrolled.device_id,
+      device_id: identity.device_id,
       session_name: sessionName,
       repo,
     })).session_id;
@@ -652,7 +659,7 @@ async function start(
   const session = createOutbox({
     session_id: sessionId,
     project_ref: projectRef,
-    device_id: enrolled.device_id,
+    device_id: identity.device_id,
     epoch: 1,
     project_root: hostDeps.projectRoot,
     start_phase: "registered",
@@ -661,7 +668,7 @@ async function start(
 
   // 3. attach. A refusal means this host will never own the session.
   try {
-    await attachHost(hostDeps, sessionId, enrolled.device_id);
+    await attachHost(hostDeps, sessionId, identity.device_id);
   } catch (error) {
     if (!(error instanceof RcError)) throw error;
     return rollbackStart(deps, hostDeps, session, error);
@@ -676,7 +683,7 @@ async function start(
     dirty_file_count: repo.dirty_file_count,
     protocol_version: RC_OPENING_PROTOCOL_VERSION,
   });
-  const presence = hostPresenceEvent(enrolled.device_id, "live");
+  const presence = hostPresenceEvent(identity.device_id, "live");
   session.start_phase = "attached";
   if (!enqueueEvent(session, opened.event_type, opened.payload) ||
       !enqueueEvent(session, presence.event_type, presence.payload)) {
@@ -831,7 +838,9 @@ export async function cmdRc(
     // without side effects.
     browser: overrides.browser ?? (() => detectBrowserRuntime()),
     connector: overrides.connector ?? ((): string | null => connectorState),
-    enrollment: overrides.enrollment ?? loadEnrollmentMetadata,
+    enrollment: overrides.enrollment ?? (() => null),
+    ...(!overrides.enrollment ? { rcIdentity: overrides.rcIdentity ?? (() => resolveRcDeviceIdentity(ctx.api)) }
+      : overrides.rcIdentity ? { rcIdentity: overrides.rcIdentity } : {}),
     repo: overrides.repo ?? repoSummary,
     out: overrides.out ?? ((text): void => void process.stdout.write(text)),
     err: overrides.err ?? ((text): void => void process.stderr.write(text)),

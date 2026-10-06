@@ -165,7 +165,7 @@ ATS requires the separate Python engine and policy consent. This build does not 
 
 [**Aether Code**](https://app.aethersystems.net/) is the browser coding app alongside Web Chat and Design Lab. It uses the same Aether account; the CLI also works independently with local Ollama. Coding sessions stay on their host, while managed agents share their Online conversations.
 
-**Remote viewing (`aether rc`) is a source candidate.** The observer bridge is on `main`; a live Cloud viewer journey (Windows and Linux hosts, phone viewer) was recorded on 2026-10-06, and `aether rc start` still needs an operator-enrolled device ([#300](https://github.com/AetherAI3/aether-agent/issues/300)). It is designed to let a browser or phone watch a redacted terminal run through a link or QR code. The viewer has observation access only. [Remote viewing status and controls](docs/REMOTE_VIEWING.md).
+**Remote viewing (`aether rc`) is a source candidate.** The observer bridge is on `main`; a live Cloud viewer journey (Windows and Linux hosts, phone viewer) was recorded on 2026-10-06. `aether rc start` now requests a separate owner-scoped RC identity and does not require operator device enrollment; an ordinary-account deployed journey still needs qualification. It is designed to let a browser or phone watch a redacted terminal run through a link or QR code. The viewer has observation access only. [Remote viewing status and controls](docs/REMOTE_VIEWING.md).
 
 ## Privacy and control
 
