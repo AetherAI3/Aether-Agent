@@ -145,6 +145,16 @@ byte paging with `sha256: null` and `validation_scope: "returned_range"`.
 Opened-handle containment, symlink checks, observed read-conflict checks, and
 the output budget still apply.
 
+`write_file` creates new paths exclusively. Existing-file replacement requires
+both `expected_revision` and the executor-scoped `replace_token` emitted only
+by a complete byte-mode read of that path. Partial reads cannot supply the
+token. The host checks the same digest-backed revision over at most 4096 bytes
+after staging the replacement; larger files use `patch_file`. The old file is
+never opened with truncation. The final same-directory rename is atomic where
+supported, and a rename failure preserves the old file. The check and rename
+are separate filesystem operations, so non-cooperating external writers need
+workspace locking for strict serializability.
+
 ---
 
 ## 2. ATS trading contracts (Spec 1, Gate 1.0)  ·  frozen

@@ -49,6 +49,10 @@ export function writeDiffLines(exec: ToolExecutor, args: Record<string, unknown>
   // this check execution would fall through to renderDiff and fabricate a
   // clean "(new +N)" preview for a write that never actually happens.
   if (snap.reason === "unsafe") return [];
+  // Legacy overwrite calls fail at execution. Do not render their proposed
+  // content as if the file had been changed before that refusal is shown.
+  const hasProof = typeof args["expected_revision"] === "string" && typeof args["replace_token"] === "string";
+  if (snap.existed !== hasProof) return [];
 
   if (snap.existed && snap.text === null) {
     const what = snap.reason === "binary" ? "binary" : "large file";

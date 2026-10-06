@@ -50,7 +50,8 @@ test("canary 1: a refused write never lands, and the write path is real", async 
 
   // Prove the write path really would have changed it, so the assertions above
   // are not vacuously passing against a broken executor.
-  const allowed = await exec.executeAsync("write_file", { path: "guarded.txt", content: "REPLACED\n" });
+  const prior = JSON.parse((await exec.executeAsync("read_file", { path: "guarded.txt" })).output);
+  const allowed = await exec.executeAsync("write_file", { path: "guarded.txt", content: "REPLACED\n", expected_revision: prior.revision, replace_token: prior.replace_token });
   assert.equal(allowed.exitCode, 0);
   assert.equal(
     readFileSync(target, "utf8"),
