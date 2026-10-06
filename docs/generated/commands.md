@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:f4e871943389ef5a5056286b260f28b965b9ba1dfd02e070d54d9d7669b52ab2 -->
+<!-- manifest-digest: sha256:d1d54032ed8cb1d139f8a4859e729deea8554358ef443208f4f2f6734c60cf52 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -533,7 +533,7 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 #### `/steer <guidance>`
 
-mid\-task steering for the next turn
+steer the running turn if its brain acknowledges it, else the next turn
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.steer`
 

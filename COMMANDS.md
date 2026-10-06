@@ -565,7 +565,7 @@ Each starts an agent loop in the REPL.
 | Command | Action |
 |---|---|
 | `/queue <task>` | Queue a task to run when the current one finishes. |
-| `/steer <guidance>` | Mid-task steering applied on the next turn. |
+| `/steer <guidance>` | Steer the running local turn; reported as accepted, applied (with the boundary reached and any tool calls withheld), or refused. A hosted chat turn cannot acknowledge live steering, so the note is deferred to the next turn and says so. Never changes tool permissions. |
 | `/btw <note>` | Contextual side note (accumulates into context). |
 
 ### Context & limits
