@@ -21,6 +21,7 @@
 // approval phrase. `--yes` is not authority here, and deliberately still isn't.
 
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type { AppContext } from "../core/context.js";
 import { openBrowser } from "../core/browser.js";
@@ -50,6 +51,8 @@ import {
   renderPlan,
   renderReceipt,
 } from "../core/action_rail.js";
+import { publishActionReceipt } from "../core/rc/action_receipts.js";
+import { projectRefFor, rcOutboxPath } from "./rc.js";
 
 export interface GithubOpts {
   noBrowser?: boolean;
@@ -538,5 +541,20 @@ async function doExecute(
       receipt: result.receipt,
     }),
   );
+  publishReceiptToRc(ctx, plan, result.receipt);
   return EXIT_OK;
+}
+
+/**
+ * The receipt hook for an active RC session (#220). Runs after the receipt is
+ * printed, queues the CI/PR projection durably and starts its upload without
+ * awaiting it: a viewer can never delay or change a Cloud action's result.
+ */
+function publishReceiptToRc(ctx: AppContext, plan: ActionPlan, receipt: unknown): void {
+  try {
+    const root = resolve(ctx.flags.cwd);
+    publishActionReceipt(ctx.api, root, rcOutboxPath(projectRefFor(root)), receipt, plan);
+  } catch {
+    // RC publication is best-effort by contract.
+  }
 }
