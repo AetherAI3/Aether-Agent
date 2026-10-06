@@ -227,14 +227,33 @@ export function commitReceipts(
   record: OutboxRecord,
   batch: readonly PersistedEvent[],
   response: AppendResponse,
+  /** The cursor when `batch` was sent; receipts must sit above THAT (#223). */
+  sentCursor: number = record.cursor,
 ): ReceiptOutcome {
-  const outcome = validateReceipts(response, batch, record.cursor);
+  const outcome = validateReceipts(response, batch, sentCursor);
   if (!outcome.ok) return outcome;
 
   const acknowledged = new Set(batch.map((event) => event.host_event_id));
   record.events = record.events.filter((event) => !acknowledged.has(event.host_event_id));
-  record.cursor = outcome.highestSeq;
+  // Another writer's overlapping receipt may have moved the cursor while this
+  // batch was in flight. The cursor never moves backwards.
+  record.cursor = Math.max(record.cursor, outcome.highestSeq);
   return outcome;
+}
+
+/**
+ * Make `target` the record `source` holds, in place (#223).
+ *
+ * The outbox FILE is the shared truth between every writer of one project's
+ * outbox — the coding observer, /orchestra, and the host pump delivering for
+ * them. A writer that saved its own long-lived copy would erase whatever the
+ * others queued since it last read. So writers read-modify-write the file, and
+ * adopt the result into the in-memory record they share, which keeps every
+ * holder of that object looking at the same events.
+ */
+export function adoptOutbox(target: OutboxRecord, source: OutboxRecord): void {
+  Object.assign(target, source);
+  if (!source.recovery) delete target.recovery;
 }
 
 // ── persistence ─────────────────────────────────────────────────────────────

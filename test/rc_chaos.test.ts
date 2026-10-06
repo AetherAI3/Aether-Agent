@@ -241,6 +241,9 @@ test("a receipt from a restarted sequence cannot advance the cursor", async () =
   broker.create(SESSION_B, "user-a", "dev-a");
   out.session_id = SESSION_B;
   enqueueEvent(out, "plan", { title: "after", status: "running" });
+  // Durable first: flushOutbox sends what the outbox FILE holds (#223), so the
+  // replaced session has to be the recorded one, cursor and all.
+  saveOutbox(path, out);
   const outcome = await flushOutbox(deps(broker.as("user-a"), path), out);
 
   assert.equal(outcome.ok, false, "a restarted sequence must not be accepted as progress");
@@ -506,7 +509,9 @@ test("an id reused with different bytes is a typed conflict, not a silent replac
       payload_digest: "sha256:" + "1".repeat(64),
     },
   ];
-  const outcome = await flushOutbox(deps(broker.as("user-a"), path), conflicting);
+  // A hand-built record with no file behind it: on disk its forged digest would
+  // be quarantined before it could ever be sent (#223 sends only what is durable).
+  const outcome = await flushOutbox(deps(broker.as("user-a"), sandbox()), conflicting);
   assert.equal(outcome.ok, false);
   if (!outcome.ok) assert.equal(outcome.code, "RC_EVENT_ID_CONFLICT");
 });

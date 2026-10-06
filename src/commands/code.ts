@@ -1041,6 +1041,8 @@ export async function cmdCode(
   process.on("SIGTERM", onSigterm);
   if (opts.signal?.aborted) onExternalAbort();
   else opts.signal?.addEventListener("abort", onExternalAbort, { once: true });
+  // Hoisted so the outer finally can end the RC host on every exit path.
+  let rcObserver: RcCodingObserver | null = null;
 
   try {
 
@@ -1150,7 +1152,8 @@ export async function cmdCode(
   // which terminal renderer is active. The observer owns its best-effort upload.
   // RC was explicitly enabled for the launch project. An agent may execute in
   // a generated worktree, but that does not change which project was shared.
-  const rcObserver = openRcCodingObserver(ctx.flags.cwd, ctx.api);
+  // Opening it binds one RC host lifetime (heartbeat + delivery) to this run.
+  rcObserver = openRcCodingObserver(ctx.flags.cwd, ctx.api);
 
   let onEvent: (ev: BrainEvent) => void | Promise<void>;
   let teardown = (): void => {};
@@ -1340,9 +1343,11 @@ export async function cmdCode(
   }
   if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
   // A viewer sees only Git's measured checkout snapshot after the run settles.
-  // RC is optional; an unavailable broker must not change the code result.
+  // RC is optional and never awaited here: the measurement runs alongside the
+  // rest of the run's end, and rcObserver.close() in `finally` waits for it
+  // only inside its one bounded deadline (#223), so the run never waits on it.
   try {
-    if (!repoSpec) await rcObserver?.publishDiff(cwd);
+    if (!repoSpec) void rcObserver?.publishDiff(cwd);
   } catch {
     // The coding verdict remains authoritative if observation fails.
   }
@@ -1374,6 +1379,9 @@ export async function cmdCode(
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigterm);
     opts.signal?.removeEventListener("abort", onExternalAbort);
+    // RC is observation only: one final flush bounded by a short deadline,
+    // never a rejection and never a delay beyond it (#223).
+    await rcObserver?.close();
   }
 }
 

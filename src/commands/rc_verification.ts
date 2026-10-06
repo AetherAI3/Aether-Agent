@@ -41,8 +41,11 @@ import type { CheckReading } from "../core/verify_gate.js";
 import type { VerificationReading } from "../core/verification_record.js";
 import { checkInterruption } from "../core/verify_run.js";
 import { testsEvent, type RcProducedEvent } from "../core/rc/producers.js";
+import { enqueueEvent } from "../core/rc/outbox.js";
+import { queueForDelivery } from "../core/rc/publish.js";
 import { sanitizeRemotePayload } from "../core/rc/redaction.js";
-import { openRcCodingObserver, type RcCodingObserver } from "./rc_observation.js";
+import type { RcCodingObserver } from "./rc_observation.js";
+import { projectRefFor, rcOutboxPath } from "./rc.js";
 
 /**
  * The tests frame for `reading`, holding only fields the outbox sanitizer
@@ -130,11 +133,10 @@ export function publishCodingVerification(
  * project the command was launched in (the same root `rc start` and the coding
  * observer key on).
  *
- * A standalone command is a second writer of the outbox, so it reads the
- * outbox from disk immediately before it enqueues (opening the observer and
- * publishing are one synchronous step); a coding run's observer likewise
- * reloads before its next enqueue, so neither saves an older copy over the
- * other's queued events (rc_observation.ts names the window that remains).
+ * A standalone command is a second writer of the outbox, so it goes through
+ * the one-shot seam (rc/publish.ts): read the file, queue into what it read,
+ * save, deliver. It never opens a coding observer, whose host pump would
+ * heartbeat for as long as the process lives (a REPL's `/review`).
  *
  * Fire-and-forget: the event is sanitized and persisted synchronously, the
  * upload starts in the background, and the returned promise exists for tests.
@@ -149,10 +151,12 @@ export function publishVerificationReading(
 ): Promise<void> {
   try {
     if (!api) return Promise.resolve();
-    const observer = openRcCodingObserver(resolve(projectRoot), api, outboxPath);
-    if (!observer) return Promise.resolve();
-    publishVerification(observer, reading);
-    return observer.drain().catch(() => {});
+    const root = resolve(projectRoot);
+    const deps = { api, outboxPath: outboxPath ?? rcOutboxPath(projectRefFor(root)), projectRoot: root };
+    return queueForDelivery(deps, (record) => {
+      const event = verificationEvent(reading, root);
+      return event && enqueueEvent(record, event.event_type, event.payload) ? 1 : 0;
+    }).delivery;
   } catch {
     return Promise.resolve();
   }

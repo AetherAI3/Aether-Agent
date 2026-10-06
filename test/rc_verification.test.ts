@@ -409,10 +409,12 @@ function broker(options: { hang?: boolean } = {}): Broker {
   const waiters: Array<{ count: number; resolve: () => void }> = [];
   let seq = 0;
   const api = {
-    postJson: async (_path: string, body: { events: Array<{
+    postJson: async (path: string, body: { events: Array<{
       host_event_id: string; event_type: string; payload: Record<string, unknown>;
     }> }) => {
       if (options.hang) return new Promise(() => {});
+      // A live host heartbeats too (#223); only appends carry events.
+      if (path.endsWith("/host/heartbeat")) return { session_id: SESSION, state: "live" };
       bodies.push(JSON.stringify(body));
       for (const event of body.events) {
         const violation = contractViolation(event);
@@ -694,6 +696,7 @@ test("coding gate: a broken observer never changes the gate's verdict", async (t
     feed: () => { throw new Error("feed"); },
     publish: () => { throw new Error("publish"); },
     publishDiff: () => Promise.reject(new Error("publishDiff")),
+    close: () => Promise.reject(new Error("close")),
     drain: () => Promise.reject(new Error("drain")),
   };
   const outcome = await codingGate(broken, gateExec({ output: "1 failed", exitCode: 1 }),

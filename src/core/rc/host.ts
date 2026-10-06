@@ -37,7 +37,7 @@
 
 import type { ApiClient } from "../transport.js";
 import { existsSync } from "node:fs";
-import { commitReceipts, loadOutbox, saveOutbox, takeBatch, type OutboxRecord } from "./outbox.js";
+import { adoptOutbox, commitReceipts, loadOutbox, saveOutbox, takeBatch, type OutboxRecord } from "./outbox.js";
 import { describeRejection, type AppendResponse } from "./receipts.js";
 
 /** Stable envelope name for anything this module surfaces to a caller. */
@@ -115,6 +115,10 @@ export interface RcHostDeps {
   projectRoot: string;
   /** Durable writer; defaults to saveOutbox. Injected only to fail a write on purpose. */
   persist?: (path: string, record: OutboxRecord) => void;
+  /** Per-request bound for heartbeat and append; the host pump keeps it under its cadence. */
+  requestTimeoutMs?: number;
+  /** Aborts in-flight heartbeat/append requests, so nothing RC started outlives a run. */
+  signal?: AbortSignal;
 }
 
 function persistOf(deps: RcHostDeps): (path: string, record: OutboxRecord) => void {
@@ -355,8 +359,8 @@ export async function heartbeatHost(
     const response = await deps.api.postJson<{ state?: unknown }>(
       sessionPath(sessionId, "/host/heartbeat"),
       { device_id: deviceId },
-      undefined,
-      REQUEST_TIMEOUT_MS,
+      deps.signal,
+      deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
     );
     return typeof response?.state === "string" ? response.state : "unknown";
   } catch (error) {
@@ -373,8 +377,11 @@ export async function heartbeatHost(
  * dropped on an unproven answer is gone for good.
  */
 export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promise<FlushOutcome> {
-  const batch = takeBatch(record);
-  if (batch.length === 0) return { ok: true, sent: 0, cursor: record.cursor };
+  // The file, not `record`, is the shared truth between this outbox's writers
+  // (#223). Read it before sending, so what goes out is exactly what is durable
+  // — including events another writer queued — and read it again after the
+  // answer, so applying the receipts can never save a stale copy over events
+  // queued while the batch was in flight.
   const before = existsSync(deps.outboxPath) ? loadOutbox(deps.outboxPath, deps.projectRoot) : null;
   if (before?.recovery) {
     return { ok: false, code: "RC_STATE_UNREADABLE", detail: "local RC state could not be read" };
@@ -382,6 +389,13 @@ export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promi
   if (before?.revoke_pending) {
     return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session was revoked" };
   }
+  if (before && before.session_id !== record.session_id) {
+    return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session was replaced" };
+  }
+  if (before) adoptOutbox(record, before);
+  const batch = takeBatch(record);
+  if (batch.length === 0) return { ok: true, sent: 0, cursor: record.cursor };
+  const sentCursor = record.cursor;
 
   let response: AppendResponse;
   try {
@@ -398,8 +412,8 @@ export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promi
           payload: event.payload,
         })),
       },
-      undefined,
-      REQUEST_TIMEOUT_MS,
+      deps.signal,
+      deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
     );
   } catch (error) {
     return { ok: false, ...classifyRcError(error) };
@@ -415,9 +429,10 @@ export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promi
     if (current.recovery || current.session_id !== before.session_id || current.revoke_pending) {
       return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session changed during append" };
     }
+    adoptOutbox(record, current);
   }
 
-  const outcome = commitReceipts(record, batch, response);
+  const outcome = commitReceipts(record, batch, response, sentCursor);
   if (!outcome.ok) {
     return { ok: false, code: "RC_RECEIPTS_UNPROVEN", detail: describeRejection(outcome.reason) };
   }
