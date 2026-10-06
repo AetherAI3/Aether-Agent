@@ -446,7 +446,10 @@ async function showPicker(
   const cat = await getCatalog(ctx, false, signal, out);
   const items = byKind(cat, kind);
 
-  const picked = await pickModel(items, out);
+  const current = kind === "model"
+    ? ctx.flags.model ?? ctx.cfg.defaultModel ?? cat.default
+    : ctx.flags.agent;
+  const picked = await pickModel(items, out, current);
   if (picked === undefined) {
     // pickModel hit an internal fault and already printed its own distinct
     // diagnostic — printing the generic "kept current session." below too
@@ -456,11 +459,8 @@ async function showPicker(
   if (!picked) {
     // pickModel returned null — either cancelled (Esc) or non-TTY fallback.
     // If non-TTY, render a flat numbered list so the user can still /model <n>.
-    if (!process.stdin.isTTY) {
-      const current =
-        kind === "model"
-          ? ctx.flags.model ?? ctx.cfg.defaultModel ?? cat.default
-          : ctx.flags.agent;
+    if (!process.stdin.isTTY || (out as Writable & { isTTY?: boolean }).isTTY === false ||
+        (out === process.stdout && !process.stdout.isTTY)) {
       out.write(`tier: ${cat.tier}\n`);
       items.forEach((m, i) => {
         const mark = m.id === current ? "›" : m.available ? " " : "🔒";
