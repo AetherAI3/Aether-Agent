@@ -24,6 +24,7 @@ import {
   createOutbox,
   enqueueEvent,
   loadOutbox,
+  retryTransientFs,
   saveOutbox,
   takeBatch,
   type OutboxRecord,
@@ -305,6 +306,62 @@ test("unparseable or absent state loads as a fresh outbox, not a crash", () => {
   assert.equal(loadOutbox(broken, PROJECT_ROOT).events.length, 0);
 });
 
+// #227: a file that exists but cannot be trusted is not the same as no file.
+
+test("an absent file is simply empty; it is not a recovery condition", () => {
+  const reloaded = loadOutbox(join(sandbox(), "absent.json"), PROJECT_ROOT);
+  assert.equal(reloaded.recovery, undefined);
+  assert.equal(reloaded.session_id, "");
+});
+
+test("unparseable, incompatible and unreadable files each carry an explicit recovery reason", () => {
+  const dir = sandbox();
+  const garbled = join(dir, "garbled.json");
+  writeFileSync(garbled, "{ not json", "utf8");
+  assert.equal(loadOutbox(garbled, PROJECT_ROOT).recovery?.reason, "unparseable");
+
+  const future = join(dir, "future.json");
+  writeFileSync(future, JSON.stringify({ schema: "aether.rc_outbox/9", session_id: SESSION }), "utf8");
+  assert.equal(loadOutbox(future, PROJECT_ROOT).recovery?.reason, "incompatible");
+
+  // A directory where the file should be cannot be read on any platform.
+  assert.equal(loadOutbox(dir, PROJECT_ROOT).recovery?.reason, "unreadable");
+});
+
+test("a legible session id is salvaged from damaged bytes, and nothing else is trusted", () => {
+  const path = join(sandbox(), "truncated.json");
+  writeFileSync(path, `{"schema":"aether.rc_outbox/1","session_id":"${SESSION}","events":[{"host_event_id":`, "utf8");
+  const reloaded = loadOutbox(path, PROJECT_ROOT);
+  assert.deepEqual(reloaded.recovery, { reason: "unparseable", session_id: SESSION });
+  assert.equal(reloaded.session_id, "", "a salvaged id never makes the record publishable");
+  assert.equal(reloaded.events.length, 0);
+});
+
+test("a recovery stand-in can never be saved over the bytes it stands in for", () => {
+  const path = join(sandbox(), "damaged.json");
+  writeFileSync(path, "{ damaged", "utf8");
+  const reloaded = loadOutbox(path, PROJECT_ROOT);
+  reloaded.revoke_pending = true;
+  assert.throws(() => saveOutbox(path, reloaded));
+  assert.equal(readFileSync(path, "utf8"), "{ damaged");
+});
+
+test("start progress is durable, and a legacy record without it is not called confirmed", () => {
+  const { record, path } = fresh();
+  record.start_phase = "registered";
+  saveOutbox(path, record);
+  assert.equal(loadOutbox(path, PROJECT_ROOT).start_phase, "registered");
+
+  const legacy = JSON.parse(readFileSync(path, "utf8"));
+  delete legacy.start_phase;
+  writeRaw(path, legacy);
+  assert.equal(loadOutbox(path, PROJECT_ROOT).start_phase, "attached", "no receipt yet: unconfirmed");
+  legacy.cursor = 2;
+  legacy.next_seq = 3;
+  writeRaw(path, legacy);
+  assert.equal(loadOutbox(path, PROJECT_ROOT).start_phase, "confirmed", "a receipted cursor proves the first append");
+});
+
 test("reloaded sequences that run backwards are quarantined", () => {
   const { record, path } = fresh();
   fill(record, 3);
@@ -358,4 +415,31 @@ test("revoke_pending is persisted and survives a reload", () => {
   record.revoke_pending = true;
   saveOutbox(path, record);
   assert.equal(loadOutbox(path, PROJECT_ROOT).revoke_pending, true);
+});
+
+// ── transient locks are not damage (#227) ───────────────────────────────────
+
+test("a transient file lock is retried briefly; anything else fails at once", () => {
+  // Windows reports a file another handle holds (a concurrent reader, an
+  // antivirus scan) as EBUSY/EPERM/EACCES for a few milliseconds. Reading that
+  // as damaged state would stop delivery and invite `rc off` to set a good
+  // record aside, so it is retried — a bounded number of times.
+  const lock = (code: string): Error => Object.assign(new Error(code), { code });
+  let calls = 0;
+  const waits: number[] = [];
+  assert.equal(retryTransientFs(() => {
+    calls += 1;
+    if (calls < 3) throw lock("EBUSY");
+    return "read";
+  }, 4, (ms) => void waits.push(ms)), "read");
+  assert.equal(calls, 3);
+  assert.equal(waits.length, 2);
+
+  calls = 0;
+  assert.throws(() => retryTransientFs(() => { calls += 1; throw lock("ENOENT"); }, 4, () => {}), /ENOENT/);
+  assert.equal(calls, 1, "a missing file is not a lock");
+
+  calls = 0;
+  assert.throws(() => retryTransientFs(() => { calls += 1; throw lock("EPERM"); }, 4, () => {}), /EPERM/);
+  assert.equal(calls, 4, "and a lock that never clears is bounded");
 });

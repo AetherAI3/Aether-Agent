@@ -61,6 +61,35 @@ export interface ObservedWorker {
   summary: string;
 }
 
+/**
+ * How far `rc start` got, durably. Spec #227: a session is reported live only
+ * after register, attach, durable local state AND a receipted first append.
+ *
+ *   ""            no session
+ *   "registered"  the Cloud created the session; attach has not succeeded.
+ *                 Nothing may publish from this record — `rc off` revokes it.
+ *   "attached"    this host owns the session and the opening events are
+ *                 queued, but the Cloud has not yet proven it stored them.
+ *                 Delivery may continue (that is what confirms it), but no
+ *                 surface may call the session live.
+ *   "confirmed"   the first append was receipted. Only now is it live.
+ */
+export type RcStartPhase = "" | "registered" | "attached" | "confirmed";
+
+/**
+ * Why a persisted outbox could not be trusted (spec #227).
+ *
+ * A file that exists but cannot be read, parsed, or recognised is NOT the same
+ * as no file. It may be the only record of a live Cloud session, so it is
+ * surfaced as an explicit condition rather than silently replaced by a blank
+ * record that the next `saveOutbox` would write over it.
+ */
+export interface OutboxRecovery {
+  reason: "unreadable" | "unparseable" | "incompatible";
+  /** A session id recovered from the damaged bytes, when one is legible. */
+  session_id: string | null;
+}
+
 /** One sanitized event, durable. `payload` has already passed the allowlist. */
 export interface PersistedEvent {
   host_event_id: string;
@@ -93,6 +122,14 @@ export interface OutboxRecord {
   revoke_pending: boolean;
   /** Last published worker state, retained after receipts to dedupe replayed trees. */
   observed_workers: Record<string, ObservedWorker>;
+  /** Durable progress of `rc start`; see RcStartPhase. */
+  start_phase: RcStartPhase;
+  /**
+   * In memory only, never persisted: set when the file on disk could not be
+   * trusted. A record carrying it is a blank stand-in, and saveOutbox refuses
+   * to write it over the bytes it stands in for.
+   */
+  recovery?: OutboxRecovery;
 }
 
 export interface CreateOutboxOptions {
@@ -101,6 +138,8 @@ export interface CreateOutboxOptions {
   device_id: string;
   epoch: number;
   project_root: string;
+  /** Defaults to "attached" for a record with a session, "" without one. */
+  start_phase?: RcStartPhase;
 }
 
 export function createOutbox(options: CreateOutboxOptions): OutboxRecord {
@@ -118,7 +157,21 @@ export function createOutbox(options: CreateOutboxOptions): OutboxRecord {
     quarantined: 0,
     revoke_pending: false,
     observed_workers: Object.create(null) as Record<string, ObservedWorker>,
+    start_phase: options.start_phase ?? (options.session_id ? "attached" : ""),
   };
+}
+
+/**
+ * Whether this record may publish for `projectRoot` right now.
+ *
+ * The single predicate every publisher shares, so "is there an active RC
+ * session for this project" has one answer: a session this host attached to,
+ * not revoked, read from a trustworthy file, for the same working tree.
+ */
+export function isPublishable(record: OutboxRecord, projectRoot: string): boolean {
+  return Boolean(record.session_id) && !record.revoke_pending && !record.recovery &&
+    (record.start_phase === "attached" || record.start_phase === "confirmed") &&
+    record.project_root === projectRoot;
 }
 
 // ── enqueue ─────────────────────────────────────────────────────────────────
@@ -186,8 +239,53 @@ export function commitReceipts(
 
 // ── persistence ─────────────────────────────────────────────────────────────
 
-/** Atomic, owner-only write. A partially written outbox is a corrupt outbox. */
+/**
+ * Codes Windows reports while ANOTHER handle holds the file — a concurrent
+ * reader in another process, an antivirus scan, an indexer — and that clear
+ * within milliseconds. Every RC writer renames over the same file, so these
+ * are routine there, and none of them says anything about the record itself.
+ */
+const TRANSIENT_FS_CODES: ReadonlySet<string> = new Set(["EBUSY", "EPERM", "EACCES", "EAGAIN"]);
+const TRANSIENT_FS_ATTEMPTS = 4;
+const TRANSIENT_FS_PAUSE_MS = 10;
+
+function pauseSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Run one synchronous file step, retrying briefly while it fails with a
+ * transient lock (#227). Bounded: at most 60 ms of waiting in total, and any
+ * other error — or a lock that never clears — is thrown to the caller.
+ */
+export function retryTransientFs<T>(
+  step: () => T,
+  attempts: number = TRANSIENT_FS_ATTEMPTS,
+  wait: (ms: number) => void = pauseSync,
+): T {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return step();
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (attempt >= attempts || typeof code !== "string" || !TRANSIENT_FS_CODES.has(code)) throw error;
+      wait(TRANSIENT_FS_PAUSE_MS * attempt);
+    }
+  }
+}
+
+/**
+ * Atomic, owner-only write. A partially written outbox is a corrupt outbox.
+ *
+ * Refuses a record that stands in for state that could not be read (#227):
+ * writing it would replace what may be the only record of a live Cloud
+ * session with a blank. Recovery goes through `aether rc off`, which revokes
+ * what it can identify and sets the damaged bytes aside rather than over them.
+ */
 export function saveOutbox(path: string, record: OutboxRecord): void {
+  if (record.recovery) {
+    throw new Error("refusing to overwrite RC state that could not be read; run `aether rc off`");
+  }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}-${randomUUID()}.tmp`;
   try {
@@ -196,7 +294,7 @@ export function saveOutbox(path: string, record: OutboxRecord): void {
       mode: 0o600,
       flag: "wx",
     });
-    renameSync(tmp, path);
+    retryTransientFs(() => renameSync(tmp, path));
   } catch (error) {
     try {
       if (existsSync(tmp)) unlinkSync(tmp);
@@ -243,22 +341,57 @@ function revalidate(raw: unknown, projectRoot: string): PersistedEvent | null {
   return { host_event_id, event_type, payload, host_seq, created_at, payload_digest };
 }
 
+/** A session id shape narrow enough that salvage can never lift arbitrary text. */
+const SALVAGEABLE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * The session id damaged bytes still legibly name, or null.
+ *
+ * Only an id is salvaged, never events or counters: an id is what `rc off`
+ * needs to revoke the Cloud session, and nothing else in a file we could not
+ * parse is trustworthy enough to act on.
+ */
+function salvageSessionId(parsed: unknown, raw: string): string | null {
+  const fromObject = isPlainObject(parsed) ? parsed["session_id"] : undefined;
+  const candidate = typeof fromObject === "string"
+    ? fromObject
+    : /"session_id"\s*:\s*"([^"\\]{1,128})"/.exec(raw)?.[1];
+  return candidate && SALVAGEABLE_SESSION_ID.test(candidate) ? candidate : null;
+}
+
+function recoveryStandIn(projectRoot: string, recovery: OutboxRecovery): OutboxRecord {
+  const record = blank(projectRoot);
+  record.recovery = recovery;
+  return record;
+}
+
 /**
  * Read the outbox at `path`, refusing to trust any part of it.
  *
- * A missing, unreadable, unparseable or wrong-schema file yields a fresh empty
- * outbox rather than an exception: RC failing to reload is not allowed to stop
- * a local session, and empty is the safe reading of "we cannot tell what was
- * queued".
+ * A MISSING file is a fresh empty outbox. A file that exists but is
+ * unreadable, unparseable or of another schema is different (#227): it may
+ * be the only record of a live Cloud session. It still loads as an empty,
+ * unpublishable record — RC failing to reload never stops a local session —
+ * but one carrying an explicit `recovery` condition, which saveOutbox refuses
+ * to write over and which `rc start` refuses to start past.
  */
 export function loadOutbox(path: string, projectRoot: string): OutboxRecord {
+  let raw: string;
+  try {
+    raw = retryTransientFs(() => readFileSync(path, "utf8"));
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === "ENOENT") return blank(projectRoot);
+    return recoveryStandIn(projectRoot, { reason: "unreadable", session_id: null });
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    parsed = JSON.parse(raw);
   } catch {
-    return blank(projectRoot);
+    return recoveryStandIn(projectRoot, { reason: "unparseable", session_id: salvageSessionId(undefined, raw) });
   }
-  if (!isPlainObject(parsed) || parsed["schema"] !== RC_OUTBOX_SCHEMA) return blank(projectRoot);
+  if (!isPlainObject(parsed) || parsed["schema"] !== RC_OUTBOX_SCHEMA) {
+    return recoveryStandIn(projectRoot, { reason: "incompatible", session_id: salvageSessionId(parsed, raw) });
+  }
 
   const record = blank(projectRoot);
   record.session_id = typeof parsed["session_id"] === "string" ? parsed["session_id"] : "";
@@ -303,7 +436,39 @@ export function loadOutbox(path: string, projectRoot: string): OutboxRecord {
   // A cursor above the sequences ever issued would make every future receipt
   // look stale and stall the host permanently. Repair rather than trust.
   record.cursor = Math.min(finiteInt(parsed["cursor"], 0), record.next_seq - 1);
+  record.start_phase = startPhaseOf(parsed["start_phase"], record);
   return record;
+}
+
+/**
+ * The persisted start phase, or the most a legacy file can prove.
+ *
+ * A record written before start progress was tracked was saved after attach
+ * and before its first flush, so it is "attached" unless a receipted cursor
+ * shows the first append landed. Never "confirmed" on the file's say-so alone.
+ */
+function startPhaseOf(value: unknown, record: OutboxRecord): RcStartPhase {
+  if (!record.session_id) return "";
+  if (value === "registered" || value === "attached") return value;
+  // "confirmed" is believed only alongside the receipted cursor that proves it.
+  return record.cursor > 0 ? "confirmed" : "attached";
+}
+
+/**
+ * Move damaged state out of the way without destroying it (#227).
+ *
+ * Used only by `rc off` after it has done what it can with the salvaged
+ * session id. The bytes are renamed beside the original rather than deleted,
+ * so a support investigation can still read them, and a fresh start is no
+ * longer blocked by them. Returns false when the file could not be moved.
+ */
+export function setAsideOutbox(path: string, now: number = Date.now()): boolean {
+  try {
+    renameSync(path, `${path}.unreadable-${now}`);
+    return true;
+  } catch (error) {
+    return (error as { code?: unknown } | null)?.code === "ENOENT";
+  }
 }
 
 function blank(projectRoot: string): OutboxRecord {

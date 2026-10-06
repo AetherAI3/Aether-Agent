@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import type { ApiClient } from "../core/transport.js";
 import { flushOutbox, type RcHostDeps } from "../core/rc/host.js";
 import { checkoutDiffSummary } from "../core/rc/diff_summary.js";
-import { enqueueEvent, loadOutbox, saveOutbox } from "../core/rc/outbox.js";
+import { enqueueEvent, isPublishable, loadOutbox, saveOutbox } from "../core/rc/outbox.js";
 import { mapBrainEventToRc, type RcProducedEvent } from "../core/rc/producers.js";
 import { projectRefFor, rcOutboxPath } from "./rc.js";
 
@@ -37,7 +37,8 @@ export function openRcCodingObserver(
     const root = resolve(projectRoot);
     const path = outboxPath ?? rcOutboxPath(projectRefFor(root));
     let record = loadOutbox(path, root);
-    if (!record.session_id || record.revoke_pending || record.project_ref !== projectRefFor(root) || record.project_root !== root) return null;
+    // Only a session this host attached to, read from trustworthy state (#227).
+    if (!isPublishable(record, root) || record.project_ref !== projectRefFor(root)) return null;
     const deps: RcHostDeps = { api, outboxPath: path, projectRoot: root };
     let pending: Promise<void> = Promise.resolve();
     let flushing = false;

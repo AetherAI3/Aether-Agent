@@ -69,7 +69,32 @@ export type RcCode =
   /** The broker rejected the request body outright. */
   | "RC_EVENT_REJECTED"
   /** Local publication stopped, but Cloud revocation is unconfirmed. */
-  | "RC_REVOKE_UNCONFIRMED";
+  | "RC_REVOKE_UNCONFIRMED"
+  /** Persisted RC state exists but cannot be read or recognised. Run `rc off`. */
+  | "RC_STATE_UNREADABLE"
+  /** Local RC state could not be written, so nothing may claim to be live. */
+  | "RC_STATE_UNWRITABLE";
+
+/**
+ * Codes after which retrying the same request cannot help: the session is
+ * gone or not ours, or the broker refused the bytes themselves. A host that
+ * sees one stops; it never loops on it. Everything else (unreachable, rate
+ * limited, an unproven receipt) is transient and retried with backoff.
+ */
+const TERMINAL_CODES: ReadonlySet<RcCode> = new Set<RcCode>([
+  "RC_SESSION_NOT_FOUND",
+  "RC_HOST_CONFLICT",
+  "RC_SESSION_TERMINAL",
+  "RC_NOT_AUTHORIZED",
+  "RC_EVENT_ID_CONFLICT",
+  "RC_EVENT_REJECTED",
+  "RC_STATE_UNREADABLE",
+  "RC_STATE_UNWRITABLE",
+]);
+
+export function isTerminalRcCode(code: RcCode): boolean {
+  return TERMINAL_CODES.has(code);
+}
 
 /** A typed transport failure. `detail` is composed locally, never echoed. */
 export class RcError extends Error {
@@ -88,6 +113,22 @@ export interface RcHostDeps {
   outboxPath: string;
   /** Anchors path relativization so reloads sanitize identically. */
   projectRoot: string;
+  /** Durable writer; defaults to saveOutbox. Injected only to fail a write on purpose. */
+  persist?: (path: string, record: OutboxRecord) => void;
+}
+
+function persistOf(deps: RcHostDeps): (path: string, record: OutboxRecord) => void {
+  return deps.persist ?? saveOutbox;
+}
+
+/** Write durably, reporting failure as a value: RC failures never throw into a caller's run. */
+export function persistRecord(deps: RcHostDeps, record: OutboxRecord): boolean {
+  try {
+    persistOf(deps)(deps.outboxPath, record);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Identifiers only — never file contents. Mirrors Cloud's RepoSummaryV1. */
@@ -159,9 +200,15 @@ function statusOf(error: unknown): number | null {
 }
 
 /** The server's `detail`, flattened for MATCHING only. Never printed: a
- *  broker-authored string does not belong in a terminal. */
-function detailText(error: unknown): string {
-  const detail = (error as { detail?: unknown } | null)?.detail;
+ *  broker-authored string does not belong in a terminal.
+ *
+ *  ApiClient's HttpError carries the parsed response at `body`, so FastAPI's
+ *  discriminator is `body.detail`; a bare `detail` is accepted too. */
+export function detailText(error: unknown): string {
+  const carrier = error as { detail?: unknown; body?: unknown } | null;
+  const body = carrier?.body;
+  const detail = carrier?.detail ??
+    (body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined);
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object") {
     const inner = (detail as { error?: unknown }).error;
@@ -256,8 +303,9 @@ export async function registerSession(
   deps: RcHostDeps,
   options: RegisterOptions,
 ): Promise<RemoteSessionSummary> {
+  let session: RemoteSessionSummary;
   try {
-    return await deps.api.postJson<RemoteSessionSummary>(
+    session = await deps.api.postJson<RemoteSessionSummary>(
       "/remote/sessions",
       {
         project_ref: options.project_ref,
@@ -271,6 +319,12 @@ export async function registerSession(
   } catch (error) {
     rethrow(error);
   }
+  // Every later step addresses the session by this id, and `rc off` revokes
+  // by it. An answer without a usable one cannot be recorded or rolled back.
+  if (typeof session?.session_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(session.session_id)) {
+    throw new RcError("RC_RECEIPTS_UNPROVEN", "the broker did not return a usable session id");
+  }
+  return session;
 }
 
 /** Claim the single exclusive host slot. A 409 is final, never a takeover. */
@@ -322,6 +376,9 @@ export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promi
   const batch = takeBatch(record);
   if (batch.length === 0) return { ok: true, sent: 0, cursor: record.cursor };
   const before = existsSync(deps.outboxPath) ? loadOutbox(deps.outboxPath, deps.projectRoot) : null;
+  if (before?.recovery) {
+    return { ok: false, code: "RC_STATE_UNREADABLE", detail: "local RC state could not be read" };
+  }
   if (before?.revoke_pending) {
     return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session was revoked" };
   }
@@ -355,7 +412,7 @@ export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promi
       return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session disappeared during append" };
     }
     const current = loadOutbox(deps.outboxPath, deps.projectRoot);
-    if (current.session_id !== before.session_id || current.revoke_pending) {
+    if (current.recovery || current.session_id !== before.session_id || current.revoke_pending) {
       return { ok: false, code: "RC_SESSION_TERMINAL", detail: "local RC session changed during append" };
     }
   }
@@ -364,10 +421,15 @@ export async function flushOutbox(deps: RcHostDeps, record: OutboxRecord): Promi
   if (!outcome.ok) {
     return { ok: false, code: "RC_RECEIPTS_UNPROVEN", detail: describeRejection(outcome.reason) };
   }
+  // A receipted append is the proof `rc start` waits for (#227). It may land
+  // here rather than in start itself: a start that hit an outage stays
+  // "attached" until a later delivery is receipted.
+  if (record.start_phase === "attached") record.start_phase = "confirmed";
 
   // Durable before we forget: a crash between the receipt and this write would
-  // otherwise resend a batch the broker already stored.
-  saveOutbox(deps.outboxPath, record);
+  // otherwise resend a batch the broker already stored. A failed write throws:
+  // the caller must not report as stored what this host cannot remember.
+  persistOf(deps)(deps.outboxPath, record);
   return { ok: true, sent: batch.length, cursor: record.cursor };
 }
 
@@ -385,48 +447,82 @@ export type RevokeOutcome = { ok: true } | { ok: false; code: RcCode; detail: st
  * locally silent and will reconcile later — never one that reported a success
  * it did not have.
  */
-export async function revokeHost(deps: RcHostDeps, record: OutboxRecord): Promise<RevokeOutcome> {
+export async function revokeHost(
+  deps: RcHostDeps,
+  record: OutboxRecord,
+  options: { timeoutMs?: number } = {},
+): Promise<RevokeOutcome> {
   const sessionId = record.session_id;
+
+  // No Cloud session means nothing to revoke and nothing to reconcile. A
+  // tombstone naming no session could never be confirmed, so it would block
+  // every later start; clear a stale one rather than writing a new one.
+  if (!sessionId) {
+    if (!record.revoke_pending && record.events.length === 0) return { ok: true };
+    markRevoking(record);
+    clearSession(record);
+    return persistRecord(deps, record)
+      ? { ok: true }
+      : { ok: false, code: "RC_STATE_UNWRITABLE", detail: "local RC state could not be cleared" };
+  }
 
   // 1-2: stop publishing and drop everything queued. Nothing further is sent
   // from this record whatever happens below.
-  record.events = [];
-  record.revoke_pending = true;
+  markRevoking(record);
 
-  // 3: durable before the network. If this write fails we are not permitted to
-  // attempt the revoke and report on it — a caller would read "revoked" from a
-  // host whose next start could resume.
-  try {
-    saveOutbox(deps.outboxPath, record);
-  } catch {
+  // 3: durable before the network. If this write fails, the ACTIVE record is
+  // still on disk and a later run would resume from it, so nothing local can
+  // keep publication off. Only the Cloud can: revoke there anyway, and report
+  // exactly which half happened. Never a success, and never "will not resume".
+  if (!persistRecord(deps, record)) {
+    if (await confirmCloudRevoke(deps, sessionId, options.timeoutMs)) {
+      return {
+        ok: false,
+        code: "RC_STATE_UNWRITABLE",
+        detail:
+          "the Cloud confirmed revocation, but local RC state could not be written; a later run's host is refused " +
+          "by the revoked session. Run `aether rc off` again once local state is writable",
+      };
+    }
     return {
       ok: false,
       code: "RC_REVOKE_UNCONFIRMED",
       detail:
-        "publication stopped, but the local revoke marker could not be written; RC will not resume automatically",
+        "local RC state could not be written and the Cloud did not confirm revocation, so RC is NOT off; " +
+        "run `aether rc off` again",
     };
   }
 
-  if (!sessionId) return { ok: true };
-
   // 4: Cloud revokes session, grants and streams atomically.
-  try {
-    await deps.api.postJson(sessionPath(sessionId, "/revoke"), {}, undefined, REQUEST_TIMEOUT_MS);
-  } catch (error) {
-    const { code } = classifyRcError(error);
-    // A session the Cloud no longer has is already revoked as far as this host
-    // is concerned; anything else stays pending and reconciles later.
-    if (code !== "RC_SESSION_NOT_FOUND" && code !== "RC_SESSION_TERMINAL") {
-      return {
-        ok: false,
-        code: "RC_REVOKE_UNCONFIRMED",
-        detail:
-          "local publication stopped, but the Cloud did not confirm revocation; RC stays off and will retry",
-      };
-    }
+  if (!(await confirmCloudRevoke(deps, sessionId, options.timeoutMs))) {
+    return {
+      ok: false,
+      code: "RC_REVOKE_UNCONFIRMED",
+      detail:
+        "local publication stopped, but the Cloud did not confirm revocation; RC stays off and will retry",
+    };
   }
 
-  // 5: confirmed. Only now does the local session identity go away.
+  // 5: confirmed. Only now does the local session identity go away. If even
+  // that write fails the tombstone from step 3 is still on disk, so the next
+  // command re-sends the (idempotent) revoke and clears it then.
+  clearSession(record);
+  if (!persistRecord(deps, record)) {
+    return {
+      ok: false,
+      code: "RC_STATE_UNWRITABLE",
+      detail: "the Cloud confirmed revocation, but local RC state could not be cleared; RC stays off",
+    };
+  }
+  return { ok: true };
+}
+
+function markRevoking(record: OutboxRecord): void {
+  record.events = [];
+  record.revoke_pending = true;
+}
+
+function clearSession(record: OutboxRecord): void {
   record.session_id = "";
   record.device_id = "";
   record.project_ref = "";
@@ -437,6 +533,61 @@ export async function revokeHost(deps: RcHostDeps, record: OutboxRecord): Promis
   record.quarantined = 0;
   record.observed_workers = Object.create(null) as typeof record.observed_workers;
   record.revoke_pending = false;
-  saveOutbox(deps.outboxPath, record);
-  return { ok: true };
+  record.start_phase = "";
+}
+
+/**
+ * Ask the Cloud to revoke `sessionId`; true only when it confirmed.
+ *
+ * A session the Cloud no longer has, or that can no longer change state, is
+ * already revoked as far as this host is concerned. Anything else — an
+ * outage, a rate limit, a refusal — is unconfirmed and must stay pending.
+ */
+export async function confirmCloudRevoke(
+  deps: RcHostDeps,
+  sessionId: string,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<boolean> {
+  try {
+    await deps.api.postJson(sessionPath(sessionId, "/revoke"), {}, undefined, timeoutMs);
+    return true;
+  } catch (error) {
+    const { code } = classifyRcError(error);
+    // Only the Cloud's own answers settle it: its single 404 for a session
+    // this account no longer has, or a 409 for one that can no longer change
+    // state. A 404 from anything else — a proxy, a deployment without the
+    // route — proves nothing about the session, so it stays pending.
+    if (code === "RC_SESSION_NOT_FOUND") return detailText(error) === "session not found";
+    return code === "RC_SESSION_TERMINAL";
+  }
+}
+
+/** What a rolled-back start left behind, stated rather than implied. */
+export interface AbandonOutcome {
+  /** The Cloud confirmed the session is revoked. */
+  revoked: boolean;
+  /** Local state now matches: cleared when revoked, a tombstone when not. */
+  durable: boolean;
+}
+
+/**
+ * Roll back a session `rc start` registered but could not bring live (#227).
+ *
+ * The difference from revokeHost is one rule. revokeHost refuses to contact
+ * the Cloud when it cannot first write its tombstone, because an operator
+ * asked to turn a LIVE host off and must not be told "revoked" by a host that
+ * could resume. Here the session was never reported live, and the failure
+ * being rolled back is often exactly that the disk cannot be written. Not
+ * revoking would orphan a Cloud session with no local record of it at all, so
+ * the revoke is attempted whatever the disk says, and the outcome reports
+ * both halves honestly.
+ */
+export async function abandonSession(deps: RcHostDeps, record: OutboxRecord): Promise<AbandonOutcome> {
+  const sessionId = record.session_id;
+  markRevoking(record);
+  const tombstone = persistRecord(deps, record);
+  if (!sessionId) return { revoked: true, durable: tombstone };
+  if (!(await confirmCloudRevoke(deps, sessionId))) return { revoked: false, durable: tombstone };
+  clearSession(record);
+  return { revoked: true, durable: persistRecord(deps, record) };
 }
