@@ -324,20 +324,111 @@ export async function cmdShip(ctx: AppContext, _rest: string[], flags: ShipFlags
   return runShip(ctx, defaultShipDeps(ctx.flags.cwd, process.stdout), flags);
 }
 
-/** `/ship` inside the REPL. */
-export async function shipSlash(ctx: AppContext, out: Writable, arg: string): Promise<void> {
-  const parts = arg.trim().split(/\s+/).filter(Boolean);
-  const valueOf = (name: string): string | undefined => {
-    const at = parts.indexOf(name);
-    return at >= 0 ? parts[at + 1] : undefined;
-  };
-  await runShip(ctx, defaultShipDeps(ctx.flags.cwd, out), {
-    yes: false,
-    json: false,
-    ...(valueOf("--title") !== undefined ? { title: valueOf("--title") } : {}),
-    ...(valueOf("--base") !== undefined ? { base: valueOf("--base") } : {}),
-    ...(valueOf("--approve") !== undefined ? { approve: valueOf("--approve") } : {}),
-  });
+export const SHIP_SLASH_USAGE =
+  'usage: /ship [--title <text>] [--body <text>] [--base <branch>] [--approve publish] [--yes] [--json] [--help]';
+
+interface SlashWord { value: string; quoted: boolean }
+
+/** Split REPL input into argv without invoking a shell or expanding any text. */
+function shipSlashWords(input: string): SlashWord[] {
+  const words: SlashWord[] = [];
+  let value = "";
+  let active = false;
+  let quoted = false;
+  let quote: "'" | '"' | null = null;
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index]!;
+    if (char === "\\" && quote !== "'") {
+      const next = input[index + 1];
+      if (next === undefined) throw new Error("trailing escape");
+      // Escapes quote characters, backslashes and whitespace. Other escapes
+      // remain literal, including Windows paths and shell-looking text.
+      if (next === "\\" || next === '"' || next === "'" || next === "$" || next === "`" || /\s/u.test(next) || (quote === null && next === "-")) {
+        value += next;
+        index++;
+        quoted = true;
+      } else {
+        value += char;
+      }
+      active = true;
+      continue;
+    }
+    if (quote !== null) {
+      if (char === quote) quote = null;
+      else value += char;
+      active = true;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      quoted = true;
+      active = true;
+    } else if (/\s/u.test(char)) {
+      if (active) words.push({ value, quoted });
+      value = "";
+      active = false;
+      quoted = false;
+    } else {
+      value += char;
+      active = true;
+    }
+  }
+  if (quote !== null) throw new Error("unterminated quote");
+  if (active) words.push({ value, quoted });
+  return words;
+}
+
+/** Parse exactly the options `/ship` can pass to the shared ship rail. */
+export function parseShipSlashArgs(arg: string): ShipFlags | "help" {
+  const words = shipSlashWords(arg);
+  const flags: ShipFlags = { yes: false, json: false };
+  const seen = new Set<string>();
+  const valued = new Set(["--title", "--body", "--base", "--approve"]);
+  const boolean = new Set(["--yes", "--json", "--help"]);
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index]!;
+    const equal = word.value.indexOf("=");
+    const name = equal < 0 ? word.value : word.value.slice(0, equal);
+    if (!name.startsWith("-") || (word.quoted && equal < 0)) throw new Error(`unexpected argument: ${word.value}`);
+    if (!valued.has(name) && !boolean.has(name)) throw new Error(`unsupported option: ${name}`);
+    if (seen.has(name)) throw new Error(`duplicate option: ${name}`);
+    seen.add(name);
+    if (boolean.has(name)) {
+      if (equal >= 0) throw new Error(`${name} does not take a value`);
+      if (name === "--yes") flags.yes = true;
+      if (name === "--json") flags.json = true;
+      continue;
+    }
+    const next = equal < 0 ? words[++index] : { value: word.value.slice(equal + 1), quoted: word.quoted };
+    if (!next || !next.value.trim() || (equal < 0 && next.value.startsWith("-") && !next.quoted)) {
+      throw new Error(`${name} needs a value`);
+    }
+    if (name === "--title") flags.title = next.value;
+    if (name === "--body") flags.body = next.value;
+    if (name === "--base") flags.base = next.value;
+    if (name === "--approve") flags.approve = next.value;
+  }
+  if (seen.has("--help")) {
+    if (seen.size !== 1) throw new Error("--help must be used alone");
+    return "help";
+  }
+  return flags;
+}
+
+/** `/ship` inside the REPL. The optional deps also keep wrapper tests offline. */
+export async function shipSlash(ctx: AppContext, out: Writable, arg: string, deps?: ShipDeps): Promise<void> {
+  let flags: ShipFlags | "help";
+  try {
+    flags = parseShipSlashArgs(arg);
+  } catch (error) {
+    out.write(`✗ ${error instanceof Error ? error.message : String(error)}\n${SHIP_SLASH_USAGE}\n`);
+    return;
+  }
+  if (flags === "help") {
+    out.write(`${SHIP_SLASH_USAGE}\n`);
+    return;
+  }
+  await runShip(ctx, deps ?? defaultShipDeps(ctx.flags.cwd, out), flags);
 }
 
 /**
