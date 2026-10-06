@@ -94,10 +94,12 @@ A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-c
 Explain the failing test
 !npm test
 /shell-result
-Help me fix it
+/shell-result lines
+/shell-result drop 8-10
+/shell-result send
 ```
 
-`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` explicitly shares the latest result with the next model turn; review it for secrets first.
+`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` stages and previews the exact bounded attachment, including the command, captured directory, exit status, and any omitted bytes. Edit it with `drop`, `replace`, `mask`, or `redact`, then choose `/shell-result send` or `/shell-result cancel`. Redaction helps identify common secrets but does not guarantee their removal. A later shell command cannot change the staged attachment. For pipes and JSON sessions, `/shell-result send` is the explicit one-step send form.
 
 | Platform | Local shell | Interactive programs |
 |---|---|---|

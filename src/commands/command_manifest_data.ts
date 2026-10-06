@@ -4056,8 +4056,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "summary": "explicitly share the last local shell result with chat (bounded)",
-    "detailedHelp": "/shell-result\nexplicitly share the last local shell result with chat (bounded)",
+    "summary": "preview and edit a bounded local shell result before sharing it",
+    "detailedHelp": "/shell-result previews the exact bounded attachment without contacting a model. Use /shell-result lines to inspect numbered rows; drop <first>[-<last>], replace <line> <text>, mask <literal>, or redact to edit the staged snapshot. /shell-result send shares that snapshot; /shell-result cancel discards it. In pipes or JSON sessions, /shell-result send is the explicit one-step send form. A newer command never replaces a staged preview. Redaction is an aid, not a guarantee.",
     "section": "Steering",
     "hidden": false,
     "permissionClass": "network",
@@ -4084,8 +4084,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "disposition": "generated"
     },
     "release": {
-      "disposition": "new",
-      "note": "Coding console only; explicit sharing of at most 8 KiB of untrusted local output."
+      "disposition": "changed",
+      "note": "Coding console now previews and edits the command-bound bounded capture before explicit sharing."
     }
   },
   {

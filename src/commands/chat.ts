@@ -1354,7 +1354,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     /** Run one turn without sacrificing an existing type-ahead draft. */
     const runQueuedTurn = async (input: ConsoleInput, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
       const sharedShellResult = input.kind === "share";
-      if (input.kind === "share") input = consoleShell.share();
+      if (input.kind === "share") input = consoleShell.share(input);
       if (input.kind === "error") { process.stdout.write(input.message + "\n"); return "completed"; }
       if (input.kind === "empty") return "completed";
       if (input.kind !== "chat") {
@@ -1468,7 +1468,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         // server's error frame (frame() runs before runTurn throws) — only
         // genuinely unrendered failures (network, fallback-leg errors) need
         // printError's own "✗" line, or the user sees the error twice.
-        const authFailure = await resolveBackend(ctx) === "cloud"
+        const authFailure = !sharedShellResult && await resolveBackend(ctx) === "cloud"
           && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts);
         if (authFailure && buf.value) heldDraft = buf.value;
         if (authFailure && !ctx.flags.json) {
@@ -1488,7 +1488,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         // commit() clears the submitted line before the request starts. Put it
         // back only when the user has not typed ahead; otherwise preserve their
         // newer draft and leave the failed submission in history for recall.
-        const recovered = authFailure ? buf.value : recoverSubmittedPrompt(text, buf.value);
+        const recovered = sharedShellResult || authFailure ? buf.value : recoverSubmittedPrompt(text, buf.value);
         if (recovered !== buf.value) {
           buf.clear();
           buf.insert(recovered);
@@ -2037,7 +2037,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     if (ConsoleShell.isTerminalCommand(line)) { await consoleShell.terminalCommand(line); continue; }
     let input = classifyConsoleInput(line);
     const sharedShellResult = input.kind === "share";
-    if (input.kind === "share") input = consoleShell.share();
+    if (input.kind === "share") input = consoleShell.share(input, true);
     if (input.kind === "error") { process.stdout.write(input.message + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
     let t = input.kind === "chat" ? input.text : "";
     let authReplay = false;
@@ -2085,7 +2085,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
       if (p) process.stdout.write(p + consoleShell.prompt());
       continue;
     }
-    if (historyEnabled() && line.trim() !== "/shell-result") appendHistory(line.trim(), historyPath(ctx.flags.cwd));
+    if (historyEnabled() && !sharedShellResult) appendHistory(line.trim(), historyPath(ctx.flags.cwd));
     if (t === "/auth" || t.startsWith("/auth ")) {
       inflight = new AbortController();
       try {
@@ -2166,7 +2166,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
         const outcome = turnOutcomeForError(err);
         if (ctx.flags.json && outcome) process.stdout.write(turnOutcomeJson(outcome) + "\n");
         else process.stderr.write("\n" + errTheme.dim("✗ canceled — turn discarded") + "\n");
-      } else if (await resolveBackend(ctx) === "cloud" && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts)) {
+      } else if (!sharedShellResult && await resolveBackend(ctx) === "cloud" && authRepair.noteFailure(err, submittedPrompt, turnOutcomeForError(err), receipts)) {
         if (!ctx.flags.json) process.stderr.write("✗ Hosted credential rejected (401). Task saved. Use /auth login; /auth status shows the credential source.\n");
         printed = true;
       } else if (err instanceof ChatTurnError) {

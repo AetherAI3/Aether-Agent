@@ -199,6 +199,11 @@ export class ShellSession {
         options.signal?.removeEventListener("abort", abort);
         cleanupOut(); cleanupErr();
         result.output += output.render();
+        // Internal preview provenance must not change the public ToolResult
+        // shape consumed by model tools, JSON output, or existing callers.
+        Object.defineProperty(result, "capture", {
+          value: { observedBytes: output.observedBytes, omittedBytes: output.omittedBytes },
+        });
         fd.off("data", onControl);
         this.failActive = null;
         emit(state, result.exitCode);

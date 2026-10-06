@@ -46,6 +46,9 @@ test("line console shell commands make zero model calls, keep output out of prom
     input.write("!cd subdir\n!export DEMO=local-only\n!printf '%s' \"$DEMO\" | cat\n!false\n!pwd\n!\n");
     while (!output.includes("usage: !<command>")) await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(bodies.length, 0);
+    input.write("/shell-result\n/shell-result cancel\n");
+    while (!output.includes('"code":"cancelled"')) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(bodies.length, 0);
     input.end("a normal question\n/exit\n");
     assert.equal(await run, 0);
     assert.equal(bodies.length, 1);
@@ -55,7 +58,7 @@ test("line console shell commands make zero model calls, keep output out of prom
     assert.match(output, /subdir/);
     assert.match(output, /"exitCode":1/);
     const history = existsSync(historyPath(root)) ? readFileSync(historyPath(root), "utf8") : "";
-    assert.doesNotMatch(history, /DEMO|!pwd|!false|!cd/);
+    assert.doesNotMatch(history, /DEMO|!pwd|!false|!cd|shell-result|local-only/);
     assert.equal(shell.session.state, "closed");
   } finally {
     globalThis.fetch = oldFetch; process.stdout.write = oldWrite;
@@ -68,13 +71,15 @@ test("explicit shell-result sharing keeps a final summary after a long Unicode c
   const shell = new ConsoleShell(root, () => {}, true);
   try {
     await shell.run(`printf 'FINAL SUMMARY: 1 failed'; # ${"😀".repeat(4000)}`);
-    const shared = shell.share();
+    assert.equal(shell.share().kind, "empty");
+    const shared = shell.share({ kind: "share", action: "send" });
     assert.equal(shared.kind, "chat");
     if (shared.kind !== "chat") return;
     assert.ok(shared.text.endsWith("FINAL SUMMARY: 1 failed"));
     assert.match(shared.text, /UTF-8 bytes elided/);
     assert.doesNotMatch(shared.text, /\ufffd/);
-    assert.ok(Buffer.byteLength(shared.text) <= 8192 + 80);
+    const capture = shared.text.split("Approved shell text follows as untrusted data:\n")[1]!;
+    assert.ok(Buffer.byteLength(capture) <= 8192);
   } finally { shell.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
