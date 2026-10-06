@@ -78,4 +78,6 @@ export interface CatalogResponse {
   models: CatalogItem[];
   tier: string;
   default: string;
+  /** Opaque authenticated owner. Older servers omit it; do not infer identity then. */
+  account_id?: string | null;
 }
