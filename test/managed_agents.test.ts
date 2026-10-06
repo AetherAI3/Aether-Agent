@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { visibleWidth } from "../src/ui/text.js";
-import { Readable, Writable } from "node:stream";
+import { visibleWidth, stripAnsi } from "../src/ui/text.js";
+import { PassThrough, Readable, Writable } from "node:stream";
 import { ManagedAgentsClient, managedAgentError, probeManagedReadiness, type ManagedAgent } from "../src/core/managed_agents.js";
 import { ApiClient } from "../src/core/transport.js";
 import { StaticTokenStore } from "../src/core/auth.js";
 import { HttpError } from "../src/core/errors.js";
 import { DEFAULT_CONFIG } from "../src/core/config.js";
 import type { AppContext } from "../src/core/context.js";
-import { configureManagedAgent, cmdManagedAgents, cmdManagedAgentChat, renderManagedAgents, renderManagedContext } from "../src/commands/managed_agents.js";
+import { configureManagedAgent, cmdManagedAgents, cmdManagedAgentChat, renderManagedAgents, renderManagedContext, renderManagedMessage, renderManagedAdmission, writeManagedChatEvent, type ManagedChatSurface } from "../src/commands/managed_agents.js";
 import { handleSlash } from "../src/commands/slash.js";
 
 const ID = "mag_0123456789abcdef";
@@ -125,7 +125,7 @@ test("DM send uses canonical conversation and nonce; no coding or chat runtime e
     assert.equal(await cmdManagedAgentChat(context(), ID, "Review my strategy", { out: output.out, err: output.out, hooks: { beforeChat: async () => async () => { closed = true; } } }), 1);
   });
   assert.equal(closed, true);
-  assert.match(output.text(), /blocked_budget/);
+  assert.match(output.text(), /saved · blocked by budget.*Next: configure/);
   assert.equal(paths.length, 4);
   assert.ok(paths.every((path) => path.includes("/agent/managed/")));
 });
@@ -212,10 +212,162 @@ for (const columns of [40, 60, 80, 120]) {
     const context = renderManagedContext(untrusted, { chat: "paused", memory: "verified 5 GiB", mode: "plan requested", browser: "stale", data: "unverified" }, columns);
     for (const line of [...list.split("\n"), ...context.split("\n")]) assert.ok(visibleWidth(line) <= columns, line);
     assert.ok(list.includes(ID));
-    assert.match(context, /chat paused/);
+    assert.match(context, /DM paused/);
+    assert.doesNotMatch(context, /memory|strategies|browser|data/);
     assert.doesNotMatch(list + context, /\x1b\]52/);
   });
 }
+
+test("ordinary and ATS status snapshots keep verified sources distinct at narrow and wide widths", () => {
+  const typed: ManagedAgent = { ...agent, config: { ...agent.config, profile: { schema_version: "aether.managed-agent.profile/1", kind: "ats" } } };
+  const state = { chat: "synced" as const, checkedAt: Date.parse("2026-10-06T12:00:00Z"), profileCheckedAt: Date.parse("2026-10-06T11:59:00Z"), memory: "writer leased 5 GiB", mode: "plan requested", strategies: "configured", browser: "unverified", data: "unverified" };
+  for (const columns of [40, 80, 120]) {
+    const ordinary = stripAnsi(renderManagedContext(agent, state, columns));
+    const ats = stripAnsi(renderManagedContext(typed, state, columns));
+    assert.match(ordinary, /Test agent · draft\nDM synced/);
+    assert.match(ordinary.replace(/\n/g, " "), /checked\s+2026-10-06T12:00:00.000Z/);
+    assert.doesNotMatch(ordinary, /ATS|memory|strategies|browser|data|mode/);
+    assert.match(ats, /ATS local/);
+    assert.match(ats, /writer leased 5 GiB/);
+    assert.match(ats.replace(/\n/g, " "), /checked\s+2026-10-06T11:59:00.000Z/);
+    assert.doesNotMatch(ats, /browser|data/);
+    for (const line of [...ordinary.split("\n"), ...ats.split("\n")]) assert.ok(visibleWidth(line) <= columns, line);
+  }
+  const unchecked = stripAnsi(renderManagedContext(typed, { chat: "paused", memory: "writer leased 5 GiB" }, 80));
+  assert.match(unchecked, /ATS local · not checked/);
+  assert.doesNotMatch(unchecked, /writer leased/);
+});
+
+test("transcript snapshots show time and saved, blocked, and admitted states without terminal controls", () => {
+  const message = { id: "m1", sender_type: "user", body: "multi\nbyte 長文".repeat(7), created_at: "2026-10-06T12:01:00Z", admission: { state: "blocked_budget" as const } };
+  for (const width of [40, 80, 120]) {
+    const rendered = stripAnsi(renderManagedMessage(message, agent, width));
+    assert.match(rendered, /You · 2026-10-06T12:01:00.000Z\nsaved · blocked by budget/);
+    for (const line of rendered.split("\n")) assert.ok(visibleWidth(line) <= width, line);
+    assert.doesNotMatch(rendered, /\x1b/);
+  }
+  assert.match(renderManagedMessage({ id: "m2", body: "reply", sender_type: "agent" }, agent), /time unknown/);
+  assert.doesNotMatch(renderManagedMessage({ id: "m2", body: "reply", sender_type: "agent" }, agent), /saved/);
+  assert.match(renderManagedAdmission(undefined), /admission unconfirmed.*check the shared conversation/);
+  assert.match(renderManagedAdmission({ state: "saved" }), /admission pending.*\/refresh/);
+  assert.match(renderManagedAdmission({ state: "blocked_policy" }), /blocked by policy.*review this agent/);
+  assert.match(renderManagedAdmission({ state: "needs_review" }), /needs review.*review this message/);
+  assert.equal(renderManagedAdmission({ state: "admitted" }), "admitted");
+});
+
+test("prompt-preserving status event redraws a moved cursor without changing a draft", () => {
+  const output = capture();
+  const draft = { value: "a long draft", cursor: 3 };
+  const calls: boolean[] = [];
+  writeManagedChatEvent(output.out, { getCursorPos: () => ({ rows: 2, cols: 3 }), prompt: (preserve?: boolean) => { calls.push(Boolean(preserve)); } }, "DM sync paused. Next: /refresh");
+  assert.match(output.text(), /^\r\x1b\[2A\x1b\[0JDM sync paused/);
+  assert.deepEqual(calls, [true]);
+  assert.deepEqual(draft, { value: "a long draft", cursor: 3 });
+});
+
+test("redirected chat uses plain text, profile-specific help, and a truthful saved transcript", async () => {
+  const output = capture();
+  let reads = 0;
+  await stubFetch((url, init) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
+    if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
+    if (url.pathname.endsWith("/messages") && init.method === "GET") {
+      reads++;
+      return json({ messages: [{ id: "m1", body: "hello", sender_type: "user", created_at: "2026-10-06T12:01:00Z", admission: { state: "saved" } }] });
+    }
+    return json(envelope({ agent }));
+  }, async () => {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "", { out: output.out, err: output.out, input: Readable.from(["/help\n", "/refresh\n", "/exit\n"]), hooks: { help: () => "Browser · /browser status" } }), 0);
+  });
+  assert.equal(reads, 2);
+  assert.match(output.text(), /DM synced/);
+  assert.match(output.text(), /saved · admission pending/);
+  assert.match(output.text(), /Browser · \/browser status/);
+  assert.doesNotMatch(output.text(), /ATS local|\x1b/);
+});
+
+test("a later admission update is visible even when the saved message body is unchanged", async () => {
+  const output = capture();
+  let reads = 0;
+  await stubFetch((url) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
+    if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
+    if (url.pathname.endsWith("/messages")) return json({ messages: [{ id: "m1", body: "same body", sender_type: "user", admission: { state: ++reads === 1 ? "saved" : "admitted" } }] });
+    return json(envelope({ agent }));
+  }, async () => {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "", { out: output.out, err: output.out, input: Readable.from(["/refresh\n", "/exit\n"]) }), 0);
+  });
+  assert.equal(reads, 2);
+  assert.match(output.text(), /saved · admission pending/);
+  assert.match(output.text(), /\nadmitted\n/);
+});
+
+test("a Cloud send receipt remains visible when the conversation list omits admission", async () => {
+  const output = capture();
+  let sends = 0;
+  await stubFetch((url, init) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
+    if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
+    if (url.pathname.endsWith("/messages") && init.method === "POST") {
+      sends++;
+      return json({ id: "m1", body: "hello", admission: { state: "blocked_policy" } });
+    }
+    if (url.pathname.endsWith("/messages")) return json({ messages: sends ? [{ id: "m1", body: "hello", sender_type: "user" }] : [] });
+    return json(envelope({ agent }));
+  }, async () => {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "", { out: output.out, err: output.out, input: Readable.from(["hello\n", "/exit\n"]) }), 0);
+  });
+  assert.equal(sends, 1);
+  assert.equal((output.text().match(/saved · blocked by policy/g) ?? []).length, 2);
+});
+
+test("ATS help labels local preferences and the live-order boundary", async () => {
+  const output = capture();
+  const typed: ManagedAgent = { ...agent, config: { ...agent.config, profile: { schema_version: "aether.managed-agent.profile/1", kind: "ats" } } };
+  await stubFetch((url) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
+    if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
+    if (url.pathname.endsWith("/messages")) return json({ messages: [] });
+    return json(envelope({ agent: typed }));
+  }, async () => {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "", { out: output.out, input: Readable.from(["/help\n", "/exit\n"]),
+      hooks: { help: () => "ATS · /ats status", beforeChat: async (_ctx, _agent, surface) => { surface?.setContext?.({ memory: "writer leased 5 GiB", profileCheckedAt: Date.parse("2026-10-06T12:00:00Z") }); } } }), 0);
+  });
+  assert.match(output.text(), /ATS local/);
+  assert.match(output.text(), /memory writer leased 5 GiB/);
+  assert.match(output.text(), /ATS · \/ats status/);
+  assert.match(output.text(), /live orders.*RC observation is separate/);
+});
+
+test("TTY refresh event and resize retain a type-ahead draft at 40 and 80 columns", async () => {
+  const output = capture();
+  const ttyOut = Object.assign(output.out, { columns: 40 });
+  const input = Object.assign(new PassThrough(), { isTTY: true, isRaw: false, setRawMode(raw: boolean) { this.isRaw = raw; } });
+  let surface: ManagedChatSurface | undefined;
+  const task = stubFetch((url) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
+    if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
+    if (url.pathname.endsWith("/messages")) return json({ messages: [] });
+    return json(envelope({ agent }));
+  }, async () => {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "", { out: ttyOut, err: ttyOut, input,
+      hooks: { beforeChat: async (_ctx, _agent, current) => { surface = current; } } }), 0);
+  });
+  try {
+    for (let i = 0; i < 50 && !output.text().includes("you › "); i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(surface);
+    input.write("draft words");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    surface.write("Background status checked\n");
+    ttyOut.columns = 80; ttyOut.emit("resize");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    input.write("\x15/exit\r");
+    input.end();
+    await task;
+    assert.match(stripAnsi(output.text()), /Background status checked/);
+    assert.ok(stripAnsi(output.text()).split("draft words").length >= 3, "draft should be redrawn after the event and resize");
+  } finally { input.destroy(); }
+});
 
 test("canonical readback refuses a different agent identity", async () => {
   await stubFetch(() => json(envelope({ agent: { ...agent, agent_id: "mag_aaaaaaaaaaaaaaaa" } })), async () => {
@@ -340,6 +492,6 @@ test("chat stays paused when conversation read fails after an enabled readiness 
     }), 0);
   });
   assert.equal(state, "paused");
-  assert.match(output.text(), /Conversation sync paused/);
+  assert.match(output.text(), /DM sync paused.*Next: \/refresh/);
   assert.doesNotMatch(output.text(), /synced|private message/);
 });

@@ -5,7 +5,7 @@ import type { AppContext } from "../core/context.js";
 import {
   ManagedAgentsClient, MANAGED_AGENT_ID, managedAgentError, probeManagedReadiness,
   type ManagedReadiness, type ReadinessGate,
-  type ManagedAgent, type ManagedAgentConfig, type AgentMessage,
+  type ManagedAgent, type ManagedAgentConfig, type AgentMessage, type MessageAdmission,
 } from "../core/managed_agents.js";
 import { theme } from "../ui/theme.js";
 import { sanitizeTerm, sliceVisible, visibleWidth, wrapVisible } from "../ui/text.js";
@@ -17,6 +17,7 @@ import { managedChatInput } from "../ui/managed_chat_input.js";
 export interface ManagedChatContext {
   chat: "connecting" | "synced" | "paused";
   checkedAt?: number;
+  profileCheckedAt?: number;
   mode?: string;
   memory?: string;
   strategies?: string;
@@ -99,15 +100,30 @@ export function renderManagedAgents(agents: ManagedAgent[], columns = process.st
   return rows.flatMap(row => wrapVisible(row, width)).join("\n") + "\n";
 }
 
-/** A compact status strip above the composer; no sidebar steals narrow widths. */
+function checkedTime(value: number | undefined): string {
+  return value !== undefined && Number.isFinite(value) && !Number.isNaN(new Date(value).getTime())
+    ? new Date(value).toISOString() : "not checked";
+}
+
+function isAts(agent: ManagedAgent): boolean {
+  return agent.config.profile?.schema_version === "aether.managed-agent.profile/1" && agent.config.profile.kind === "ats";
+}
+
+/** Read-only status from Cloud and, for typed ATS agents, checked local setup. */
 export function renderManagedContext(agent: ManagedAgent, state: ManagedChatContext, columns: number): string {
   const width = Math.max(20, Math.floor(columns));
   const clean = (value: string): string => sanitizeTerm(value).replace(/[\r\n\t]/g, " ");
-  const lines = [
-    `${clean(agent.config.identity.display_name)} · ${clean(agent.runtime.tile_state)} · chat ${state.chat}`,
-    `mode ${state.mode ?? "unconfirmed"} · memory ${state.memory ?? "unverified"} · strategies ${state.strategies ?? "unverified"}`,
-    `browser ${state.browser ?? "unverified"} · data ${state.data ?? "unverified"}`,
-  ];
+  const name = sliceVisible(clean(agent.config.identity.display_name), Math.min(24, width - 16));
+  const dm = `DM ${state.chat}`;
+  const dmChecked = `checked ${checkedTime(state.checkedAt)}`;
+  const lines = [`${name} · ${sliceVisible(clean(agent.runtime.tile_state), 16)}`];
+  lines.push(...(visibleWidth(`${dm} · ${dmChecked}`) <= width ? [`${dm} · ${dmChecked}`] : [dm, dmChecked]));
+  if (isAts(agent)) {
+    const details = checkedTime(state.profileCheckedAt) === "not checked" ? [] : (["mode", "memory", "strategies", "browser", "data"] as const)
+      .flatMap(key => state[key] && !/^(unverified|unconfirmed)$/i.test(state[key]) ? [`${key} ${clean(state[key])}`] : []);
+    if (details.length) lines.push("ATS local", `checked ${checkedTime(state.profileCheckedAt)}`, ...details);
+    else lines.push("ATS local · not checked; local setup does not verify live orders");
+  }
   return lines.flatMap(line => wrapVisible(theme.dim(clean(line)), width)).join("\n");
 }
 
@@ -220,10 +236,45 @@ async function pickManagedAgent(agents: ManagedAgent[], out: Writable, signal?: 
   });
 }
 
-function renderMessage(message: AgentMessage, agent: ManagedAgent): string {
+function admissionLabel(admission: MessageAdmission | undefined): string {
+  if (!admission) return "saved · admission unconfirmed";
+  switch (admission.state) {
+    case "admitted": return "admitted";
+    case "replied": return "replied";
+    case "blocked_budget": return "saved · blocked by budget";
+    case "blocked_policy": return "saved · blocked by policy";
+    case "needs_review": return "saved · needs review";
+    case "saved": return "saved · admission pending";
+  }
+}
+
+export function renderManagedMessage(message: AgentMessage, agent: ManagedAgent, columns = 80): string {
   const fromAgent = message.sender_type === "agent" || Boolean(message.sender_agent_id);
   const label = fromAgent ? agent.config.identity.display_name : "You";
-  return `\n${theme.cyan(sanitizeTerm(label))}\n${sanitizeTerm(message.body)}\n`;
+  const parsed = message.created_at ? Date.parse(message.created_at) : NaN;
+  const time = Number.isFinite(parsed) ? new Date(parsed).toISOString() : "time unknown";
+  const admission = !fromAgent ? ` · ${admissionLabel(message.admission)}` : "";
+  const width = Math.max(20, Math.floor(columns));
+  const cleanLabel = sliceVisible(sanitizeTerm(label).replace(/[\r\n\t]/g, " "), Math.min(32, width - 16));
+  const speakerTime = `${cleanLabel} · ${time}`;
+  const header = [
+    ...(visibleWidth(speakerTime) <= width ? [speakerTime] : [cleanLabel, time]),
+    ...(admission ? wrapVisible(admission.slice(3), width) : []),
+  ].join("\n");
+  const body = sanitizeTerm(message.body).split("\n").flatMap(line => wrapVisible(line, width)).join("\n");
+  return `\n${header}\n${body}\n`;
+}
+
+export function renderManagedAdmission(admission: MessageAdmission | undefined): string {
+  const state = admission?.state;
+  const next: Record<string, string> = {
+    blocked_budget: "Next: configure this agent's UVT limits, then send a new message.",
+    blocked_policy: "Next: review this agent's permissions in Online before trying again.",
+    needs_review: "Next: review this message in Online.",
+    saved: "Next: use /refresh to check whether Cloud admitted this message.",
+    unreported: "Next: check the shared conversation before sending again.",
+  };
+  return `${admissionLabel(admission)}${next[state ?? "unreported"] ? ` · ${next[state ?? "unreported"]}` : ""}`;
 }
 
 /** Scoped managed-chat hotkey. Repeated key events cannot queue mode changes
@@ -274,18 +325,17 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
   let timer: ReturnType<typeof setInterval> | undefined;
   let closeSession: void | (() => Promise<void>) = undefined;
   let reader: Interface | undefined;
+  let promptReady = false;
   let surfaceClosed = false;
-  let promptDrawn = false;
   let contextState: ManagedChatContext = { chat: "connecting" };
-  let refreshPrompt: (() => void) | undefined;
   const surface: ManagedChatSurface = {
     signal,
     connection: () => ({ chat: contextState.chat, checkedAt: contextState.checkedAt }),
-    setContext(state) { contextState = { ...contextState, ...state }; refreshPrompt?.(); },
+    setContext(state) { contextState = { ...contextState, ...state }; },
     write(text) {
       if (surfaceClosed) return;
       if (ctx.flags.json) out.write(JSON.stringify({ type: "agent_status", text: sanitizeTerm(text) }) + "\n");
-      else if (reader && terminal) { writeManagedChatEvent(out, reader, text); promptDrawn = true; }
+      else if (reader && terminal && promptReady) writeManagedChatEvent(out, reader, text);
       else out.write(text);
     },
   };
@@ -296,13 +346,14 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
     if (readiness.registry.state !== "enabled") { writeGateError(readiness.registry, ctx, deps.err ?? process.stderr); return 1; }
     if (readiness.dm.state !== "enabled") { writeGateError(readiness.dm, ctx, deps.err ?? process.stderr); return 1; }
     if (ctx.flags.json) out.write(JSON.stringify({ type: "readiness", readiness }) + "\n");
-    else out.write(readinessLine(readiness));
+    else if (readiness.model_uvt.state !== "enabled") out.write(`Model admission: ${readiness.model_uvt.code}. ${readiness.model_uvt.remedy}\n`);
     let agent = id ? await client.get(id, signal) : await pickManagedAgent(await client.list(signal), out, signal);
     if (!agent) return 0;
     closeSession = await deps.hooks?.beforeChat?.(ctx, agent, surface);
     const thread = await client.thread(agent.agent_id, signal);
     if (typeof thread["id"] !== "string") throw new Error("Cloud did not return a conversation ID.");
     const conversationId = thread["id"];
+    const admissionReceipts = new Map<string, MessageAdmission>();
     const send = async (body: string): Promise<boolean> => {
       const nonce = randomUUID();
       let receipt;
@@ -312,21 +363,24 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
         throw new Error(`${managedAgentError(error)} Delivery is unconfirmed; check the shared conversation before sending again.`);
       }
       const state = receipt.admission?.state ?? "unreported";
+      if (receipt.admission) {
+        admissionReceipts.set(receipt.id, receipt.admission);
+        while (admissionReceipts.size > 1000) admissionReceipts.delete(admissionReceipts.keys().next().value!);
+      }
       const accepted = state === "admitted" || state === "replied";
       const code = accepted ? "ADMITTED" : "SEND_NOT_ADMITTED";
       if (ctx.flags.json) out.write(JSON.stringify({ type: "message_admission", code, state }) + "\n");
-      else surface.write(theme.dim(`${accepted ? "Message admitted" : "Message saved; execution not accepted"} · ${sanitizeTerm(state)}`) + "\n");
+      else surface.write(theme.dim(renderManagedAdmission(receipt.admission)) + "\n");
       return accepted;
     };
     if (prompt.trim()) return await send(prompt) ? 0 : 1;
     if (!ctx.flags.json) {
-      out.write(renderAgent(agent) + theme.dim("Shared Online DM · /refresh · /exit") + "\n");
-      const help = deps.hooks?.help?.(agent);
-      if (help) out.write(theme.dim(sanitizeTerm(help)) + "\n");
+      out.write("Shared Online DM · /help · /refresh · /exit\n");
     }
     const seen = new Map<string, string>();
     let polling = false;
     let syncFailed = false;
+    let showedEmpty = false;
     let closed = false;
     const ownedInput = terminal ? managedChatInput(inputStream) : undefined;
     const rl = createInterface({ input: ownedInput?.input ?? inputStream, output: out, terminal });
@@ -334,19 +388,8 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
     const lines = rl[Symbol.asyncIterator]();
     let inputClosed = false;
     rl.once("close", () => { inputClosed = true; reader = undefined; });
-    refreshPrompt = (): void => {
-      const columns = (out as Writable & { columns?: number }).columns ?? 80;
-      const next = ctx.flags.json ? "" : `${renderManagedContext(agent!, contextState, columns)}\n${theme.cyan("you › ")}`;
-      if (next === rl.getPrompt()) return;
-      // Measure the OLD prompt before changing its wrapped height.
-      if (promptDrawn && terminal && !inputClosed && !closed) {
-        const { rows } = rl.getCursorPos();
-        out.write(`\r${rows > 0 ? `\x1b[${rows}A` : ""}\x1b[0J`);
-        rl.setPrompt(next); rl.prompt(true);
-      } else rl.setPrompt(next);
-    };
-    refreshPrompt();
-    const onResize = (): void => { refreshPrompt?.(); if (terminal && !inputClosed && !closed) rl.prompt(true); };
+    rl.setPrompt(ctx.flags.json ? "" : theme.cyan("you › "));
+    const onResize = (): void => { if (terminal && !inputClosed && !closed) rl.prompt(true); };
     out.on("resize", onResize);
     const refresh = async (redraw = false): Promise<void> => {
       if (polling || closed) return;
@@ -356,28 +399,32 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
         if (closed) return;
         agent = latest;
         contextState = { ...contextState, chat: "synced", checkedAt: Date.now() };
-        refreshPrompt?.();
-        for (const message of messages) {
-          if (seen.get(message.id) === message.body) continue;
-          const rendered = ctx.flags.json ? JSON.stringify({ type: "message", message }) + "\n" : renderMessage(message, agent!);
-          if (terminal && reader) { writeManagedChatEvent(out, rl, rendered); promptDrawn = true; }
+        if (redraw && !ctx.flags.json) surface.write(renderManagedContext(agent!, contextState, (out as Writable & { columns?: number }).columns ?? 80) + "\n");
+        if (messages.length === 0 && !ctx.flags.json && !showedEmpty) {
+          surface.write("No messages yet. Write to this agent, or use /help for commands.\n");
+          showedEmpty = true;
+        }
+        for (const rawMessage of messages) {
+          const message = rawMessage.admission ? rawMessage : { ...rawMessage, admission: admissionReceipts.get(rawMessage.id) };
+          const fingerprint = JSON.stringify([message.body, message.admission?.state, message.admission?.run_id]);
+          if (seen.get(message.id) === fingerprint) continue;
+          const rendered = ctx.flags.json ? JSON.stringify({ type: "message", message }) + "\n" : renderManagedMessage(message, agent!, (out as Writable & { columns?: number }).columns ?? 80);
+          if (terminal && reader && promptReady) writeManagedChatEvent(out, rl, rendered);
           else out.write(rendered);
-          seen.set(message.id, message.body);
+          seen.set(message.id, fingerprint);
           while (seen.size > 1000) seen.delete(seen.keys().next().value!);
         }
         if (syncFailed && !ctx.flags.json) surface.write(theme.dim("Conversation sync restored.\n"));
         syncFailed = false;
       } catch (error) {
         contextState = { ...contextState, chat: "paused" };
-        refreshPrompt?.();
         if (!closed && !syncFailed) {
           if (ctx.flags.json) out.write(JSON.stringify({ type: "sync_error", message: managedAgentError(error) }) + "\n");
-          else surface.write(theme.yellow("Conversation sync paused. " + sanitizeTerm(managedAgentError(error))) + "\n");
+          else surface.write(theme.yellow("DM sync paused. " + sanitizeTerm(managedAgentError(error)) + " Next: /refresh to retry.") + "\n");
         }
         syncFailed = true;
       } finally {
         polling = false;
-        if (redraw && !closed && !inputClosed && terminal) rl.prompt(true);
       }
     };
     let operations = Promise.resolve();
@@ -396,18 +443,24 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
     rl.on("SIGINT", stop);
     signal.addEventListener("abort", stop, { once: true });
     try {
-      await refresh();
-      if (terminal) timer = setInterval(() => { void refresh(true); }, 3000);
-      if (terminal && !inputClosed) { rl.prompt(); promptDrawn = true; }
+      await refresh(true);
+      if (terminal) timer = setInterval(() => { void refresh(); }, 3000);
+      if (terminal && !inputClosed) { rl.prompt(); promptReady = true; }
       for await (const line of { [Symbol.asyncIterator]: () => lines }) {
         const input = line.trim();
         if (input === "/exit" || input === "/quit") break;
         try {
           await enqueue(async () => {
-            if (input === "/refresh") await refresh();
+            if (input === "/refresh") await refresh(true);
+            else if (input === "/help") {
+              surface.write("Shared Online DM · /refresh checks messages and status · /exit closes chat\n");
+              const help = deps.hooks?.help?.(agent!);
+              if (help) surface.write(sanitizeTerm(help) + "\n");
+              if (isAts(agent!)) surface.write("ATS local preferences do not authorize live orders. RC observation is separate from this DM.\n");
+            }
             else if (input.startsWith("/")) {
               if (!(await deps.hooks?.onChatCommand?.(ctx, agent!, input, surface))) {
-                surface.write("Use /refresh or /exit. Configure this agent with `aether agent configure`.\n");
+                surface.write("Unknown command. Use /help for this agent's commands.\n");
               }
             } else if (input) { await send(input); await refresh(); }
           });
@@ -416,17 +469,17 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
           if (ctx.flags.json) out.write(JSON.stringify({ type: "command_error", message }) + "\n");
           else surface.write(theme.yellow(message) + "\n");
         }
-        if (terminal && !inputClosed) { rl.prompt(); promptDrawn = true; }
+        if (terminal && !inputClosed) { rl.prompt(); promptReady = true; }
       }
     } finally {
       closed = true;
       reader = undefined;
+      promptReady = false;
       removeKeys();
       await operations;
       signal.removeEventListener("abort", stop);
       rl.removeListener("SIGINT", stop);
       out.removeListener("resize", onResize);
-      refreshPrompt = undefined;
       rl.close();
       ownedInput?.dispose();
     }
