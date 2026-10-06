@@ -58,7 +58,14 @@ function displayEvent(event_type: ViewerEventType, payload: Record<string, unkno
   return { event_type, payload: { projection_version: RC_DISPLAY_PROJECTION_VERSION, ...payload } };
 }
 
-/** Event classes this adapter can currently emit. */
+/**
+ * Event classes production code actually emits (#226).
+ *
+ * An adapter below existing is not enough: a type is listed here only when a
+ * production module calls its adapter, which test/rc_producers.test.ts proves
+ * by reading the source. Wiring a producer moves its type here from
+ * RC_UNPRODUCED_EVENT_TYPES; that test fails until the move is made.
+ */
 export const RC_PRODUCED_EVENT_TYPES = [
   "session",
   "presence",
@@ -67,20 +74,20 @@ export const RC_PRODUCED_EVENT_TYPES = [
   "done",
   "error",
   "subagent",
-  "diff_summary",
-  "tests",
-  "ci",
-  "pr_status",
-  "artifact",
-  "preview",
+  "diff_summary", // rc/diff_summary.ts: rc start's opening batch and the run-end diff (#218)
+  "tests", //        commands/rc_verification.ts: verifier readings (#219)
+  "ci", //           rc/action_receipts.ts: Action Rail receipts (#220)
+  "pr_status", //    rc/action_receipts.ts: Action Rail receipts (#220)
+  "artifact", //     rc/artifacts.ts: media-history commits (#221)
+  "preview", //      rc/preview.ts: preview supervisor phases (#222)
 ] as const satisfies readonly ViewerEventType[];
 
 /**
  * Declared in the viewer profile, not yet produced here, and why.
  *
- * Each waits on a subsystem that owns the data. None can be derived from a
- * BrainEvent, so wiring them is separate, checkable work rather than something
- * this adapter could approximate.
+ * Each would wait on a subsystem that owns the data and name it here. None is
+ * deferred now: every viewer type has a production caller (#218-#222), which
+ * test/rc_producers.test.ts re-proves from the source.
  */
 export const RC_UNPRODUCED_EVENT_TYPES: Readonly<Record<string, string>> = Object.freeze({});
 

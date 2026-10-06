@@ -19,14 +19,14 @@ has no tool authority.
 |---|---|
 | `aether rc start` | Start the observer session and return its link. |
 | `aether rc link` | Return the current short-lived observer link. |
-| `aether rc status` | Inspect local session status without replaying the link. |
-| `aether rc exposure` | Inspect what is exposed. |
-| `aether rc viewers` | Show the observer count with the exposure view. It reads `unknown`, never zero, when presence cannot be confirmed. |
+| `aether rc status` | Ask the Cloud for session health (active, pending, reconnecting, offline, revoked, expired), expiry, last accepted receipt and queued/dropped/quarantined counts, without replaying the link. When the Cloud cannot be asked the state is `unknown`, never `active`. |
+| `aether rc exposure` | Inspect what is exposed now, and what is declared but not yet sent. |
+| `aether rc viewers` | Show how many observers the Cloud reports attached, against the broker's cap (a count, not identities). When the Cloud cannot answer it reads `unknown`, never zero, and exits 1. |
 | `aether rc off` | Revoke observation access. |
 
-Use `aether --json rc start`, `link`, or `status` for structured session/device
-identity. Only `start` and `link` return the short-lived link. Integrations must
-not log it.
+Use `aether --json rc start`, `link`, `status`, `exposure` or `viewers` for
+structured session/device identity. Only `start` and `link` return the
+short-lived link. Integrations must not log it.
 
 ## The browser viewer is observer-only
 
@@ -67,6 +67,9 @@ deployment; the live Cloud viewer journey still needs qualification.
   test counts stay local. A run that was interrupted, timed out or could not
   start, or whose working tree changed or could not be identified, is
   `unknown`, never a pass.
+- While a coding run is active, the host heartbeats the session and delivers
+  queued events, backing off during outages. It never delays the run; events
+  still queued at the end are delivered by the next run.
 
 These are release requirements. Local source tests do not establish a qualified
 Cloud viewer or publication.
