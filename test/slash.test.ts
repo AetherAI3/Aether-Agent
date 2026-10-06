@@ -40,24 +40,41 @@ test("resolveSelection rejects out-of-range index and unknown id", () => {
 function fakeCtx(answer: boolean): AppContext {
   return {
     flags: { yes: false, json: false, audit: false, cwd: "." },
-    cfg: { defaultModel: "haiku", baseUrl: "x" },
+    cfg: { defaultModel: "haiku", baseUrl: "x", backend: "cloud" },
+    tokens: { get: async () => "hosted-token" },
     api: { getJson: async () => ({ tier: "pro", default: "haiku", models: [item("opus")] }) },
     confirm: async () => answer,
   } as unknown as AppContext;
 }
 
-test("/model switch prompts and, on yes, signals a restart", async () => {
+test("/model proposes a reviewed switch without restarting or prompting", async () => {
   const out: string[] = [];
+  await primeCatalog(fakeCtx(true));
   const res = await handleSlash(fakeCtx(true), "/model opus", {
     write: (s: string) => out.push(s),
   } as never);
-  assert.deepEqual(res.restart, { model: "opus" });
-  assert.match(out.join(""), /restart the session and clear context/i);
+  assert.deepEqual(res.modelSwitch, { model: "opus", label: "opus", contextWindow: null });
+  assert.equal(res.restart, undefined);
+  assert.doesNotMatch(out.join(""), /restart the session and clear context/i);
 });
 
-test("/model switch on no does NOT restart", async () => {
+test("/model never restarts before the console's explicit choice", async () => {
+  await primeCatalog(fakeCtx(false));
   const res = await handleSlash(fakeCtx(false), "/model opus", { write: () => {} } as never);
   assert.equal(res.restart, undefined);
+  assert.equal(res.modelSwitch?.model, "opus");
+});
+
+test("/model accepts an installed local Ollama id without a hosted catalogue", async () => {
+  const ctx = fakeCtx(false);
+  ctx.cfg.backend = "local";
+  ctx.api = new Proxy({} as AppContext["api"], { get: () => { throw new Error("hosted catalogue contacted"); } });
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ models: [{ name: "qwen2.5-coder:7b" }] })) as typeof fetch;
+  try {
+    const res = await handleSlash(ctx, "/model ollama/qwen2.5-coder:7b", { write: () => {} } as never);
+    assert.equal(res.modelSwitch?.model, "ollama/qwen2.5-coder:7b");
+  } finally { globalThis.fetch = oldFetch; }
 });
 
 test("/mcp no longer prints coming soon", async () => {

@@ -705,7 +705,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "deprecatedAliases": [],
     "args": "<subcommand>",
     "summary": "publish a viewer-only observation stream for this session",
-    "detailedHelp": "aether rc <subcommand>\npublish a viewer-only observation stream for this session\n\nstart [--name <name>]  begin publishing\nstatus                 what is being published\nexposure               what an observer can see\nviewers                who is observing\noff                    end publishing and revoke the session\n\nObservation only. Run `aether rc exposure` for the full disclosure.",
+    "detailedHelp": "aether rc <subcommand>\npublish a viewer-only observation stream for this session\n\nstart [--name <name>]  begin publishing and make an observer link\nlink                   make a fresh one-time observer link\nstatus                 what is being published\nexposure               what an observer can see\nviewers                who is observing\noff                    end publishing and revoke the session\n\nObservation only. Run `aether rc exposure` for the full disclosure.",
     "section": "Account",
     "hidden": true,
     "permissionClass": "account",
@@ -2741,9 +2741,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "[--title t] [--base b]",
+    "args": "[--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]",
     "summary": "publish the head branch and open a pull request",
-    "detailedHelp": "aether ship [--title t] [--base b]\npublish the head branch and open a pull request",
+    "detailedHelp": "aether ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]\npublish the head branch and open a pull request\n--pr-draft prints an editable, revision-bound JSON proposal without publishing; save and edit it, then pass --draft-file to publish that proposal. --title and --body override its text verbatim. --base selects the target branch. --approve publish authorizes publication; --yes alone does not. --json previews the exact planned argv without publishing.",
     "section": "Start",
     "hidden": false,
     "permissionClass": "destructive",
@@ -2808,6 +2808,12 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "body": {
         "type": "string"
       },
+      "pr-draft": {
+        "type": "boolean"
+      },
+      "draft-file": {
+        "type": "string"
+      },
       "base": {
         "type": "string"
       }
@@ -2823,7 +2829,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "ship",
-      "usage": "aether ship [--title t] [--base b]",
+      "usage": "aether ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]",
       "visible": true,
       "disposition": "generated"
     },
@@ -3032,21 +3038,43 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:auth",
+    "surface": "slash",
+    "name": "auth",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "[status|login|continue|new|draft]",
+    "summary": "repair hosted login and explicitly continue a rejected task",
+    "detailedHelp": "/auth [status|login|continue|new|draft]\nCheck credential source, sign in with browser or --no-browser, explicitly continue a safely rejected task, or restore a type-ahead draft. Account changes require /auth new.",
+    "section": "Session",
+    "hidden": false,
+    "permissionClass": "account",
+    "availability": { "state": "runtime-dependent", "capabilityRequirements": ["aether.hosted"] },
+    "telemetryName": "slash.auth",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": { "id": "handler:slash:auth", "kind": "host", "module": "src/commands/slash.ts", "symbol": "handleSlash" },
+    "docs": { "kind": "manifest", "module": "src/commands/command_manifest_data.ts", "symbol": "COMMAND_MANIFEST_SOURCE", "target": "auth", "usage": "/auth [status|login|continue|new|draft]", "visible": true, "disposition": "generated" },
+    "release": { "disposition": "new", "note": "In-console hosted authentication repair with explicit safe continuation." }
+  },
+  {
     "key": "slash:models",
     "surface": "slash",
     "name": "models",
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "summary": "interactive model picker",
-    "detailedHelp": "/models\ninteractive model picker",
+    "summary": "list installed Ollama models locally or account models when hosted",
+    "detailedHelp": "/models\nLocal sessions list only models installed at OLLAMA_HOST, with no hosted account call or pull. Hosted sessions list the account-scoped Aether catalogue. Non-TTY and JSON sessions show stable IDs for /model <tag|n|id>.",
     "section": "Session",
     "hidden": false,
     "permissionClass": "unknown",
     "availability": {
       "state": "runtime-dependent",
       "capabilityRequirements": [
-        "aether.catalogue"
+        "aether.catalogue",
+        "ollama.local"
       ]
     },
     "telemetryName": "slash.models",
@@ -3068,8 +3096,8 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
+      "disposition": "changed",
+      "note": "Local console sessions now discover installed Ollama models without hosted catalogue access."
     }
   },
   {
@@ -3079,16 +3107,17 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "<n|id>",
-    "summary": "switch model (no arg → picker)",
-    "detailedHelp": "/model <n|id>\nswitch model (no arg → picker)",
+    "args": "<tag|n|id>",
+    "summary": "choose a model, then continue this task or start fresh",
+    "detailedHelp": "/model <tag|n|id> validates a local tag against installed models at OLLAMA_HOST, or a hosted ID against the account catalogue. Local IDs use ollama/<tag>; legacy ollama:<tag> input remains accepted. At the idle console, review the task brief and choose /switch continue, /switch fresh, or /switch cancel.",
     "section": "Session",
     "hidden": false,
     "permissionClass": "unknown",
     "availability": {
       "state": "runtime-dependent",
       "capabilityRequirements": [
-        "aether.catalogue"
+        "aether.catalogue",
+        "ollama.local"
       ]
     },
     "telemetryName": "slash.model",
@@ -3105,14 +3134,35 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "model",
-      "usage": "/model <n|id>",
+      "usage": "/model <tag|n|id>",
       "visible": true,
       "disposition": "generated"
     },
     "release": {
-      "disposition": "existing",
-      "note": null
+      "disposition": "changed",
+      "note": "Local model selection now validates an installed Ollama tag and uses canonical ollama/<tag> IDs."
     }
+  },
+  {
+    "key": "slash:switch",
+    "surface": "slash",
+    "name": "switch",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "<subcommand>",
+    "summary": "review and decide a pending model switch",
+    "detailedHelp": "/switch brief shows the exact continuation brief. /switch edit goal|constraints|outstanding <text> revises it. /switch continue sends it with the next turn; /switch fresh clears task context; /switch cancel keeps the current session.",
+    "section": "Session",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": { "state": "runtime-dependent", "capabilityRequirements": [] },
+    "telemetryName": "slash.switch",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": { "id": "handler:slash:switch", "kind": "host", "module": "src/commands/slash.ts", "symbol": "handleSlash" },
+    "docs": { "kind": "manifest", "module": "src/commands/command_manifest_data.ts", "symbol": "COMMAND_MANIFEST_SOURCE", "target": "switch", "usage": "/switch <subcommand>", "visible": true, "disposition": "generated" },
+    "release": { "disposition": "new", "note": "Model switching now offers reviewed task continuation, fresh start, and cancellation." }
   },
   {
     "key": "slash:agent",
@@ -4000,6 +4050,240 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:shell-result",
+    "surface": "slash",
+    "name": "shell-result",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "explicitly share the last local shell result with chat (bounded)",
+    "detailedHelp": "/shell-result\nexplicitly share the last local shell result with chat (bounded)",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "network",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.shell-result",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:shell-result",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "shell-result",
+      "usage": "/shell-result",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Coding console only; explicit sharing of at most 8 KiB of untrusted local output."
+    }
+  },
+  {
+    "key": "slash:shell-reset",
+    "surface": "slash",
+    "name": "shell-reset",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "discard local shell cwd/environment/functions; never replay",
+    "detailedHelp": "/shell-reset\ndiscard local shell cwd/environment/functions; never replay",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.shell-reset",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:shell-reset",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "shell-reset",
+      "usage": "/shell-reset",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
+    "key": "slash:terminal",
+    "surface": "slash",
+    "name": "terminal",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "start an explicit Linux interactive terminal (Python 3 and TTY required)",
+    "detailedHelp": "/terminal\nstart an explicit Linux interactive terminal (Python 3 and TTY required)",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal",
+      "usage": "/terminal",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
+    "key": "slash:terminal-attach",
+    "surface": "slash",
+    "name": "terminal-attach",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "reattach the current local terminal",
+    "detailedHelp": "/terminal-attach\nreattach the current local terminal",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal-attach",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal-attach",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal-attach",
+      "usage": "/terminal-attach",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
+    "key": "slash:terminal-stop",
+    "surface": "slash",
+    "name": "terminal-stop",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "stop the current local terminal and its process group",
+    "detailedHelp": "/terminal-stop\nstop the current local terminal and its process group",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal-stop",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal-stop",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal-stop",
+      "usage": "/terminal-stop",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
+    "key": "slash:terminal-status",
+    "surface": "slash",
+    "name": "terminal-status",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "summary": "show the current local terminal ID and state",
+    "detailedHelp": "/terminal-status\nshow the current local terminal ID and state",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.terminal-status",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:terminal-status",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "terminal-status",
+      "usage": "/terminal-status",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; handled before model routing."
+    }
+  },
+  {
     "key": "slash:queue",
     "surface": "slash",
     "name": "queue",
@@ -4448,9 +4732,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "<desc|view|start|pause|resume|cancel|complete|note>",
-    "summary": "create/manage a goal (agent plans phases)",
-    "detailedHelp": "/goal <desc|view|start|pause|resume|cancel|complete|note>\ncreate/manage a goal (agent plans phases)",
+    "args": "<command>",
+    "summary": "draft and edit goal plans, or run one accepted phase with host verification",
+    "detailedHelp": "/goal <command>\nUse /goal followed by an objective to draft a repository-grounded plan. /goal save accepts it; /goal edit [id] reopens it. /goal run [id] executes one accepted phase through the host coding loop and check. /goal run resume [id] reconciles a checkpoint. /goal start and /goal complete are manual tracking actions and do not certify tests.",
     "section": "Goals & Workflows",
     "hidden": false,
     "permissionClass": "unknown",
@@ -4472,7 +4756,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "goal",
-      "usage": "/goal <desc|view|start|pause|resume|cancel|complete|note>",
+      "usage": "/goal <command>",
       "visible": true,
       "disposition": "generated"
     },
@@ -5400,9 +5684,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "[--title t] [--base b]",
+    "args": "[--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]",
     "summary": "publish the head branch and open a pull request",
-    "detailedHelp": "/ship [--title t] [--base b]\npublish the head branch and open a pull request",
+    "detailedHelp": "/ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]\npublish the head branch and open a pull request\n--pr-draft prints an editable, revision-bound JSON proposal without publishing; edit it and pass --draft-file to use it. Quote values containing spaces or newlines. --title and --body override the draft verbatim. --approve publish authorizes publication; --yes alone does not. --json previews the exact argv without publishing.",
     "section": "UVT Tools",
     "hidden": false,
     "permissionClass": "unknown",
@@ -5424,7 +5708,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "ship",
-      "usage": "/ship [--title t] [--base b]",
+      "usage": "/ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]",
       "visible": true,
       "disposition": "generated"
     },

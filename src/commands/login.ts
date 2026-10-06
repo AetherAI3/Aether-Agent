@@ -53,7 +53,9 @@ export async function cmdLogin(
   ctx: AppContext,
   opts: LoginOpts,
   dependencies: LoginDependencies = LOGIN_DEPENDENCIES,
+  signal?: AbortSignal,
 ): Promise<number> {
+  if (signal?.aborted) return 1;
   // 1. Direct token.
   if (opts.token) {
     await ctx.tokens.set(opts.token);
@@ -95,10 +97,15 @@ export async function cmdLogin(
     }
   }
   // 4. Default: device authorization grant through the portal (RFC 8628).
-  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms: number): Promise<void> => new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason ?? new DOMException("login cancelled", "AbortError")); return; }
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", cancel); resolve(); }, ms);
+    const cancel = (): void => { clearTimeout(timer); reject(signal?.reason ?? new DOMException("login cancelled", "AbortError")); };
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
   let code;
   try {
-    code = await requestDeviceCode(ctx.api);
+    code = await requestDeviceCode(ctx.api, signal);
   } catch (err) {
     process.stderr.write(
       formatErrorLine(`could not start login: ${errorMessage(err)}`, { hint: errorHint(err, ctx.cfg.baseUrl) }),
@@ -127,7 +134,8 @@ export async function cmdLogin(
   }
   process.stdout.write("Waiting for approval in your browser…\n");
   try {
-    const token = await pollForToken(ctx.api, code, sleep);
+    const token = await pollForToken(ctx.api, code, sleep, signal);
+    if (signal?.aborted) return 1;
     await ctx.tokens.set(token);
     process.stdout.write("✓ Logged in.\n");
     warnEnvTokenShadow();

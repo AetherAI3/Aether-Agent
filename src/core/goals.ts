@@ -10,7 +10,7 @@ import { isCurrentWorkspace, normalizeWorkspace } from "./workspace_scope.js";
 // ── Types ───────────────────────────────────────────────────────────
 
 export type PhaseStatus = "pending" | "in_progress" | "complete" | "failed" | "skipped";
-export type GoalStatus = "idle" | "running" | "paused" | "complete" | "halted" | "failed";
+export type GoalStatus = "idle" | "manual" | "running" | "paused" | "blocked" | "verification_pending" | "complete" | "halted" | "failed";
 export type TaskMiniStatus = "queued" | "running" | "complete" | "failed" | "skipped";
 
 export interface GoalTask {
@@ -26,9 +26,40 @@ export interface GoalPhase {
   status: PhaseStatus;
   tasks: GoalTask[];
   userNote: string;
+  /** User-accepted conditions for declaring this phase complete. */
+  completionCriteria?: string[];
+  /** A manual mark is never presented as host-verified work. */
+  completionMethod?: "manual" | "verified";
+  /** The latest explicit coding attempt and its durable host receipts. */
+  run?: GoalPhaseRun;
+  /** Prior attempts remain available when an interrupted phase is resumed. */
+  runHistory?: GoalPhaseRun[];
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+}
+
+export interface GoalPhaseRun {
+  attemptId: string;
+  state: "working" | "blocked" | "verification_pending" | "failed" | "complete" | "paused" | "cancelled" | "interrupted";
+  reason: string;
+  startedAt: string;
+  finishedAt?: string;
+  sessionId?: string;
+  turnId?: string;
+  model?: string;
+  workspace: string;
+  checkCommand: string | null;
+  acceptedScopeDigest: string;
+  criteria: string[];
+  baseline?: { head: string | null; digest: string };
+  resulting?: { head: string | null; digest: string };
+  touchedFiles?: string[];
+  hostRefusals?: string[];
+  check?: { state: string; exitCode: number | null; reason: string };
+  verification?: { status: "verified" | "failed" | "stale" | "unknown"; reason: string; ranAt?: string };
+  checkReceipt?: { command: string; ranAt: string; head: string | null; treeDigest: string; exitCode: number };
+  exitCode?: number;
 }
 
 export interface Goal {
@@ -41,6 +72,21 @@ export interface Goal {
   createdAt: string;
   completedAt?: string;
   cwd?: string;
+  /** Absent on plans saved before editable authoring was introduced. */
+  plan?: GoalPlan;
+}
+
+export interface GoalPlan {
+  state: "draft" | "accepted";
+  source: "repository" | "model" | "manual";
+  stack: string[];
+  relevantFiles: string[];
+  checks: string[];
+  instructions: string[];
+  assumptions: string[];
+  constraints: string[];
+  verification: { state: "known" | "unresolved"; check: string | null };
+  acceptedAt?: string;
 }
 
 // ── Store ────────────────────────────────────────────────────────────
@@ -145,7 +191,9 @@ export function goalsForWorkspace(
 }
 
 export function getActiveGoal(cwd: string, file: string = goalsFile()): Goal | undefined {
-  return goalsForWorkspace(cwd, file).find((g) => g.status === "running" || g.status === "paused");
+  const goals = goalsForWorkspace(cwd, file);
+  return goals.find((g) => g.status === "running")
+    ?? goals.find((g) => ["manual", "paused", "blocked", "verification_pending"].includes(g.status));
 }
 
 export function newGoal(title: string, cwd: string): Goal {
@@ -167,6 +215,7 @@ export function newPhase(idx: number, title: string, description: string): GoalP
     status: "pending",
     tasks: [],
     userNote: "",
+    completionCriteria: [],
     createdAt: new Date().toISOString(),
   };
 }
@@ -194,7 +243,7 @@ export function setPhaseNote(goal: Goal, phaseId: string, note: string): Goal {
 
 export function startGoal(goal: Goal): Goal {
   const copy = cloneGoal(goal);
-  copy.status = "running";
+  copy.status = "manual";
   const first = copy.phases.find((p) => p.status === "pending");
   if (first) {
     first.status = "in_progress";
@@ -208,21 +257,14 @@ export function startGoal(goal: Goal): Goal {
 export function completePhase(goal: Goal, phaseId: string): Goal {
   const copy = cloneGoal(goal);
   const phase = copy.phases.find((p) => p.id === phaseId);
-  if (phase) {
-    phase.status = "complete";
-    phase.completedAt = new Date().toISOString();
-    for (const t of phase.tasks) t.status = "complete";
-  }
-  const next = copy.phases.find((p) => p.status === "pending");
-  if (next) {
-    next.status = "in_progress";
-    next.startedAt = new Date().toISOString();
-    copy.activePhaseId = next.id;
-    copy.selectedPhaseId = next.id;
-  } else {
+  if (!phase || phase.run?.state === "working") return copy;
+  phase.status = "complete";
+  phase.completionMethod = "manual";
+  phase.completedAt = new Date().toISOString();
+  if (copy.phases.every((p) => p.status === "complete")) {
     copy.status = "complete";
     copy.completedAt = new Date().toISOString();
-    copy.activePhaseId = undefined;
-  }
+  } else copy.status = "idle";
+  copy.activePhaseId = undefined;
   return copy;
 }

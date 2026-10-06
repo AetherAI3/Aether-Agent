@@ -13,7 +13,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/npm-prepare.yml
+    with:
+      tag: ${{ github.event.release.tag_name }}
+
   publish:
+    needs: prepare
+    # npm OIDC and provenance require a supported cloud-hosted builder/publisher.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: npm-production
@@ -23,17 +32,25 @@ jobs:
       attestations: write
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
+      EXPECTED_SOURCE_SHA: ${{ github.sha }}
+      PREPARED_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      PREPARED_NODE_VERSION: ${{ needs.prepare.outputs.node_version }}
     steps:
-      - name: Checkout immutable release tag
+      - name: Checkout immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Verify release commit belongs to a trusted release line
         shell: bash
         run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$EXPECTED_SOURCE_SHA" = "$PREPARED_SOURCE_SHA"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$EXPECTED_SOURCE_SHA"
           git fetch --no-tags origin main release/0.3
 
           if git merge-base --is-ancestor HEAD origin/main; then
@@ -55,14 +72,17 @@ jobs:
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
+      - name: Require the qualified Node version
+        run: node -e "require('node:assert/strict').equal(process.versions.node, process.env.PREPARED_NODE_VERSION)"
+
       - name: Install dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
 
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
-      - name: Test release source
-        run: npm test
+      - name: Build release source on the cloud-hosted runner
+        run: npm run build
 
       - name: Verify tag, production policy, and package allowlist
         run: npm run verify:production -- --tag "$RELEASE_TAG"
@@ -74,7 +94,7 @@ jobs:
         id: pack
         shell: bash
         run: |
-          npm pack --json --ignore-scripts > pack-metadata.json
+          node scripts/npm-pack-reproducible.mjs > pack-metadata.json
           tarball="$(node -e "const fs=require('node:fs');const p=JSON.parse(fs.readFileSync('pack-metadata.json','utf8'));process.stdout.write(p[0].filename)")"
           test -n "$tarball"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
@@ -93,6 +113,12 @@ jobs:
           prefix="$RUNNER_TEMP/aether-install"
           node dist/scripts/packed-repl-auth-smoke.js "$prefix/lib/node_modules/aether-agents/dist/src/main.js"
 
+      - name: Require rebuilt tarball to match tested bytes
+        env:
+          AETHER_RELEASE_SOURCE_SHA: ${{ github.sha }}
+          AETHER_EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball_sha256 }}
+        run: node scripts/npm-release-packet.mjs verify
+
       - name: Attest package provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -106,6 +132,7 @@ jobs:
             ${{ steps.pack.outputs.tarball }}
             aether-agents.cdx.json
             pack-metadata.json
+            npm-release-packet.json
           if-no-files-found: error
           retention-days: 90
 

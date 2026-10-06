@@ -255,6 +255,7 @@ async function agentProbes(
       ...buildDevSessionRequest({
         task: `aether doctor health probe ${nonce}`,
         capabilities: TOOLS,
+        readFileRanges: true,
         protocolVersion: DEV_PROTOCOL_VERSION,
       }),
       // The doctor contract. A server that does not understand it will either

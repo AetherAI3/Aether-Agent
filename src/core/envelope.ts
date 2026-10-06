@@ -63,6 +63,11 @@ export interface DevSessionWireRequest {
   /** Tool names this host supports — the client owns the allowlist; the
    *  server intersects with its own known set and never sends anything else. */
   capabilities: string[];
+  read_file_ranges?: boolean;
+  /** Advertise expected_revision support independently of older range support. */
+  read_file_revisions?: boolean;
+  /** Host refuses legacy blind replacements of existing files. */
+  write_file_preconditions?: boolean;
   max_uvt?: number;
   repo?: Record<string, unknown>;
   protocol_version: number;
@@ -73,6 +78,9 @@ export interface BuildDevSessionArgs {
   model?: string;
   effort?: string;
   capabilities: readonly string[];
+  readFileRanges?: boolean;
+  readFileRevisions?: boolean;
+  writeFilePreconditions?: boolean;
   maxUvt?: number;
   repo?: Record<string, unknown>;
   protocolVersion: number;
@@ -88,6 +96,9 @@ export function buildDevSessionRequest(args: BuildDevSessionArgs): DevSessionWir
     protocol_version: args.protocolVersion,
   };
   if (args.maxUvt && args.maxUvt > 0) req.max_uvt = args.maxUvt;
+  if (args.readFileRanges) req.read_file_ranges = true;
+  if (args.readFileRevisions) req.read_file_revisions = true;
+  if (args.writeFilePreconditions) req.write_file_preconditions = true;
   if (args.repo) req.repo = args.repo;
   return req;
 }

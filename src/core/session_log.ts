@@ -13,6 +13,8 @@ import type { SessionContext } from "./session_resume.js";
 import { join } from "node:path";
 import type { BrainEvent } from "./brain_protocol.js";
 import type { ToolResult } from "./tool_executor.js";
+import type { CheckReading } from "./verify_gate.js";
+import type { VerificationRecord } from "./verification_record.js";
 import { registerRestore } from "../ui/restore.js";
 import { normalizeWorkspace } from "./workspace_scope.js";
 import { logsRoot } from "./logs_root.js";
@@ -80,7 +82,7 @@ export function readRepoIdentity(cwd: string, run: Runner): RepoIdentity | undef
 const SENSITIVE_KEY =
   /token|secret|password|authorization|api[_-]?key|private[_-]?key|credential|(?:^|[_-])pat(?:$|[_-])/i;
 
-function redactInline(value: string): string {
+export function redactInline(value: string): string {
   return value
     .replace(/(bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
     .replace(/((?:token|secret|password|api[_-]?key|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")
@@ -140,7 +142,9 @@ function loggedEvent(ev: BrainEvent): BrainEvent {
 /** The terminal status of a run. Derived by the host's verify gate (verify_gate.ts)
  * from a real final test run — NEVER from the brain's self-report. "ok" only when the
  * host's tests are green; the breaker reasons (stalled/no-progress/max-turns) are the
- * brain's, surfaced through when the host is red; "unverified" when there is no gate. */
+ * brain's, surfaced through when the host is red; "unverified" when there is no gate.
+ * "cancelled" and "timed-out" record a run that was stopped — before or during its
+ * check — so the library never files an interruption as a red test run. */
 export type FinalStatus =
   | "ok"
   | "incomplete"
@@ -149,11 +153,13 @@ export type FinalStatus =
   | "no-progress"
   | "max-turns"
   | "failed"
-  | "error";
+  | "error"
+  | "cancelled"
+  | "timed-out";
 
 export interface SessionMeta {
   task: string;
-  /** Resolved model provenance. Local runs store `ollama:<tag>`; cloud auto
+  /** Resolved model provenance. Local runs store `ollama/<tag>`; cloud auto
    * routing stores an empty string rather than guessing the server's choice. */
   model: string;
   poolGb: number;
@@ -184,6 +190,15 @@ export interface SessionMeta {
   instructionsDigest?: string;
   /** The rules and skills this run was conducted under (digests, never content). */
   context?: SessionContext;
+}
+
+interface ManifestEnd {
+  ended: string;
+  finalStatus: string;
+  remaining?: number;
+  verification?: CheckReading;
+  verificationRecord?: VerificationRecord;
+  hostRefusals?: string[];
 }
 
 export class SessionLog {
@@ -325,8 +340,9 @@ export class SessionLog {
 
   /** Finalize the manifest. `finalStatus` is derived from the HOST's own final
    * test run (ground truth), never from the brain's self-report. `remaining` =
-   * failing tests when not ok (only written when > 0). */
-  close(finalStatus: FinalStatus, ended: string, remaining = 0): void {
+   * failing tests when not ok (only written when > 0). `verification` is the
+   * check reading the footer and JSON outcome rendered, recorded beside them. */
+  close(finalStatus: FinalStatus, ended: string, remaining = 0, verification?: CheckReading, verificationRecord?: VerificationRecord, hostRefusals?: string[]): void {
     this.flush();
     this.unregisterFlush();
     // Read the repository identity HERE and nowhere else. The run is over, so
@@ -343,14 +359,12 @@ export class SessionLog {
     } catch {
       this.repo = undefined;
     }
-    this.writeManifest({ ended, finalStatus, remaining });
+    this.writeManifest({ ended, finalStatus, remaining, ...(verification ? { verification } : {}), ...(verificationRecord ? { verificationRecord } : {}), ...(hostRefusals?.length ? { hostRefusals } : {}) });
   }
 
   /** The manifest body — the authoritative record of this session, and the only
    *  thing the session index is ever built from. */
-  private manifestBody(
-    end: { ended: string; finalStatus: string; remaining?: number } | null,
-  ): Record<string, unknown> {
+  private manifestBody(end: ManifestEnd | null): Record<string, unknown> {
     const m = this.meta;
     // What the CALLER said wins over what was probed: a caller that knows the
     // branch (because it made one) knows better than a probe of the launch
@@ -389,10 +403,30 @@ export class SessionLog {
       toolCalls: this.toolCalls,
       filesTouched: this.written.size,
       ...(end?.remaining != null && end.remaining > 0 && { remaining: end.remaining }),
+      // The command and any server text are the user's and the model's; the
+      // same inline redaction the task and testCmd get applies to the reason.
+      ...(end?.verification && {
+        verification: {
+          state: end.verification.state,
+          reason: redactInline(end.verification.reason),
+          exitCode: end.verification.exitCode,
+          failing: end.verification.failing,
+        },
+      }),
+      ...(end?.verificationRecord && {
+        verificationRecord: {
+          command: redactInline(end.verificationRecord.command),
+          ranAt: end.verificationRecord.ranAt,
+          head: end.verificationRecord.head,
+          treeDigest: end.verificationRecord.treeDigest,
+          exitCode: end.verificationRecord.exitCode,
+        },
+      }),
+      ...(end?.hostRefusals?.length && { hostRefusals: end.hostRefusals.slice(0, 16).map(redactInline) }),
     };
   }
 
-  private writeManifest(end: { ended: string; finalStatus: string; remaining?: number } | null): void {
+  private writeManifest(end: ManifestEnd | null): void {
     const body = this.manifestBody(end);
     writeFileSync(this.manifestPath, JSON.stringify(body, null, 2) + "\n", {
       encoding: "utf8",

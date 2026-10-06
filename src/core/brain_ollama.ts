@@ -1,7 +1,7 @@
 // OllamaBrain — the fully-local brain, in TypeScript (no Python subprocess).
 //
 // It runs the same agentic chat+tool loop the headless Python brain does, but
-// inline: it calls Ollama (core/ollama.ts) with the 8 canonical tools, and on a
+// inline: it calls Ollama (core/ollama.ts) with the canonical tools, and on a
 // tool_call it emits a {type:"tool_call"} event and AWAITS the host's
 // tool_result via sendToolResult — mirroring LocalBrain's queue handoff so the
 // host loop (commands/code.ts hostLoop) drives it identically to local/cloud.
@@ -47,9 +47,9 @@ export interface OllamaBrainOptions {
 
 const DEFAULT_MAX_TURNS = 24;
 
-// The 8 canonical tools, advertised to the model as OpenAI function schemas. The
+// The canonical tools, advertised to the model as OpenAI function schemas. The
 // ONE implementation lives host-side in tool_executor.ts; this only describes
-// them so the model can request them. Names are pinned by TOOLS (protocol v3).
+// them so the model can request them. Names are pinned by TOOLS (protocol v4).
 const TOOL_SCHEMAS: readonly ToolSchema[] = ollamaToolSchemas();
 
 function systemPersona(tools: readonly ToolName[]): string {
@@ -80,6 +80,8 @@ export class OllamaBrain implements Brain {
   private readonly pauseWaiters = new Set<() => void>();
   private readonly steerQueue: string[] = [];
   private steerBytes = 0;
+  // Incremented per model reply: tool calls batched into one reply share it.
+  private round = 0;
 
   constructor(opts: OllamaBrainOptions = {}) {
     this.opts = opts;
@@ -129,6 +131,11 @@ export class OllamaBrain implements Brain {
     this.steerQueue.push(steer);
     this.steerBytes += bytes;
     return { accepted: true, state: this.paused ? "paused" : "running" };
+  }
+
+  /** The model reply the outstanding tool call belongs to (Brain.modelRound). */
+  modelRound(): number {
+    return this.round;
   }
 
   close(): void {
@@ -214,6 +221,7 @@ export class OllamaBrain implements Brain {
         }
 
         const calls = reply.tool_calls ?? [];
+        this.round += 1;
         // A pause received while the network request was in flight takes
         // effect before any resulting tool call or answer becomes observable.
         await this.waitWhilePaused();
@@ -334,8 +342,10 @@ function parseArgs(raw: string): Record<string, unknown> {
  */
 export function ollamaToolSchemas(tools: readonly ToolName[] = TOOLS): readonly ToolSchema[] {
   const summaries: Readonly<Record<ToolName, string>> = {
-    read_file: "Read a workspace file.",
-    write_file: "Write or overwrite a workspace file.",
+    read_file: "Read a bounded byte range (offset/max_bytes) or line range (start_line/max_lines). A complete byte read includes a replace_token for write_file. On supported Linux filesystems, pass the revision as expected_revision on each continuation and restart if stale; other systems return revision_unsupported for guarded reads. An initial unguarded read can return a SHA-256 digest for patch_file. Do not combine range modes.",
+    list_directory: "List one bounded page of a workspace directory. Use the returned cursor for the next page.",
+    patch_file: "Replace one exact range in a file using its read_file SHA-256 digest. A stale digest fails without writing.",
+    write_file: "Create a new workspace file, or replace an existing small text file only with expected_revision and replace_token from one complete read_file byte result. Partial reads cannot authorize replacement; use patch_file for larger files.",
     run_shell: "Run a shell command in the workspace.",
     run_tests: "Run the project's test command.",
     repo_search: "Grep the repository for a string.",

@@ -47,6 +47,8 @@ import {
   type VerificationReading,
 } from "../core/verification_record.js";
 import { openPullRequest, prCreateArgs, type ShipRequest } from "../core/ship.js";
+import { getActiveGoal } from "../core/goals.js";
+import { assertCurrentPrDraft, preparePrDraft, readPreparedPrDraft, type PreparedPrDraft } from "../core/pr_draft.js";
 import type { RepoSpec } from "../core/repo.js";
 import { defaultRunner, type Runner } from "../core/worktree.js";
 import { confirm, stdioPrompt, type PromptIO } from "../ui/interact.js";
@@ -55,6 +57,8 @@ import { theme } from "../ui/theme.js";
 export interface ShipFlags {
   title?: string | undefined;
   body?: string | undefined;
+  draft?: boolean | undefined;
+  draftFile?: string | undefined;
   base?: string | undefined;
   yes: boolean;
   json: boolean;
@@ -159,6 +163,7 @@ export function renderShipConfirm(
     `  base branch  ${request.base ?? "(repository default)"}`,
     `  commits      ${ahead} ahead of ${state.base.branch ?? "an unresolved base"}`,
     `  title        ${request.title}`,
+    `  body         ${request.body.split("\n").join("\n               ")}`,
     // classifyVerification's own words. Nothing in this command re-words them,
     // and nothing in it can upgrade a stale or unknown reading to verified.
     `  verified     ${verification.status} — ${verification.reason}`,
@@ -180,7 +185,15 @@ export function renderShipConfirm(
 // ── the command ─────────────────────────────────────────────────────────────
 
 export async function runShip(_ctx: AppContext, deps: ShipDeps, flags: ShipFlags): Promise<number> {
-  const state = readRepoState(deps.run, deps.cwd, flags.base ? { base: flags.base } : {});
+  let state = readRepoState(deps.run, deps.cwd, flags.base ? { base: flags.base } : {});
+  if (state.ok && !flags.base && !state.base.revision) {
+    // A newly cloned checkout may have origin/main but no origin/HEAD symbolic
+    // ref yet. Resolve an existing common base before requiring a bound draft.
+    for (const candidate of ["main", "master"]) {
+      const resolved = readRepoState(deps.run, deps.cwd, { base: candidate });
+      if (resolved.ok && resolved.base.revision && resolved.head.branch !== candidate) { state = resolved; break; }
+    }
+  }
   if (!state.ok) {
     deps.out.write(`✗ ${state.reason}\n`);
     return 1;
@@ -204,13 +217,29 @@ export async function runShip(_ctx: AppContext, deps: ShipDeps, flags: ShipFlags
     return 1;
   }
 
-  const subject = deps.run("git", ["-C", state.root, "log", "-1", "--format=%s"], state.root);
-  const body = deps.run("git", ["-C", state.root, "log", "-1", "--format=%b"], state.root);
   const verification = classifyVerification(readVerification(state.root), treeIdentity(deps.run, state.root));
+  const scope = getActiveGoal(state.root);
+  let generated: PreparedPrDraft;
+  let edited: PreparedPrDraft | undefined;
+  try {
+    generated = preparePrDraft(deps.run, state, verification, scope);
+    if (flags.draftFile) {
+      edited = readPreparedPrDraft(flags.draftFile);
+      assertCurrentPrDraft(edited, generated);
+    }
+  } catch (error) {
+    deps.out.write(`✗ ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+
+  if (flags.draft) {
+    deps.out.write(JSON.stringify({ ...generated, title: flags.title ?? edited?.title ?? generated.title, body: flags.body ?? edited?.body ?? generated.body }, null, 2) + "\n");
+    return 0;
+  }
 
   const planned = planShip(state, {
-    title: (flags.title ?? (subject.status === 0 ? subject.stdout.trim() : "")).trim(),
-    body: (flags.body ?? (body.status === 0 ? body.stdout.trim() : "")).trim(),
+    title: flags.title ?? edited?.title ?? generated.title,
+    body: flags.body ?? edited?.body ?? generated.body,
     ...(flags.base ? { base: flags.base } : {}),
     // Only a verification that actually reads "verified" is stated on the pull
     // request. A stale or unknown reading is shown to the user on the screen
@@ -220,7 +249,7 @@ export async function runShip(_ctx: AppContext, deps: ShipDeps, flags: ShipFlags
   if ("ok" in planned) {
     deps.out.write(`✗ ${planned.reason}\n`);
     if (!flags.title) {
-      deps.out.write(theme.dim("  give a title with --title, or commit with a subject that can serve as one.\n"));
+      deps.out.write(theme.dim("  give a title with --title or edit an exported PR draft.\n"));
     }
     return 1;
   }
@@ -242,6 +271,9 @@ export async function runShip(_ctx: AppContext, deps: ShipDeps, flags: ShipFlags
           pushUrl: state.remote?.pushUrl ?? null,
           aheadOfBase: state.aheadOfBase,
           verification: { status: verification.status, reason: verification.reason },
+          draftBinding: generated.binding,
+          title: planned.title,
+          body: planned.body,
           commands: plannedCommands(state, planned),
         },
         null,
@@ -271,6 +303,18 @@ export async function runShip(_ctx: AppContext, deps: ShipDeps, flags: ShipFlags
         theme.dim("  --yes does not approve publishing. Pass --approve publish to authorise it in a script.\n"),
       );
     }
+    return 1;
+  }
+
+  // Approval was for this exact base/head and evidence. Re-read after the
+  // prompt, before any push, so a changed branch cannot publish a stale draft.
+  try {
+    const freshState = readRepoState(deps.run, deps.cwd, { base: state.base.branch ?? undefined });
+    if (!freshState.ok) throw new Error(freshState.reason);
+    const freshVerification = classifyVerification(readVerification(freshState.root), treeIdentity(deps.run, freshState.root));
+    assertCurrentPrDraft(generated, preparePrDraft(deps.run, freshState, freshVerification, getActiveGoal(freshState.root)));
+  } catch (error) {
+    deps.out.write(`✗ ${error instanceof Error ? error.message : String(error)} — nothing was published.\n`);
     return 1;
   }
 
@@ -324,20 +368,113 @@ export async function cmdShip(ctx: AppContext, _rest: string[], flags: ShipFlags
   return runShip(ctx, defaultShipDeps(ctx.flags.cwd, process.stdout), flags);
 }
 
-/** `/ship` inside the REPL. */
-export async function shipSlash(ctx: AppContext, out: Writable, arg: string): Promise<void> {
-  const parts = arg.trim().split(/\s+/).filter(Boolean);
-  const valueOf = (name: string): string | undefined => {
-    const at = parts.indexOf(name);
-    return at >= 0 ? parts[at + 1] : undefined;
-  };
-  await runShip(ctx, defaultShipDeps(ctx.flags.cwd, out), {
-    yes: false,
-    json: false,
-    ...(valueOf("--title") !== undefined ? { title: valueOf("--title") } : {}),
-    ...(valueOf("--base") !== undefined ? { base: valueOf("--base") } : {}),
-    ...(valueOf("--approve") !== undefined ? { approve: valueOf("--approve") } : {}),
-  });
+export const SHIP_SLASH_USAGE =
+  'usage: /ship [--pr-draft] [--draft-file <path>] [--title <text>] [--body <text>] [--base <branch>] [--approve publish] [--yes] [--json] [--help]';
+
+interface SlashWord { value: string; quoted: boolean }
+
+/** Split REPL input into argv without invoking a shell or expanding any text. */
+function shipSlashWords(input: string): SlashWord[] {
+  const words: SlashWord[] = [];
+  let value = "";
+  let active = false;
+  let quoted = false;
+  let quote: "'" | '"' | null = null;
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index]!;
+    if (char === "\\" && quote !== "'") {
+      const next = input[index + 1];
+      if (next === undefined) throw new Error("trailing escape");
+      // Escapes quote characters, backslashes and whitespace. Other escapes
+      // remain literal, including Windows paths and shell-looking text.
+      if (next === "\\" || next === '"' || next === "'" || next === "$" || next === "`" || /\s/u.test(next) || (quote === null && next === "-")) {
+        value += next;
+        index++;
+        quoted = true;
+      } else {
+        value += char;
+      }
+      active = true;
+      continue;
+    }
+    if (quote !== null) {
+      if (char === quote) quote = null;
+      else value += char;
+      active = true;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      quoted = true;
+      active = true;
+    } else if (/\s/u.test(char)) {
+      if (active) words.push({ value, quoted });
+      value = "";
+      active = false;
+      quoted = false;
+    } else {
+      value += char;
+      active = true;
+    }
+  }
+  if (quote !== null) throw new Error("unterminated quote");
+  if (active) words.push({ value, quoted });
+  return words;
+}
+
+/** Parse exactly the options `/ship` can pass to the shared ship rail. */
+export function parseShipSlashArgs(arg: string): ShipFlags | "help" {
+  const words = shipSlashWords(arg);
+  const flags: ShipFlags = { yes: false, json: false };
+  const seen = new Set<string>();
+  const valued = new Set(["--title", "--body", "--base", "--approve", "--draft-file"]);
+  const boolean = new Set(["--yes", "--json", "--help", "--pr-draft"]);
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index]!;
+    const equal = word.value.indexOf("=");
+    const name = equal < 0 ? word.value : word.value.slice(0, equal);
+    if (!name.startsWith("-") || (word.quoted && equal < 0)) throw new Error(`unexpected argument: ${word.value}`);
+    if (!valued.has(name) && !boolean.has(name)) throw new Error(`unsupported option: ${name}`);
+    if (seen.has(name)) throw new Error(`duplicate option: ${name}`);
+    seen.add(name);
+    if (boolean.has(name)) {
+      if (equal >= 0) throw new Error(`${name} does not take a value`);
+      if (name === "--yes") flags.yes = true;
+      if (name === "--json") flags.json = true;
+      if (name === "--pr-draft") flags.draft = true;
+      continue;
+    }
+    const next = equal < 0 ? words[++index] : { value: word.value.slice(equal + 1), quoted: word.quoted };
+    if (!next || !next.value.trim() || (equal < 0 && next.value.startsWith("-") && !next.quoted)) {
+      throw new Error(`${name} needs a value`);
+    }
+    if (name === "--title") flags.title = next.value;
+    if (name === "--body") flags.body = next.value;
+    if (name === "--base") flags.base = next.value;
+    if (name === "--approve") flags.approve = next.value;
+    if (name === "--draft-file") flags.draftFile = next.value;
+  }
+  if (seen.has("--help")) {
+    if (seen.size !== 1) throw new Error("--help must be used alone");
+    return "help";
+  }
+  return flags;
+}
+
+/** `/ship` inside the REPL. The optional deps also keep wrapper tests offline. */
+export async function shipSlash(ctx: AppContext, out: Writable, arg: string, deps?: ShipDeps): Promise<void> {
+  let flags: ShipFlags | "help";
+  try {
+    flags = parseShipSlashArgs(arg);
+  } catch (error) {
+    out.write(`✗ ${error instanceof Error ? error.message : String(error)}\n${SHIP_SLASH_USAGE}\n`);
+    return;
+  }
+  if (flags === "help") {
+    out.write(`${SHIP_SLASH_USAGE}\n`);
+    return;
+  }
+  await runShip(ctx, deps ?? defaultShipDeps(ctx.flags.cwd, out), flags);
 }
 
 /**

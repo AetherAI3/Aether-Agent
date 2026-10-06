@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import type { ApiClient } from "../transport.js";
 import { flushOutbox } from "./host.js";
-import { enqueueEvent, loadOutbox, RC_MAX_OBSERVED_WORKERS, saveOutbox } from "./outbox.js";
+import { enqueueEvent, isPublishable, loadOutbox, RC_MAX_OBSERVED_WORKERS, saveOutbox } from "./outbox.js";
 import type { RcProducedEvent } from "./producers.js";
 
 const WORKER_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -16,7 +16,7 @@ export async function publishSubagentEvents(
 ): Promise<number> {
   try {
     const record = loadOutbox(outboxPath, projectRoot);
-    if (!record.session_id || record.revoke_pending || record.project_root !== projectRoot) return 0;
+    if (!isPublishable(record, projectRoot)) return 0;
     let added = 0;
     for (const event of observations) {
       if (event.event_type !== "subagent") continue;

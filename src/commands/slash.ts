@@ -1,7 +1,7 @@
 // In-REPL slash commands (Claude-Code style). The interactive `aether` session
 // routes any line starting with "/" here. Models + orchestrators come from the
-// shared GET /models catalog, so the terminal switches models exactly like the
-// desktop picker and web do.
+// hosted GET /models catalog or the active Ollama installation. The route is
+// chosen from the session backend; discovery never changes that backend.
 //
 //   /help                 list commands
 //   /models               list chat models (numbered)
@@ -30,8 +30,12 @@ import { suggestManifestCommand } from "./command_manifest.js";
 import { printSlashHelp } from "./slash_help.js";
 import { EFFORT_TIERS, normalizeEffort, renderEffortSlider, renderCodeProArt } from "../ui/effort.js";
 import { saveConfig } from "../core/config.js";
-import { handleGoal, handleGoals } from "./goals.js";
+import { handleGoalInput, handleGoals } from "./goals.js";
 import { pickModel } from "../ui/model_picker.js";
+import { isLocalModelId, localModelId, normalizeOllamaTag, ollamaTagFromId, resolveLocalModel } from "../core/local_ollama.js";
+import { chooseBackend, type BackendPath } from "../core/backend.js";
+import { normalizeOllamaHost } from "../core/ollama.js";
+import { listInstalledOllamaModels, OllamaModelsError } from "../core/ollama_models.js";
 import { runLogsViewer } from "../ui/logs_viewer.js";
 
 import { pinSlash, dropSlash, snapshotSlash, limitSlash, auditReceiptSlash, purgeSlash } from "./slash_context.js";
@@ -58,12 +62,16 @@ export interface SlashResult {
   /** Set when the user confirmed a model/agent switch: the REPL must restart
    * the brain + clear context with the new selection. */
   restart?: { model?: string; agent?: string };
+  /** Console model switches wait for an explicit reviewed choice. */
+  modelSwitch?: { model: string; label: string; contextWindow: number | null };
 }
 
 type Kind = "model" | "orchestrator";
 
 // Catalog is cached per REPL session; a fresh session re-fetches.
 let _catalog: CatalogResponse | null = null;
+
+export function invalidateCatalog(): void { _catalog = null; }
 
 /** Resolve a selection arg (1-based index OR id) against a list. Pure. */
 export function resolveSelection(items: CatalogItem[], arg: string): CatalogItem | null {
@@ -93,6 +101,7 @@ async function getCatalog(
  * swallowed so the prompt is never blocked and the user sees no error. */
 export async function primeCatalog(ctx: AppContext): Promise<void> {
   try {
+    if (await activeBackend(ctx) === "local") return;
     await getCatalog(ctx, true);
   } catch {
     /* offline / token not ready — /models will retry lazily */
@@ -103,17 +112,82 @@ function byKind(cat: CatalogResponse, kind: Kind): CatalogItem[] {
   return cat.models.filter((m) => m.kind === kind);
 }
 
+async function activeBackend(ctx: AppContext): Promise<BackendPath> {
+  const pref = (process.env["AETHER_BACKEND"] || (ctx.flags.local ? "local" : ctx.cfg.backend) || "auto").trim();
+  return chooseBackend(pref, pref === "local" ? false : Boolean(await ctx.tokens.get()));
+}
+
+function localEndpoint(): string {
+  try { return normalizeOllamaHost(process.env["OLLAMA_HOST"]); }
+  catch { return "configured OLLAMA_HOST"; }
+}
+
+function localCatalogError(ctx: AppContext, out: Writable, error: unknown): void {
+  const endpoint = localEndpoint();
+  const reason = error instanceof OllamaModelsError ? error.reason : "configuration";
+  const nextStep = reason === "malformed" ? "Restart or update Ollama, then retry /models."
+    : reason === "timeout" ? "Check OLLAMA_HOST and the server, then retry /models."
+      : reason === "unreachable" ? "Start Ollama or check OLLAMA_HOST, then retry /models."
+        : "Set OLLAMA_HOST to a valid Ollama URL, then retry /models.";
+  const message = reason === "malformed" ? "Ollama returned invalid installed-model data"
+    : reason === "timeout" ? "Ollama installed-model request timed out"
+      : reason === "unreachable" ? "Cannot reach Ollama installed models"
+        : "Invalid Ollama endpoint";
+  if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-models/1", backend: "ollama", endpoint, ok: false, error: reason, nextStep }) + "\n");
+  else out.write(`${message} at ${endpoint}. ${nextStep}\n`);
+}
+
+function localSelectionError(ctx: AppContext, out: Writable, endpoint: string, id: string, error: "invalid" | "not-installed", message: string, nextStep: string): void {
+  if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-model-selection/1", backend: "ollama", endpoint, ok: false, id, error, nextStep }) + "\n");
+  else out.write(`${message} ${nextStep}\n`);
+}
+
+async function getLocalCatalog(ctx: AppContext, signal?: AbortSignal): Promise<{ catalog: CatalogResponse; endpoint: string }> {
+  const { endpoint, tags } = await listInstalledOllamaModels(process.env["OLLAMA_HOST"], signal);
+  const explicit = isLocalModelId(ctx.flags.model) || ctx.flags.local === true ? ctx.flags.model : undefined;
+  const selected = localModelId(resolveLocalModel(explicit, ctx.cfg.localModel ?? "", { allowBareExplicit: ctx.flags.local === true }));
+  return {
+    endpoint,
+    catalog: {
+      tier: "local-installed",
+      default: selected,
+      models: tags.map(tag => ({
+        id: localModelId(tag), label: tag, kind: "model", provider: "ollama",
+        context_window: null, tier_min: null, enabled: true, available: true,
+        monthly_uvt_cap: null, is_default: localModelId(tag) === selected,
+      })),
+    },
+  };
+}
+
+export function splitSlashCommand(line: string): { cmd: string; arg: string } {
+  const input = line.slice(1).trim();
+  const separator = input.search(/\s/u);
+  const cmd = (separator < 0 ? input : input.slice(0, separator)).toLowerCase();
+  // Keep the argument text intact. /ship parses quoting and may contain a
+  // literal newline in a quoted PR body; splitting here would corrupt it.
+  const arg = separator < 0 ? "" : input.slice(separator).trim();
+  return { cmd, arg };
+}
+
 export async function handleSlash(
   ctx: AppContext,
   line: string,
   out: Writable,
   signal?: AbortSignal,
 ): Promise<SlashResult> {
-  const parts = line.slice(1).trim().split(/\s+/);
-  const cmd = (parts[0] ?? "").toLowerCase();
-  const arg = parts.slice(1).join(" ");
+  const { cmd, arg } = splitSlashCommand(line);
 
   switch (cmd) {
+    case "terminal":
+    case "terminal-attach":
+    case "terminal-stop":
+    case "terminal-status":
+      out.write("Interactive terminal commands belong to the local coding console; Linux/Python 3 and a TTY are required.\n");
+      break;
+    case "shell-reset":
+      out.write("/shell-reset belongs to the local coding console; submit it there to discard shell state.\n");
+      break;
     case "exit":
     case "quit":
       return { exit: true };
@@ -121,25 +195,33 @@ export async function handleSlash(
     case "":
       printSlashHelp(out, arg);
       break;
+    case "auth":
+      out.write("/auth status|login|continue|new|draft is available in the interactive coding console.\n");
+      break;
     case "browser":
     case "ats":
       // These operations belong to the managed chat hook/session lifecycle.
       // The coding REPL only gives a handoff, and never replays the arguments.
       out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
       break;
-    case "models":
-      await showPicker(ctx, out, "model", signal);
+    case "models": {
+      const r = await showPicker(ctx, out, "model", signal);
+      if (r?.model) return { exit: false, modelSwitch: { model: r.model, label: r.label ?? r.model, contextWindow: r.contextWindow ?? null } };
       break;
+    }
     case "model": {
       if (!arg) {
         const r = await showPicker(ctx, out, "model", signal);
-        if (r) return { exit: false, restart: r };
+        if (r) return { exit: false, ...(r.model ? { modelSwitch: { model: r.model, label: r.label ?? r.model, contextWindow: r.contextWindow ?? null } } : { restart: r }) };
         break;
       }
       const r = await select(ctx, out, arg, "model", signal);
-      if (r) return { exit: false, restart: r };
+      if (r) return { exit: false, ...(r.model ? { modelSwitch: { model: r.model, label: r.label ?? r.model, contextWindow: r.contextWindow ?? null } } : { restart: r }) };
       break;
     }
+    case "switch":
+      out.write("/switch continue|fresh|cancel|brief|edit is available at an idle coding console after /model.\n");
+      break;
     case "agent": {
       if (!arg) {
         const r = await showPicker(ctx, out, "orchestrator", signal);
@@ -200,10 +282,7 @@ export async function handleSlash(
       break;
     }
     case "goal": {
-      const parts = arg.split(/\s+/);
-      const subcmd = parts[0] ?? "";
-      const rest = parts.slice(1).join(" ");
-      await handleGoal(ctx, out, subcmd.toLowerCase(), rest);
+      await handleGoalInput(ctx, out, arg);
       break;
     }
     case "goals": {
@@ -222,7 +301,7 @@ export async function handleSlash(
       break;
     }
     case "agent-create": {
-      await cmdManagedAgents(ctx, ["create", ...parts.slice(1)], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
+      await cmdManagedAgents(ctx, ["create", ...(arg ? arg.split(/\s+/u) : [])], { out, err: out, signal, hooks: createAtsHooks({ output: text => { out.write(text); } }) });
       break;
     }
     case "doctor": {
@@ -321,6 +400,7 @@ export async function handleSlash(
     case "clear":
       out.write("\x1b[2J\x1b[H");
       break;
+    case "shell-result":
     case "queue":
     case "steer":
     case "btw":
@@ -414,11 +494,47 @@ async function showPicker(
   out: Writable,
   kind: Kind,
   signal?: AbortSignal,
-): Promise<{ model?: string; agent?: string } | null> {
-  const cat = await getCatalog(ctx, false, signal, out);
+): Promise<{ model?: string; agent?: string; label?: string; contextWindow?: number | null } | null> {
+  const local = kind === "model" && await activeBackend(ctx) === "local";
+  let cat: CatalogResponse;
+  let endpoint: string | null = null;
+  if (local) {
+    try {
+      const result = await getLocalCatalog(ctx, signal);
+      cat = result.catalog;
+      endpoint = result.endpoint;
+    } catch (error) { localCatalogError(ctx, out, error); return null; }
+  } else cat = await getCatalog(ctx, false, signal, out);
   const items = byKind(cat, kind);
 
-  const picked = await pickModel(items, out);
+  if (local && items.length === 0) {
+    const nextStep = "Run aether local pull <tag> --yes, then retry /models.";
+    if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-models/1", backend: "ollama", endpoint, ok: false, error: "empty", models: [], nextStep }) + "\n");
+    else out.write(`No Ollama models are installed at ${endpoint}. ${nextStep}\n`);
+    return null;
+  }
+
+  const current = kind === "model"
+    ? (local ? cat.default : (ctx.flags.model ?? ctx.cfg.defaultModel ?? cat.default))
+    : ctx.flags.agent;
+  if (!process.stdin.isTTY || (out as Writable & { isTTY?: boolean }).isTTY === false ||
+      (out === process.stdout && !process.stdout.isTTY) || ctx.flags.json) {
+    if (ctx.flags.json) {
+      out.write(JSON.stringify({ schema: "aether.console-models/1", backend: local ? "ollama" : "hosted", ...(endpoint ? { endpoint } : {}), ok: true, selected: current ?? null,
+        models: items.map((m, i) => ({ index: i + 1, id: m.id, label: m.label, available: m.available })) }) + "\n");
+    } else {
+      out.write(local ? `installed Ollama models at ${endpoint}:\n` : `tier: ${cat.tier}\n`);
+      items.forEach((m, i) => {
+        const mark = m.id === current ? ">" : m.available ? " " : "locked";
+        const cap = m.monthly_uvt_cap != null ? `  cap ${m.monthly_uvt_cap}` : "";
+        out.write(`${mark} ${String(i + 1).padStart(2)}. ${m.id}\t${m.label}${cap}\n`);
+      });
+      out.write(kind === "model" ? (local ? "switch: /model <tag|n|id>\n" : "switch: /model <n|id>\n") : "switch: /agent <n|id>\n");
+    }
+    return null;
+  }
+
+  const picked = await pickModel(items, out, current);
   if (picked === undefined) {
     // pickModel hit an internal fault and already printed its own distinct
     // diagnostic — printing the generic "kept current session." below too
@@ -426,24 +542,18 @@ async function showPicker(
     return null;
   }
   if (!picked) {
-    // pickModel returned null — either cancelled (Esc) or non-TTY fallback.
-    // If non-TTY, render a flat numbered list so the user can still /model <n>.
-    if (!process.stdin.isTTY) {
-      const current =
-        kind === "model"
-          ? ctx.flags.model ?? ctx.cfg.defaultModel ?? cat.default
-          : ctx.flags.agent;
-      out.write(`tier: ${cat.tier}\n`);
-      items.forEach((m, i) => {
-        const mark = m.id === current ? "›" : m.available ? " " : "🔒";
-        const cap = m.monthly_uvt_cap != null ? `  cap ${m.monthly_uvt_cap}` : "";
-        out.write(`${mark} ${String(i + 1).padStart(2)}. ${m.id}\t${m.label}${cap}\n`);
-      });
-      out.write(kind === "model" ? "switch: /model <n|id>\n" : "switch: /agent <n|id>\n");
-    } else {
-      out.write("kept current session.\n");
-    }
+    out.write("kept current session.\n");
     return null;
+  }
+
+  if (local) {
+    try {
+      const latest = await getLocalCatalog(ctx, signal);
+      if (!latest.catalog.models.some(item => item.id === picked.id)) {
+        out.write(`Ollama model ${picked.id} disappeared from ${latest.endpoint}. Run /models to refresh the installed list.\n`);
+        return null;
+      }
+    } catch (error) { localCatalogError(ctx, out, error); return null; }
   }
 
   return confirmSwitch(ctx, out, picked, kind, cat.tier);
@@ -455,10 +565,39 @@ async function select(
   arg: string,
   kind: Kind,
   signal?: AbortSignal,
-): Promise<{ model?: string; agent?: string } | null> {
+): Promise<{ model?: string; agent?: string; label?: string; contextWindow?: number | null } | null> {
   if (!arg) {
     out.write(`usage: /${kind === "model" ? "model" : "agent"} <n|id>\n`);
     return null;
+  }
+  const local = kind === "model" && (await activeBackend(ctx) === "local" || isLocalModelId(arg));
+  if (local) {
+    let result: Awaited<ReturnType<typeof getLocalCatalog>>;
+    try { result = await getLocalCatalog(ctx, signal); }
+    catch (error) { localCatalogError(ctx, out, error); return null; }
+    const items = result.catalog.models;
+    if (items.length === 0) {
+      localSelectionError(ctx, out, result.endpoint, arg, "not-installed", `Ollama model ${JSON.stringify(arg)} is not installed at ${result.endpoint}; the installed list is empty.`, "Run aether local pull <tag> --yes, then retry /model.");
+      return null;
+    }
+    let id = arg;
+    if (!/^\d+$/.test(arg)) {
+      try {
+        const tag = isLocalModelId(arg) ? ollamaTagFromId(arg) : normalizeOllamaTag(arg);
+        if (!tag) throw new Error("invalid tag");
+        id = localModelId(tag);
+      } catch {
+        localSelectionError(ctx, out, result.endpoint, arg, "invalid", `Invalid Ollama model ${JSON.stringify(arg)}.`, "Run /models to see installed tags.");
+        return null;
+      }
+    }
+    const item = resolveSelection(items, id);
+    if (!item) {
+      localSelectionError(ctx, out, result.endpoint, arg, "not-installed", `Ollama model ${JSON.stringify(arg)} is not installed at ${result.endpoint}.`, "Run /models to refresh the installed list.");
+      return null;
+    }
+    if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-model-selection/1", backend: "ollama", endpoint: result.endpoint, id: item.id, tag: ollamaTagFromId(item.id), status: "pending-review" }) + "\n");
+    return confirmSwitch(ctx, out, item, kind, result.catalog.tier);
   }
   const cat = await getCatalog(ctx, false, signal, out);
   const item = resolveSelection(byKind(cat, kind), arg);
@@ -477,7 +616,7 @@ export async function confirmSwitch(
   item: CatalogItem,
   kind: Kind,
   tier: string,
-): Promise<{ model?: string; agent?: string } | null> {
+): Promise<{ model?: string; agent?: string; label?: string; contextWindow?: number | null } | null> {
   if (!item.available) {
     // Same dim styling + "check: /tier or `aether models`" pointer as
     // httpStatusHint(403) (errors.ts) — a tier lock reached via the picker
@@ -486,9 +625,14 @@ export async function confirmSwitch(
     out.write(theme.dim(`${item.id} is locked on tier ${tier} — check: /tier or \`aether models\`\n`));
     return null;
   }
+  if (kind === "model") {
+    // The console displays a bounded, editable continuation brief before the
+    // user chooses continue, fresh, or cancel. No model call occurs here.
+    return { model: item.id, label: item.label, contextWindow: item.context_window };
+  }
   out.write(
     theme.dim(
-      `⚠ Switching ${kind === "model" ? "model" : "orchestrator"} to ${item.label} will ` +
+      `⚠ Switching orchestrator to ${item.label} will ` +
         `restart the session and clear context.\n`,
     ),
   );
@@ -497,7 +641,7 @@ export async function confirmSwitch(
     out.write("kept current session.\n");
     return null;
   }
-  return kind === "model" ? { model: item.id } : { agent: item.id };
+  return { agent: item.id };
 }
 
 /** `/effort` — show the dial; `/effort <tier|1-5>` — set it. The tier persists

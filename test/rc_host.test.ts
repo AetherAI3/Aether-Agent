@@ -19,10 +19,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ApiClient } from "../src/core/transport.js";
+import { HttpError } from "../src/core/errors.js";
 import {
   RC_HOST_SCHEMA,
   RcError,
   attachHost,
+  classifyRcError,
   flushOutbox,
   heartbeatHost,
   registerSession,
@@ -187,6 +189,25 @@ test("an append carries only the three wire fields, never the local bookkeeping"
   for (const event of body.events) {
     assert.deepEqual(Object.keys(event).sort(), ["event_type", "host_event_id", "payload"]);
   }
+});
+
+test("a real ApiClient HttpError is classified by the FastAPI detail in its body", () => {
+  // Regression: ApiClient throws HttpError(status, message, body) and the
+  // Cloud's discriminator lives at body.detail. Reading only a top-level
+  // `detail` (which only hand-made test errors carry) turned every real 409
+  // into RC_SESSION_TERMINAL.
+  assert.equal(
+    classifyRcError(new HttpError(409, "HTTP 409", { detail: "host already attached" })).code,
+    "RC_HOST_CONFLICT",
+  );
+  assert.equal(
+    classifyRcError(new HttpError(409, "HTTP 409", { detail: { error: "event_conflict", host_event_id: "x" } })).code,
+    "RC_EVENT_ID_CONFLICT",
+  );
+  assert.equal(
+    classifyRcError(new HttpError(409, "HTTP 409", { detail: "session not appendable" })).code,
+    "RC_SESSION_TERMINAL",
+  );
 });
 
 test("attach never takes over an existing host", async () => {

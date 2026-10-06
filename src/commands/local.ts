@@ -2,7 +2,8 @@ import { spawn, spawnSync } from "node:child_process";
 import type { AppContext } from "../core/context.js";
 import { saveConfig } from "../core/config.js";
 import { normalizeOllamaHost } from "../core/ollama.js";
-import { localModelId, normalizeOllamaTag, resolveLocalModel } from "../core/local_ollama.js";
+import { isLocalModelId, localModelId, normalizeOllamaTag, ollamaTagFromId, resolveLocalModel } from "../core/local_ollama.js";
+import { OllamaModelsError, parseInstalledOllamaTags, requestOllamaTags } from "../core/ollama_models.js";
 import { terminateProcessTree } from "../core/process_tree_kill.js";
 
 export const LOCAL_EXIT = {
@@ -59,10 +60,6 @@ const PULL_TIMEOUT_MS = 30 * 60_000;
 const RECEIPT_BYTES = 8 * 1024;
 const PROGRESS_CHUNK_BYTES = 16 * 1024;
 
-class MalformedOllamaResponseError extends Error {
-  override readonly name = "MalformedOllamaResponseError";
-}
-
 function isTimeoutError(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current = error;
@@ -78,6 +75,13 @@ function isTimeoutError(error: unknown): boolean {
 
 function cleanLine(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200);
+}
+
+function requestedTag(raw: string): string {
+  if (!isLocalModelId(raw)) return normalizeOllamaTag(raw);
+  const tag = ollamaTagFromId(raw);
+  if (!tag) throw new Error("Invalid Ollama model id; use ollama/<tag>");
+  return tag;
 }
 
 function progressText(value: string): string {
@@ -171,43 +175,11 @@ const productionDeps: LocalRuntimeDeps = {
     };
   },
   pull: runStreamingProcess,
-  async requestTags(host, timeoutMs) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(`${host}/api/tags`, { signal: controller.signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      try {
-        return await response.json() as unknown;
-      } catch {
-        throw new MalformedOllamaResponseError("Ollama returned a non-JSON /api/tags response");
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-  },
+  requestTags: requestOllamaTags,
   save(ctx) {
     saveConfig(ctx.cfg);
   },
 };
-
-function tagsFromResponse(value: unknown): string[] | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const models = (value as Record<string, unknown>)["models"];
-  if (!Array.isArray(models)) return null;
-  const tags: string[] = [];
-  for (const item of models) {
-    if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
-    const name = (item as Record<string, unknown>)["name"];
-    if (typeof name !== "string") return null;
-    try {
-      tags.push(normalizeOllamaTag(name));
-    } catch {
-      return null;
-    }
-  }
-  return [...new Set(tags)].sort();
-}
 
 async function snapshot(ctx: AppContext, deps: LocalRuntimeDeps): Promise<LocalSnapshot | { code: number; message: string }> {
   let host: string;
@@ -241,13 +213,14 @@ async function snapshot(ctx: AppContext, deps: LocalRuntimeDeps): Promise<LocalS
     const timedOut = isTimeoutError(error);
     return {
       ...common,
-      server: error instanceof MalformedOllamaResponseError ? "malformed" : timedOut ? "timeout" : "down",
+      server: error instanceof OllamaModelsError && error.reason === "malformed" ? "malformed" : timedOut ? "timeout" : "down",
       models: [],
       selectedPresent: false,
     };
   }
-  const models = tagsFromResponse(raw);
-  if (models === null) return { ...common, server: "malformed", models: [], selectedPresent: false };
+  let models: string[];
+  try { models = parseInstalledOllamaTags(raw); }
+  catch { return { ...common, server: "malformed", models: [], selectedPresent: false }; }
   return { ...common, server: "up", models, selectedPresent: models.includes(selectedTag) };
 }
 
@@ -388,7 +361,7 @@ export async function cmdLocal(ctx: AppContext, argv: string[], _flags: unknown,
     }
     let tag: string;
     try {
-      tag = raw.startsWith("ollama:") ? normalizeOllamaTag(raw.slice("ollama:".length)) : normalizeOllamaTag(raw);
+      tag = requestedTag(raw);
     } catch (error) {
       process.stderr.write((error instanceof Error ? error.message : String(error)) + "\n");
       return LOCAL_EXIT.usage;
@@ -437,7 +410,7 @@ export async function cmdLocal(ctx: AppContext, argv: string[], _flags: unknown,
     }
     let tag: string;
     try {
-      tag = raw.startsWith("ollama:") ? normalizeOllamaTag(raw.slice("ollama:".length)) : normalizeOllamaTag(raw);
+      tag = requestedTag(raw);
     } catch (error) {
       process.stderr.write((error instanceof Error ? error.message : String(error)) + "\n");
       return LOCAL_EXIT.usage;

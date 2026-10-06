@@ -56,7 +56,7 @@ test("generated command reference is deterministic and sourced from the canonica
   assert.match(first, /Aliases: `aether code`/);
   assert.match(first, /`\/agent-create \[ATS\] <name>`/);
   assert.match(first, /reset <section> \[--scope global\|project\] \[--preview\]/);
-  assert.match(first, /`\/model <n\|id>`/);
+  assert.match(first, /`\/model <tag\|n\|id>`/);
   assert.match(first, /Permission: `local-write`/);
   assert.match(first, /Requires: `aether\.hosted-or-local`/);
 });

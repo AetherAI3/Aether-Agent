@@ -172,17 +172,21 @@ export class FileTokenStore implements TokenStore {
     } catch {
       return null;
     }
+    let token: string | null = null;
     try {
       const buf = Buffer.alloc(8192);
       const bytes = readSync(fd, buf, 0, buf.length, 0);
-      const t = buf.subarray(0, bytes).toString("utf8").trim();
-      return t || null;
+      token = buf.subarray(0, bytes).toString("utf8").trim() || null;
     } catch {
       // e.g. EISDIR when the path is a directory — same as "no token".
-      return null;
+      token = null;
     } finally {
       closeSync(fd);
     }
+    // Give Windows a polling gap after releasing the handle so a continuous
+    // reader cannot starve another process replacing the token atomically.
+    if (process.platform === "win32") await new Promise((r) => setTimeout(r, 1));
+    return token;
   }
 
   async set(token: string): Promise<void> {

@@ -11,16 +11,24 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   RC_NO_CONTROL_LINE,
+  cmdRc,
   renderExposure,
   renderStatus,
+  renderStatusJson,
   type RcStatusView,
 } from "../src/commands/rc.js";
 import { COMMAND_MANIFEST_SOURCE } from "../src/commands/command_manifest_data.js";
 import { assertViewerManifest, tokenize } from "../src/core/rc/viewer_profile.js";
 import { producerCoverage } from "../src/core/rc/producers.js";
+import { payloadDigest } from "../src/core/rc/receipts.js";
+import type { AppContext } from "../src/core/context.js";
+import type { CommandFlags } from "../src/core/command_dispatch.js";
 
 const TOKEN_SHAPED = "aek_" + "Z".repeat(32);
 
@@ -29,7 +37,6 @@ function view(over: Partial<RcStatusView> = {}): RcStatusView {
     running: true,
     browser: "BROWSER_READY",
     connector: "connected",
-    last_receipt: "2026-09-07T00:00:00.000Z",
     device_id: "dev-1",
     device_name: "laptop",
     session_id: "rs_" + "e".repeat(32),
@@ -41,13 +48,25 @@ function view(over: Partial<RcStatusView> = {}): RcStatusView {
       dirty_file_count: 3,
     },
     state: "active",
-    expires_at: "2026-09-08T00:00:00.000Z",
-    observers: 2,
+    cloud: {
+      kind: "known",
+      status: {
+        state: "live",
+        expires_at: "2026-09-08T00:00:00.000Z",
+        revoked_at: null,
+        last_seq: 12,
+        host_last_heartbeat_at: "2026-09-07T00:00:00.000Z",
+        observer_count: 2,
+        observer_cap: 8,
+      },
+    },
     pending: 4,
     acked: 12,
     dropped: 0,
     quarantined: 0,
     revoke_pending: false,
+    exposed: [...producerCoverage().produced],
+    exposure_confirmed: true,
     ...over,
   };
 }
@@ -189,14 +208,14 @@ test("exposure names the categories that are never shared", () => {
 
 test("status shows the counters an operator needs to spot a gap", () => {
   const text = renderStatus(view({ pending: 7, acked: 40, dropped: 3, quarantined: 2 }));
-  assert.match(text, /Outbox\s+7 pending \/ 2 quarantined/);
-  assert.match(text, /dropped\s+3/);
+  assert.match(text, /Outbox\s+7 queued \/ 3 dropped \/ 2 quarantined/);
+  assert.match(text, /Last receipt\s+seq 40 \(Cloud last seq 12\)/);
 });
 
 test("an unreachable broker reports unknown observers, never zero", () => {
   // Reporting that nobody is watching when we simply could not ask is the one
   // wrong answer this screen can give.
-  const text = renderStatus(view({ observers: null }));
+  const text = renderStatus(view({ cloud: { kind: "unknown", reason: "unreachable" } }));
   assert.match(text, /observers\s+unknown \(broker unreachable\)/);
   assert.doesNotMatch(text, /observers\s+0/);
 });
@@ -209,10 +228,104 @@ test("an unconfirmed revoke is stated, with the fact that it will not resume", (
 
 test("status renders with nothing running and invents no session", () => {
   const text = renderStatus(
-    view({ running: false, session_id: null, project_ref: null, repo: null, observers: null }),
+    view({ running: false, session_id: null, project_ref: null, repo: null, cloud: { kind: "unchecked" }, exposed: [] }),
   );
   assert.match(text, /state\s+off/);
   assert.match(text, /session\s+—/);
+});
+
+test("machine status binds session and device without replaying an invitation", () => {
+  const data = JSON.parse(renderStatusJson(view())) as Record<string, unknown>;
+  assert.equal(data["schema"], "aether.cli.rc/1");
+  assert.equal(data["session_id"], "rs_" + "e".repeat(32));
+  assert.equal(data["device_id"], "dev-1");
+  assert.equal(data["host_state"], "active");
+  assert.deepEqual(data["viewer_capabilities"], ["observe"]);
+  assert.equal(data["observer"], null);
+  assert.ok(!renderStatusJson(view()).includes("rsgt_"));
+});
+
+test("machine handoff carries a one-time link only in the requested start or link result", () => {
+  const url = "https://app.aethersystems.net/rc#grant=rsgt_canary";
+  const data = JSON.parse(renderStatusJson(view(), {
+    url,
+    expires_at: "2026-09-07T00:05:00.000Z",
+  })) as { observer: { url: string; expires_at: string } };
+  assert.equal(data.observer.url, url);
+  assert.equal(data.observer.expires_at, "2026-09-07T00:05:00.000Z");
+});
+
+test("json start and status bind one RC host without replaying the one-time link", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aether-rc-json-"));
+  const priorConfig = process.env["AETHER_CONFIG_DIR"];
+  process.env["AETHER_CONFIG_DIR"] = directory;
+  const output: string[] = [];
+  const sessionId = "rs_" + "1".repeat(32);
+  const grantToken = "rsgt_" + "a".repeat(48);
+  const api = {
+    async postJson(path: string, body: unknown): Promise<unknown> {
+      if (path === "/remote/sessions") return { session_id: sessionId, state: "pending_host" };
+      if (path.endsWith("/host/attach")) return { session_id: sessionId, state: "live" };
+      if (path.endsWith("/host/events")) {
+        const events = (body as { events: Array<{ host_event_id: string; payload: Record<string, unknown> }> }).events;
+        return { session_id: sessionId, receipts: events.map((event, index) => ({
+          host_event_id: event.host_event_id, seq: index + 1, payload_digest: payloadDigest(event.payload),
+        })) };
+      }
+      if (path.endsWith("/grants")) return {
+        session_id: sessionId, purpose: "observe", device_id: (body as { device_id: string }).device_id,
+        token: grantToken, expires_at: new Date(Date.now() + 300_000).toISOString(),
+      };
+      if (path.endsWith("/revoke")) return {};
+      throw new Error(`unexpected route ${path}`);
+    },
+  };
+  const ctx = { api, flags: { cwd: directory, json: true } } as unknown as AppContext;
+  const flags = { str: () => undefined } as unknown as CommandFlags;
+  const overrides = {
+    cwd: directory,
+    enrollment: () => ({ device_id: "dev-1", display_name: "test" }),
+    repo: () => ({ repo: "fixture", branch: "main", base_commit: "0".repeat(40), dirty_file_count: 0 }),
+    connector: () => null,
+    browser: () => null,
+    out: (value: string) => output.push(value),
+    err: (value: string) => { throw new Error(value); },
+    isTTY: false,
+    columns: undefined,
+  };
+  try {
+    assert.equal(await cmdRc(ctx, ["start"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const started = JSON.parse(output.pop()!) as { session_id: string; device_id: string; observer: { url: string } };
+    assert.equal(started.session_id, sessionId);
+    assert.equal(started.device_id, "dev-1");
+    assert.equal(new URL(started.observer.url).search, "");
+    assert.ok(started.observer.url.includes(`#grant=${grantToken}`));
+
+    assert.equal(await cmdRc(ctx, ["status"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const status = JSON.parse(output[0]!) as { session_id: string; observer: unknown };
+    assert.equal(status.session_id, sessionId);
+    assert.equal(status.observer, null);
+    assert.ok(!output[0]!.includes(grantToken));
+
+    output.length = 0;
+    assert.equal(await cmdRc(ctx, ["link"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const linked = JSON.parse(output.pop()!) as { session_id: string; observer: { url: string } };
+    assert.equal(linked.session_id, sessionId);
+    assert.ok(linked.observer.url.includes(grantToken));
+
+    assert.equal(await cmdRc(ctx, ["off"], flags, overrides), 0);
+    assert.equal(output.length, 1);
+    const closed = JSON.parse(output[0]!) as { session_id: string | null; host_state: string };
+    assert.equal(closed.session_id, null);
+    assert.equal(closed.host_state, "off");
+  } finally {
+    if (priorConfig === undefined) delete process.env["AETHER_CONFIG_DIR"];
+    else process.env["AETHER_CONFIG_DIR"] = priorConfig;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 // ── 3. Nothing rendered can carry a credential ──────────────────────────────

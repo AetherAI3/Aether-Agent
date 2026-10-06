@@ -5,6 +5,7 @@
 //   aether rc exposure                the same, framed as "what can be seen"
 //   aether rc viewers                 who is currently observing
 //   aether rc off                     stop, locally first and server-final
+//   aether rc link                    mint a fresh one-time observer invitation
 //
 // THIS COMMAND CANNOT CONTROL ANYTHING
 //
@@ -26,6 +27,7 @@ import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
 import { configDir } from "../core/config.js";
+import { checkoutDiffSummary } from "../core/rc/diff_summary.js";
 import type { CommandFlags } from "../core/command_dispatch.js";
 import type { AppContext } from "../core/context.js";
 import { digestOf } from "../core/device_runtime/canonical_json.js";
@@ -33,18 +35,31 @@ import { detectBrowserRuntime } from "../core/browser_runtime.js";
 import { McpClient } from "../core/mcp.js";
 import { loadEnrollmentMetadata } from "../core/device_runtime/identity.js";
 import {
+  RC_HOST_SCHEMA,
   RcError,
+  abandonSession,
   attachHost,
+  confirmCloudRevoke,
+  fetchSessionStatus,
   flushOutbox,
+  isTerminalRcCode,
+  mintObserverGrant,
+  persistRecord,
   registerSession,
   revokeHost,
+  type FlushOutcome,
+  type RcCode,
   type RcHostDeps,
+  type RcSessionStatus,
+  type RcStatusReading,
+  type RcStatusUnknownReason,
   type RepoSummary,
 } from "../core/rc/host.js";
 import {
+  createOutbox,
   enqueueEvent,
   loadOutbox,
-  saveOutbox,
+  setAsideOutbox,
   type OutboxRecord,
 } from "../core/rc/outbox.js";
 import {
@@ -54,6 +69,7 @@ import {
   sessionOpenedEvent,
 } from "../core/rc/producers.js";
 import { VIEWER_CAPABILITIES } from "../core/rc/viewer_profile.js";
+import { newObserverId, observerLink, observerQr } from "../core/rc/observer_handoff.js";
 
 /** Printed verbatim on every human-facing RC surface. Spec §7. */
 export const RC_NO_CONTROL_LINE = "No terminal or tool control";
@@ -61,6 +77,9 @@ export const RC_NO_CONTROL_LINE = "No terminal or tool control";
 export const EXIT_OK = 0;
 export const EXIT_OPERATIONAL = 1;
 export const EXIT_USAGE = 2;
+
+/** How long any rc command waits to re-confirm an earlier unconfirmed revoke. */
+const RC_RECONCILE_TIMEOUT_MS = 4_000;
 
 // ── paths ───────────────────────────────────────────────────────────────────
 
@@ -122,25 +141,100 @@ export interface RcStatusView {
   browser: string | null;
   /** Aether connector state, or null when it could not be determined. */
   connector: string | null;
-  /** ISO timestamp of the last accepted receipt, or null when none. */
-  last_receipt: string | null;
   device_id: string | null;
   device_name: string | null;
   session_id: string | null;
   project_ref: string | null;
   repo: RepoSummary | null;
+  /**
+   * Stable token: off, pending, active, reconnecting, offline, revoked,
+   * expired, closed, not-found, pending-revoke, recovery-required, unknown.
+   */
   state: string;
-  expires_at: string | null;
-  observers: number | null;
+  /** Human qualifier for `state`, never machine-parsed. */
+  state_detail?: string | null;
+  /** The Cloud's verified view, why it is unknown, or that this command did not ask. */
+  cloud: RcCloudView;
+  /** Events queued locally, not yet proven stored. */
   pending: number;
+  /** Highest Cloud sequence a receipt proved stored (the durable cursor). */
   acked: number;
   dropped: number;
   quarantined: number;
   revoke_pending: boolean;
+  /** Event categories a viewer of this session can receive right now. */
+  exposed: string[];
+  /**
+   * True only when the Cloud verified a non-terminal session this host has
+   * delivered to. While pending or unknown, `exposed` is what WOULD reach a
+   * viewer once delivered, and the surfaces say so.
+   */
+  exposure_confirmed: boolean;
 }
+
+/**
+ * "unchecked" only where the command itself just heard from the Cloud (start,
+ * link, off) or never had a session to ask about. `rc status`, `rc exposure`
+ * and `rc viewers` always ask.
+ */
+export type RcCloudView = { kind: "unchecked" } | RcStatusReading;
 
 function line(label: string, value: string | number | null): string {
   return `  ${label.padEnd(16)} ${value ?? "—"}`;
+}
+
+const UNKNOWN_REASON_TEXT: Readonly<Record<RcStatusUnknownReason, string>> = {
+  timeout: "timed out",
+  unreachable: "broker unreachable",
+  route_absent: "this Cloud does not report session status",
+  disabled: "remote sessions are disabled on this Cloud",
+  not_authorized: "not authorized",
+  rate_limited: "rate limited",
+  invalid_response: "the Cloud's answer could not be verified",
+  broker_error: "the broker answered with an error",
+};
+
+function cloudText(cloud: RcCloudView): string {
+  switch (cloud.kind) {
+    case "unchecked": return "not checked";
+    case "known": return cloud.status.state;
+    case "not_found": return "no such session for this account";
+    case "unknown": return `unknown (${UNKNOWN_REASON_TEXT[cloud.reason]})`;
+  }
+}
+
+/** A Cloud-owned fact: shown when verified, "unknown (why)" when it could not be asked. */
+function cloudFact(cloud: RcCloudView, known: (status: RcSessionStatus) => string): string {
+  switch (cloud.kind) {
+    case "unchecked": return "not checked";
+    case "known": return known(cloud.status);
+    case "not_found": return "— (no such session)";
+    case "unknown": return `unknown (${UNKNOWN_REASON_TEXT[cloud.reason]})`;
+  }
+}
+
+function observersText(view: RcStatusView): string {
+  return cloudFact(view.cloud, (status) => `${status.observer_count} / ${status.observer_cap}`);
+}
+
+function expiresText(view: RcStatusView): string {
+  return cloudFact(view.cloud, (status) =>
+    status.revoked_at ? `${status.expires_at} (revoked ${status.revoked_at})` : status.expires_at);
+}
+
+function heartbeatText(view: RcStatusView): string {
+  return cloudFact(view.cloud, (status) => status.host_last_heartbeat_at ?? "none yet");
+}
+
+function lastReceiptText(view: RcStatusView): string {
+  const local = view.acked > 0 ? `seq ${view.acked}` : "none yet";
+  return view.cloud.kind === "known" ? `${local} (Cloud last seq ${view.cloud.status.last_seq})` : local;
+}
+
+function exposedText(view: RcStatusView): string {
+  if (view.exposed.length === 0) return "nothing";
+  const list = view.exposed.join(", ");
+  return view.exposure_confirmed ? list : `${list} (once delivered; not confirmed by the Cloud)`;
 }
 
 /**
@@ -156,6 +250,11 @@ function coverageLine(): string {
   return `${coverage.produced.length} / ${total} available`;
 }
 
+function hostStateText(view: RcStatusView): string {
+  if (!view.running) return "off";
+  return view.state_detail ? `${view.state} (${view.state_detail})` : view.state;
+}
+
 /** `aether rc status` — what is being published, and to whom. */
 export function renderStatus(view: RcStatusView): string {
   const rows = [
@@ -164,9 +263,11 @@ export function renderStatus(view: RcStatusView): string {
     line("Viewer events", coverageLine()),
     line("Control", "NONE"),
     line("Inbound socket", "NONE"),
-    line("Host state", view.running ? view.state : "off"),
-    line("Outbox", `${view.pending} pending / ${view.quarantined} quarantined`),
-    line("Last receipt", view.last_receipt ?? (view.acked > 0 ? `seq ${view.acked}` : "none yet")),
+    line("Host state", hostStateText(view)),
+    line("Cloud", cloudText(view.cloud)),
+    line("Outbox", `${view.pending} queued / ${view.dropped} dropped / ${view.quarantined} quarantined`),
+    line("Last receipt", lastReceiptText(view)),
+    line("Exposed now", exposedText(view)),
     line("Browser", view.browser),
     line("Connector", view.connector),
     "",
@@ -177,16 +278,24 @@ export function renderStatus(view: RcStatusView): string {
     line("repo", view.repo ? `${view.repo.repo} @ ${view.repo.branch}` : null),
     line("observed head", view.repo ? view.repo.base_commit.slice(0, 12) : null),
     line("dirty files", view.repo ? view.repo.dirty_file_count : null),
-    line("expires", view.expires_at),
-    line("observers", view.observers === null ? "unknown (broker unreachable)" : view.observers),
-    line("dropped", view.dropped),
+    line("expires", expiresText(view)),
+    line("last heartbeat", heartbeatText(view)),
+    line("observers", observersText(view)),
     `  ${RC_NO_CONTROL_LINE}`,
   ];
   if (view.revoke_pending) {
     rows.push(
       "",
       "  RC is off locally, but the Cloud has not confirmed revocation.",
-      "  It will not resume automatically. Re-run `aether rc off` when online.",
+      "  It will not resume automatically. Every `aether rc` command retries the revoke;",
+      "  `aether rc off` retries it explicitly.",
+    );
+  }
+  if (view.state === "recovery-required") {
+    rows.push(
+      "",
+      "  The saved RC state could not be read, so nothing is published from it.",
+      "  Run `aether rc off` to revoke the session it names and set it aside.",
     );
   }
   return `${rows.join("\n")}\n`;
@@ -227,10 +336,40 @@ export function renderExposure(view: RcStatusView): string {
     "    · environment variables, tokens, or MCP credentials",
     "    · absolute paths (project-relative identifiers only)",
     "",
+    line("Host state", hostStateText(view)),
+    line("Exposed now", exposedText(view)),
     line("session", view.session_id),
-    line("observers", view.observers === null ? "unknown (broker unreachable)" : view.observers),
+    line("observers", observersText(view)),
   ];
   return `${rows.join("\n")}\n`;
+}
+
+/**
+ * `aether rc viewers` — how many observers the broker has attached, against
+ * its cap. The Cloud reports a count, not identities, so that is all this
+ * claims; when the Cloud cannot be asked the answer is unknown, never zero.
+ */
+export function renderViewers(view: RcStatusView): string {
+  const rows = [
+    "Aether RC — who is observing",
+    `  ${RC_NO_CONTROL_LINE}`,
+    "",
+    line("Host state", hostStateText(view)),
+    line("Cloud", cloudText(view.cloud)),
+    line("observers", observersText(view)),
+    line("expires", expiresText(view)),
+    line("session", view.session_id),
+  ];
+  return `${rows.join("\n")}\n`;
+}
+
+function cloudJson(cloud: RcCloudView): Record<string, unknown> {
+  switch (cloud.kind) {
+    case "unchecked": return { checked: false };
+    case "known": return { checked: true, status: "known", ...cloud.status };
+    case "not_found": return { checked: true, status: "not_found" };
+    case "unknown": return { checked: true, status: "unknown", reason: cloud.reason };
+  }
 }
 
 // ── dispatch ────────────────────────────────────────────────────────────────
@@ -247,30 +386,207 @@ export interface RcCommandDeps {
   repo: (cwd: string) => RepoSummary;
   out: (text: string) => void;
   err: (text: string) => void;
+  isTTY: boolean;
+  columns: number | undefined;
+  json: boolean;
+  /** Durable local-state writer. Injected only to fail a write at a chosen boundary. */
+  persist?: (path: string, record: OutboxRecord) => void;
+  /** Bound on the Cloud status read; defaults to RC_STATUS_TIMEOUT_MS. */
+  statusTimeoutMs?: number;
 }
 
-function viewOf(record: OutboxRecord, deps: RcCommandDeps, observers: number | null): RcStatusView {
+interface RcObserverInvitation {
+  url: string;
+  expires_at: string;
+}
+
+/**
+ * Stable machine handoff for a caller that must bind its own browser session.
+ *
+ * Built field by field from the view, which holds no credential, grant token,
+ * absolute path or event payload. The one-time observer link appears only in
+ * the result of `start` or `link`, the commands that mint it.
+ */
+export function renderStatusJson(view: RcStatusView, invitation: RcObserverInvitation | null = null): string {
+  const coverage = producerCoverage();
+  return JSON.stringify({
+    schema: RC_HOST_SCHEMA,
+    host_state: view.running ? view.state : "off",
+    state_detail: view.running ? view.state_detail ?? null : null,
+    session_id: view.session_id,
+    device_id: view.device_id,
+    project_ref: view.project_ref,
+    revoke_pending: view.revoke_pending,
+    outbox_pending: view.pending,
+    outbox_dropped: view.dropped,
+    outbox_quarantined: view.quarantined,
+    acked_seq: view.acked,
+    cloud: cloudJson(view.cloud),
+    exposed_categories: view.exposed,
+    exposure_confirmed: view.exposure_confirmed,
+    viewer_events: { produced: coverage.produced, unproduced: coverage.unproduced },
+    viewer_capabilities: VIEWER_CAPABILITIES,
+    observer: invitation,
+  }) + "\n";
+}
+
+async function printObserverLink(
+  deps: RcCommandDeps,
+  hostDeps: RcHostDeps,
+  sessionId: string,
+): Promise<RcObserverInvitation | null> {
+  try {
+    const grant = await mintObserverGrant(hostDeps, sessionId, newObserverId());
+    const link = observerLink(grant);
+    if (!deps.json) {
+      deps.out(`\nObserver link (expires ${grant.expires_at}):\n${link}\n`);
+      const qr = deps.isTTY ? observerQr(link, deps.columns) : null;
+      if (qr) deps.out(`${qr}\n`);
+      else deps.out("Open the link directly; this terminal cannot fit a scannable QR.\n");
+    }
+    return { url: link, expires_at: grant.expires_at };
+  } catch (error) {
+    const code = error instanceof RcError ? error.code : "RC_BROKER_UNREACHABLE";
+    deps.err(SESSION_REFUSALS.has(code)
+      ? `${code}: the Cloud no longer accepts this RC session, so no observer link was minted. ` +
+        "Run `aether rc off` to clear it.\n"
+      : `${code}: RC is running, but an observer link could not be minted. Retry with \`aether rc link\`.\n`);
+    return null;
+  }
+}
+
+/**
+ * Answers after which this session will never deliver or admit a viewer again
+ * (#227). Saying "pending" or "running" after one of these would be false;
+ * the honest next step is `aether rc off`.
+ */
+const SESSION_REFUSALS: ReadonlySet<RcCode> = new Set<RcCode>([
+  "RC_SESSION_NOT_FOUND",
+  "RC_SESSION_TERMINAL",
+  "RC_HOST_CONFLICT",
+  "RC_NOT_AUTHORIZED",
+  "RC_EVENT_REJECTED",
+  "RC_EVENT_ID_CONFLICT",
+]);
+
+/**
+ * What the LOCAL record alone can honestly say (#227), as a stable token for
+ * machines plus a human qualifier. "active" requires the durable proof of a
+ * receipted first append; anything short of it is pending.
+ */
+function localState(record: OutboxRecord): { state: string; detail: string | null } {
+  if (record.recovery) {
+    return {
+      state: "recovery-required",
+      detail: record.recovery.reason === "unreadable"
+        ? "saved RC state could not be read (I/O error); retry"
+        : "saved RC state is damaged",
+    };
+  }
+  if (record.revoke_pending) return { state: "pending-revoke", detail: "Cloud revocation not yet confirmed" };
+  if (!record.session_id) return { state: "off", detail: null };
+  if (record.start_phase === "registered") return { state: "pending", detail: "start did not finish" };
+  if (record.start_phase === "attached") return { state: "pending", detail: "opening events not yet accepted" };
+  return { state: "active", detail: null };
+}
+
+/**
+ * The host state an operator is shown (#226): the local record's proof
+ * combined with the Cloud's verified view. "active" needs BOTH a receipted
+ * first append locally and the Cloud saying live; a Cloud that could not be
+ * asked makes the state unknown, never active.
+ */
+function hostState(record: OutboxRecord, cloud: RcCloudView): { state: string; detail: string | null } {
+  const local = localState(record);
+  const attached = record.start_phase === "attached" || record.start_phase === "confirmed";
+  if (cloud.kind === "unchecked" || !attached || (local.state !== "active" && local.state !== "pending")) {
+    return local;
+  }
+  const confirmed = record.start_phase === "confirmed";
+  switch (cloud.kind) {
+    case "unknown":
+      return {
+        state: "unknown",
+        detail: `Cloud status unavailable: ${UNKNOWN_REASON_TEXT[cloud.reason]}` +
+          (confirmed ? "; the opening events were accepted earlier" : ""),
+      };
+    case "not_found":
+      return {
+        state: "not-found",
+        detail: "the Cloud has no such session for this account; `aether rc off` clears local state",
+      };
+    case "known":
+      switch (cloud.status.state) {
+        case "live":
+          return confirmed ? { state: "active", detail: null } : { state: "pending", detail: "opening events not yet accepted" };
+        case "pending_host":
+          return { state: "pending", detail: "the Cloud has not seen this host attach" };
+        case "host_reconnecting":
+          return { state: "reconnecting", detail: "the Cloud missed this host's recent heartbeats" };
+        case "host_offline":
+          return { state: "offline", detail: "no heartbeat from this host; a coding run keeps it live" };
+        case "revoked":
+          return { state: "revoked", detail: "revoked in the Cloud; `aether rc off` clears local state" };
+        case "expired":
+          return { state: "expired", detail: "the session lease lapsed; `aether rc off` clears local state" };
+        case "closed":
+          return { state: "closed", detail: "`aether rc off` clears local state" };
+      }
+  }
+}
+
+/** States in which the Cloud verified a session this host has delivered to. */
+const CONFIRMED_EXPOSURE_STATES: ReadonlySet<string> = new Set(["active", "reconnecting", "offline"]);
+
+/** States in which the host is still publishing, so a viewer can receive events. */
+const EXPOSING_STATES: ReadonlySet<string> = new Set(["active", "pending", "reconnecting", "offline", "unknown"]);
+
+/**
+ * What a viewer can receive right now: the produced categories while an
+ * attached session is publishing, and nothing once it is off, revoked,
+ * expired, closed, gone from the Cloud, or was never attached.
+ */
+function exposedNow(record: OutboxRecord, state: string): string[] {
+  const publishing = Boolean(record.session_id) && !record.revoke_pending && !record.recovery &&
+    (record.start_phase === "attached" || record.start_phase === "confirmed");
+  return publishing && EXPOSING_STATES.has(state) ? [...producerCoverage().produced] : [];
+}
+
+function viewOf(record: OutboxRecord, deps: RcCommandDeps, cloud: RcCloudView = { kind: "unchecked" }): RcStatusView {
   const enrolled = deps.enrollment();
   const browser = deps.browser();
+  const host = hostState(record, cloud);
   return {
-    running: Boolean(record.session_id),
+    running: Boolean(record.session_id) || Boolean(record.recovery),
     browser: browser?.code ?? null,
     connector: deps.connector(),
-    last_receipt: null,
-    device_id: enrolled?.device_id ?? null,
+    device_id: record.session_id ? record.device_id : enrolled?.device_id ?? null,
     device_name: enrolled?.display_name ?? null,
     session_id: record.session_id || null,
     project_ref: record.project_ref || null,
     repo: record.session_id ? deps.repo(deps.cwd) : null,
-    state: record.revoke_pending ? "revoked (unconfirmed)" : "active",
-    expires_at: null,
-    observers,
+    state: host.state,
+    state_detail: host.detail,
+    cloud,
     pending: record.events.length,
     acked: record.cursor,
     dropped: record.dropped,
     quarantined: record.quarantined,
     revoke_pending: record.revoke_pending,
+    exposed: exposedNow(record, host.state),
+    exposure_confirmed: CONFIRMED_EXPOSURE_STATES.has(host.state) && cloud.kind === "known",
   };
+}
+
+/**
+ * The Cloud's view, for an attached session only. A record that is off,
+ * unreadable, mid-revoke or never attached has nothing the Cloud can add, so
+ * it is not asked (and its local state is what is shown).
+ */
+async function cloudReading(hostDeps: RcHostDeps, record: OutboxRecord, timeoutMs?: number): Promise<RcCloudView> {
+  if (!record.session_id || record.recovery || record.revoke_pending) return { kind: "unchecked" };
+  if (record.start_phase !== "attached" && record.start_phase !== "confirmed") return { kind: "unchecked" };
+  return fetchSessionStatus(hostDeps, record.session_id, timeoutMs);
 }
 
 async function start(
@@ -290,58 +606,210 @@ async function start(
     );
     return EXIT_OPERATIONAL;
   }
+  if (record.recovery) {
+    deps.err(`${recoveryMessage(record)}\n`);
+    return EXIT_OPERATIONAL;
+  }
   if (record.revoke_pending) {
-    // §5.4 step 6: an unreconciled revoke never resumes by itself.
+    // §5.4 step 6: an unreconciled revoke never resumes by itself. cmdRc has
+    // already retried it once for this command; it is still unconfirmed.
     deps.err(
-      "RC_REVOKE_UNCONFIRMED: a previous `rc off` was not confirmed by the Cloud; run `aether rc off` again before starting\n",
+      "RC_REVOKE_UNCONFIRMED: a previous RC session's revocation is still not confirmed by the Cloud; run `aether rc off` again before starting\n",
     );
     return EXIT_OPERATIONAL;
   }
   if (record.session_id) {
-    deps.err(`RC is already running for this project (session ${record.session_id})\n`);
+    deps.err(record.start_phase === "registered"
+      ? `A previous \`aether rc start\` did not finish (session ${record.session_id}). Run \`aether rc off\` to revoke it before starting again.\n`
+      : record.start_phase === "attached"
+        ? `RC is already started for this project but not live yet (session ${record.session_id}): its opening ` +
+          "events are queued for delivery. Run `aether rc off` to revoke it before starting again.\n"
+        : `RC is already running for this project (session ${record.session_id})\n`);
     return EXIT_OPERATIONAL;
   }
 
   const repo = deps.repo(deps.cwd);
   const sessionName = name?.trim() || `${repo.repo}@${repo.branch}`;
+
+  // 1. register. Nothing exists yet, so a failure here has nothing to undo.
+  let sessionId: string;
   try {
-    const session = await registerSession(hostDeps, {
+    sessionId = (await registerSession(hostDeps, {
       project_ref: projectRef,
       device_id: enrolled.device_id,
       session_name: sessionName,
       repo,
-    });
-    await attachHost(hostDeps, session.session_id, enrolled.device_id);
-
-    record.session_id = session.session_id;
-    record.project_ref = projectRef;
-    record.device_id = enrolled.device_id;
-    record.epoch = 1;
-    record.observed_workers = Object.create(null) as typeof record.observed_workers;
-
-    const opened = sessionOpenedEvent({
-      session_name: sessionName,
-      repo: repo.repo,
-      branch: repo.branch,
-      base_commit: repo.base_commit,
-      dirty_file_count: repo.dirty_file_count,
-      protocol_version: RC_OPENING_PROTOCOL_VERSION,
-    });
-    enqueueEvent(record, opened.event_type, opened.payload);
-    const presence = hostPresenceEvent(enrolled.device_id, "live");
-    enqueueEvent(record, presence.event_type, presence.payload);
-    saveOutbox(hostDeps.outboxPath, record);
-    await flushOutbox(hostDeps, record);
-
-    deps.out(renderStatus(viewOf(record, deps, null)));
-    return EXIT_OK;
+    })).session_id;
   } catch (error) {
-    if (error instanceof RcError) {
-      deps.err(`${error.code}: ${error.detail}\n`);
-      return EXIT_OPERATIONAL;
-    }
-    throw error;
+    if (!(error instanceof RcError)) throw error;
+    deps.err(`${error.code}: ${error.detail}\n`);
+    return EXIT_OPERATIONAL;
   }
+
+  // 2. durable BEFORE anything else can fail, so a crash from here on leaves
+  //    a record `rc off` can revoke rather than an orphaned Cloud session.
+  //    "registered" never publishes: nothing reads this record as live.
+  const session = createOutbox({
+    session_id: sessionId,
+    project_ref: projectRef,
+    device_id: enrolled.device_id,
+    epoch: 1,
+    project_root: hostDeps.projectRoot,
+    start_phase: "registered",
+  });
+  if (!persistRecord(hostDeps, session)) return rollbackStart(deps, hostDeps, session, UNWRITABLE);
+
+  // 3. attach. A refusal means this host will never own the session.
+  try {
+    await attachHost(hostDeps, sessionId, enrolled.device_id);
+  } catch (error) {
+    if (!(error instanceof RcError)) throw error;
+    return rollbackStart(deps, hostDeps, session, error);
+  }
+
+  // 4. the opening events, durable before they are sent.
+  const opened = sessionOpenedEvent({
+    session_name: sessionName,
+    repo: repo.repo,
+    branch: repo.branch,
+    base_commit: repo.base_commit,
+    dirty_file_count: repo.dirty_file_count,
+    protocol_version: RC_OPENING_PROTOCOL_VERSION,
+  });
+  const presence = hostPresenceEvent(enrolled.device_id, "live");
+  session.start_phase = "attached";
+  if (!enqueueEvent(session, opened.event_type, opened.payload) ||
+      !enqueueEvent(session, presence.event_type, presence.payload)) {
+    return rollbackStart(deps, hostDeps, session,
+      new RcError("RC_EVENT_REJECTED", "the opening events did not pass the local allowlist"));
+  }
+  // Git's measured checkout snapshot rides in the opening batch (#218). It is
+  // optional: an unmeasurable count adds nothing and never fails the start.
+  try {
+    const diff = await checkoutDiffSummary(deps.cwd);
+    if (diff) enqueueEvent(session, diff.event_type, diff.payload);
+  } catch {
+    // Diff observation is optional; session opening still succeeds.
+  }
+  if (!persistRecord(hostDeps, session)) return rollbackStart(deps, hostDeps, session, UNWRITABLE);
+
+  // 5. the first append. Only a receipt, made durable, proves the session live.
+  let flushed: FlushOutcome;
+  try {
+    flushed = await flushOutbox(hostDeps, session);
+  } catch {
+    // flushOutbox throws only when the receipt could not be made durable.
+    return rollbackStart(deps, hostDeps, session, UNWRITABLE);
+  }
+  if (!flushed.ok) {
+    if (isTerminalRcCode(flushed.code)) return rollbackStart(deps, hostDeps, session, flushed);
+    // An outage, a rate limit or an unproven receipt: the session is real and
+    // its opening events are durable, but nothing has proven it live. Say so,
+    // keep the queue for the next delivery, and do not exit 0.
+    deps.out(deps.json ? renderStatusJson(viewOf(session, deps)) : renderStatus(viewOf(session, deps)));
+    deps.err(
+      `${flushed.code}: RC is registered, but the Cloud has not accepted its opening events, so it is not live yet. ` +
+      "They stay queued and are delivered during your next coding run or `aether rc link`; `aether rc off` revokes it.\n",
+    );
+    return EXIT_OPERATIONAL;
+  }
+
+  if (!deps.json) deps.out(renderStatus(viewOf(session, deps)));
+  const invitation = await printObserverLink(deps, hostDeps, sessionId);
+  if (deps.json) deps.out(renderStatusJson(viewOf(session, deps), invitation));
+  return EXIT_OK;
+}
+
+const UNWRITABLE = new RcError("RC_STATE_UNWRITABLE", "local RC state could not be written");
+
+/**
+ * Undo a start that cannot be reported live (#227).
+ *
+ * The Cloud session is revoked whatever the local disk allows, and every
+ * outcome is printed as what it is: revoked, revoked-but-not-recorded, or a
+ * pending revoke that the next `rc` command retries. Never a success.
+ */
+async function rollbackStart(
+  deps: RcCommandDeps,
+  hostDeps: RcHostDeps,
+  record: OutboxRecord,
+  cause: { code: string; detail: string },
+): Promise<number> {
+  const outcome = await abandonSession(hostDeps, record);
+  deps.err(`${cause.code}: ${cause.detail}\n`);
+  if (outcome.revoked && outcome.durable) {
+    deps.err("RC did not start. The Cloud session it registered was revoked; nothing is live.\n");
+  } else if (outcome.revoked) {
+    deps.err(
+      "RC did not start. The Cloud session it registered was revoked, but local RC state could not be updated.\n",
+    );
+  } else if (outcome.durable) {
+    deps.err(
+      "RC_REVOKE_UNCONFIRMED: RC did not start, and the Cloud has not confirmed revoking the session it registered. " +
+      "Publication is off; the next `aether rc` command retries the revoke, or run `aether rc off` when online.\n",
+    );
+  } else {
+    deps.err(
+      "RC_REVOKE_UNCONFIRMED: RC did not start, the Cloud has not confirmed revoking the session it registered, " +
+      "and local RC state could not be written. Nothing renews that session; it expires on its own.\n",
+    );
+  }
+  return EXIT_OPERATIONAL;
+}
+
+function recoveryMessage(record: OutboxRecord): string {
+  if (record.recovery?.reason === "unreadable") return UNREAD_MESSAGE;
+  const reason = record.recovery?.reason === "incompatible" ? "from an incompatible version" : "unreadable";
+  return `RC_STATE_UNREADABLE: the saved RC state for this project is ${reason}. It may be the only record of a ` +
+    "live session, so RC will not start over it. Run `aether rc off` to revoke what it names and set it aside.";
+}
+
+/**
+ * A read that FAILED (a lock, an access error) is not damage: the bytes may be
+ * a perfectly good record of a live session. Nothing acts on it — no start
+ * over it, and no `rc off` setting it aside — until it can be read.
+ */
+const UNREAD_MESSAGE =
+  "RC_STATE_UNREADABLE: the saved RC state for this project could not be read (an I/O error, not damage). " +
+  "It was left untouched, and RC will not start over it. Check that nothing is holding the file or blocking " +
+  "access to the Aether config directory, then retry.";
+
+/**
+ * `rc off` for state that could not be read (#227).
+ *
+ * Revokes the session the damaged bytes still name, and only then moves them
+ * aside. When the Cloud cannot confirm, nothing local changes: the damaged
+ * file stays the record and the next `rc off` retries. When no session id is
+ * legible there is nothing this host can revoke, and it says so rather than
+ * claiming a revocation it never made.
+ */
+async function offRecovery(deps: RcCommandDeps, hostDeps: RcHostDeps, record: OutboxRecord): Promise<number> {
+  if (record.recovery?.reason === "unreadable") {
+    deps.err(`${UNREAD_MESSAGE}\n`);
+    return EXIT_OPERATIONAL;
+  }
+  const named = record.recovery?.session_id ?? null;
+  if (named && !(await confirmCloudRevoke(hostDeps, named))) {
+    deps.err(
+      `RC_REVOKE_UNCONFIRMED: the saved RC state is unreadable and names session ${named}, but the Cloud did not ` +
+      "confirm revoking it. Nothing was changed; run `aether rc off` again when online.\n",
+    );
+    return EXIT_OPERATIONAL;
+  }
+  if (!setAsideOutbox(hostDeps.outboxPath)) {
+    deps.err("RC_STATE_UNWRITABLE: the unreadable RC state could not be moved aside; RC stays off.\n");
+    return EXIT_OPERATIONAL;
+  }
+  if (!named) {
+    deps.err(
+      "RC_REVOKE_UNCONFIRMED: the unreadable RC state named no session this host could revoke. It was set aside; " +
+      "any Cloud session it described is no longer renewed by this host and expires on its own.\n",
+    );
+    return EXIT_OPERATIONAL;
+  }
+  deps.out(deps.json ? renderStatusJson(viewOf(loadOutbox(hostDeps.outboxPath, deps.cwd), deps)) :
+    `RC is off. Session ${named} was revoked, and the unreadable RC state was set aside.\n`);
+  return EXIT_OK;
 }
 
 /**
@@ -367,6 +835,11 @@ export async function cmdRc(
     repo: overrides.repo ?? repoSummary,
     out: overrides.out ?? ((text): void => void process.stdout.write(text)),
     err: overrides.err ?? ((text): void => void process.stderr.write(text)),
+    isTTY: overrides.isTTY ?? Boolean(process.stdout.isTTY),
+    columns: overrides.columns ?? process.stdout.columns,
+    json: overrides.json ?? ctx.flags.json,
+    ...(overrides.persist ? { persist: overrides.persist } : {}),
+    ...(overrides.statusTimeoutMs !== undefined ? { statusTimeoutMs: overrides.statusTimeoutMs } : {}),
   };
 
   // Connector state is read once, best-effort, before anything renders. A
@@ -385,45 +858,96 @@ export async function cmdRc(
   const projectRef = projectRefFor(deps.cwd);
   const outboxPath = rcOutboxPath(projectRef);
   const record = loadOutbox(outboxPath, deps.cwd);
-  const hostDeps: RcHostDeps = { api: ctx.api, outboxPath, projectRoot: deps.cwd };
+  const hostDeps: RcHostDeps = {
+    api: ctx.api,
+    outboxPath,
+    projectRoot: deps.cwd,
+    ...(deps.persist ? { persist: deps.persist } : {}),
+  };
+  const subcommand = argv[0] ?? "status";
 
-  switch (argv[0] ?? "status") {
+  // #227: a revoke the Cloud never confirmed is retried on the next rc
+  // command, whichever it is, rather than only when the operator thinks to run
+  // `off` again. Bounded, so an offline status still answers promptly; on
+  // failure the tombstone simply stays and the subcommand reports it.
+  if (record.revoke_pending && subcommand !== "off") {
+    const named = record.session_id;
+    const reconciled = await revokeHost(hostDeps, record, { timeoutMs: RC_RECONCILE_TIMEOUT_MS });
+    // A stale tombstone naming no session is merely cleared: nothing was revoked.
+    if (reconciled.ok && named && !deps.json) deps.err("RC: the Cloud confirmed revocation of the previous session.\n");
+  }
+
+  switch (subcommand) {
     case "start":
       return start(deps, hostDeps, record, flags.str("name"), projectRef);
 
     case "status":
-      deps.out(renderStatus(viewOf(record, deps, null)));
-      return EXIT_OK;
-
     case "exposure":
-      deps.out(renderExposure(viewOf(record, deps, null)));
-      return EXIT_OK;
-
     case "viewers": {
-      if (!record.session_id) {
+      if (subcommand === "viewers" && !record.session_id) {
+        deps.err(record.recovery ? `${recoveryMessage(record)}\n` : "RC is not running for this project\n");
+        return EXIT_OPERATIONAL;
+      }
+      // The broker owns liveness, expiry and observer presence (#226). It is
+      // asked every time, with a short bound; what it cannot answer is shown
+      // as unknown, never filled in from the local file.
+      const view = viewOf(record, deps, await cloudReading(hostDeps, record, deps.statusTimeoutMs));
+      deps.out(deps.json ? renderStatusJson(view)
+        : subcommand === "status" ? renderStatus(view)
+        : subcommand === "exposure" ? renderExposure(view)
+        : renderViewers(view));
+      // `viewers` exists to answer one question; when the Cloud could not
+      // answer it, the exit code says so too.
+      return subcommand === "viewers" && view.cloud.kind !== "known" ? EXIT_OPERATIONAL : EXIT_OK;
+    }
+
+    case "link":
+      if (record.recovery) {
+        deps.err(`${recoveryMessage(record)}\n`);
+        return EXIT_OPERATIONAL;
+      }
+      if (!record.session_id || record.revoke_pending || record.start_phase === "registered") {
         deps.err("RC is not running for this project\n");
         return EXIT_OPERATIONAL;
       }
-      // The broker owns observer presence. When it cannot be reached the honest
-      // answer is "unknown", never zero — reporting that nobody is watching
-      // when we simply could not ask is the one wrong answer here.
-      deps.out(renderExposure(viewOf(record, deps, null)));
-      return EXIT_OK;
-    }
+      {
+        let flushed: FlushOutcome;
+        try {
+          flushed = await flushOutbox(hostDeps, record);
+        } catch {
+          flushed = { ok: false, code: UNWRITABLE.code, detail: UNWRITABLE.detail };
+        }
+        if (!flushed.ok && SESSION_REFUSALS.has(flushed.code)) {
+          deps.err(`${flushed.code}: ${flushed.detail}; this RC session cannot deliver events or admit a viewer. ` +
+            "Run `aether rc off` to clear it.\n");
+          return EXIT_OPERATIONAL;
+        }
+        // No invitation into a session nothing has proven live (#227).
+        if (!flushed.ok || record.start_phase !== "confirmed") {
+          const code = flushed.ok ? "RC_RECEIPTS_UNPROVEN" : flushed.code;
+          deps.err(`${code}: RC opening events are still pending. Retry \`aether rc link\` after reconnecting.\n`);
+          return EXIT_OPERATIONAL;
+        }
+        const invitation = await printObserverLink(deps, hostDeps, record.session_id);
+        if (deps.json && invitation) deps.out(renderStatusJson(viewOf(record, deps), invitation));
+        return invitation ? EXIT_OK : EXIT_OPERATIONAL;
+      }
 
     case "off": {
+      if (record.recovery) return offRecovery(deps, hostDeps, record);
       const outcome = await revokeHost(hostDeps, record);
       if (!outcome.ok) {
         deps.err(`${outcome.code}: ${outcome.detail}\n`);
         return EXIT_OPERATIONAL;
       }
-      deps.out("RC is off. The session, its grants and its streams are revoked.\n");
+      deps.out(deps.json ? renderStatusJson(viewOf(record, deps)) :
+        "RC is off. The session, its grants and its streams are revoked.\n");
       return EXIT_OK;
     }
 
     default:
       deps.err(
-        `unknown subcommand: ${String(argv[0])}\nusage: aether rc <start|status|exposure|viewers|off>\n`,
+        `unknown subcommand: ${String(argv[0])}\nusage: aether rc <start|link|status|exposure|viewers|off>\n`,
       );
       return EXIT_USAGE;
   }

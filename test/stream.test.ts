@@ -9,6 +9,16 @@ import {
 } from "../src/core/stream.js";
 import { StreamEventTooLargeError, StreamIncompleteError } from "../src/core/errors.js";
 
+test("hosted tool_call preserves read_file byte range arguments", () => {
+  assert.deepEqual(normalizeFrame({
+    type: "tool_call", tool_call_id: "read-1", name: "read_file",
+    args: { path: "src/a.ts", offset: 4096, max_bytes: 512 },
+  }), {
+    type: "tool_call", toolCallId: "read-1", name: "read_file",
+    args: { path: "src/a.ts", offset: 4096, max_bytes: 512 }, risk: undefined,
+  });
+});
+
 test("normalizeFrame done maps token fields and carries no signature", () => {
   const f = normalizeFrame({
     type: "done",
@@ -29,6 +39,15 @@ test("normalizeFrame done maps token fields and carries no signature", () => {
 test("normalizeFrame error uses contract keys msg/error_code/ref_id", () => {
   const f = normalizeFrame({ type: "error", msg: "boom", error_code: "E42", ref_id: "r1" });
   assert.deepEqual(f, { type: "error", msg: "boom", errorCode: "E42", refId: "r1" });
+});
+
+test("request_id support metadata is preserved and terminal escape text is rejected", () => {
+  assert.deepEqual(normalizeFrame({ type: "error", msg: "failed", error_code: "E_SAFE", request_id: "req_one" }), {
+    type: "error", msg: "failed", errorCode: "E_SAFE", refId: "req_one",
+  });
+  const frame = normalizeFrame({ type: "error", msg: "failed", request_id: "req\u001b[2J", error_code: "secret\ntext" });
+  assert.ok(frame?.type === "error");
+  assert.equal(frame.refId, undefined); assert.equal(frame.errorCode, undefined);
 });
 
 test("normalizeFrame accepts canonical and fixed legacy public error text only", () => {

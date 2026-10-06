@@ -98,6 +98,24 @@ function frame(obj: Record<string, unknown>): string {
   return JSON.stringify(obj);
 }
 
+test("dev-session errors with no public message terminate instead of reconnecting or reporting success", async () => {
+  const { fetchImpl, calls } = devServer([[
+    frame({ type: "error", seq: 1, request_id: "dev_req", error_code: "SESSION_FAILED", reason: "private detail" }),
+    frame({ type: "done", seq: 2, ok: true }),
+  ]]);
+  await withFetch(fetchImpl, async () => {
+    const events: BrainEvent[] = [];
+    for await (const event of new CloudBrain(new ApiClient("https://stub.test", tokens)).run(TASK)) events.push(event);
+    const error = events.find((event) => event.type === "error");
+    assert.ok(error?.type === "error");
+    assert.equal(error.requestId, "dev_req");
+    assert.doesNotMatch(error.msg, /private detail/);
+    assert.ok(events.some((event) => event.type === "done" && !event.ok));
+    assert.equal(calls.filter((call) => call.url.includes("/stream")).length, 1);
+    assert.equal(calls.filter((call) => call.method === "POST" && call.url.endsWith("/agent/dev/sessions")).length, 1);
+  });
+});
+
 test("dev session: create carries effort + capabilities; tool_call surfaces and sendToolResult POSTs upstream", async () => {
   const { fetchImpl, calls } = devServer([
     [
@@ -127,6 +145,11 @@ test("dev session: create carries effort + capabilities; tool_call surfaces and 
     assert.equal(createBody["surface"], "aether_agent");
     assert.ok(Array.isArray(createBody["capabilities"]));
     assert.ok((createBody["capabilities"] as string[]).includes("run_shell"));
+    assert.ok((createBody["capabilities"] as string[]).includes("list_directory"));
+    assert.ok((createBody["capabilities"] as string[]).includes("patch_file"));
+    assert.equal(createBody["read_file_ranges"], true);
+    assert.equal(createBody["read_file_revisions"], process.platform === "linux" ? true : undefined);
+    assert.equal(createBody["write_file_preconditions"], true);
 
     const tc = out.find((e) => e.type === "tool_call");
     assert.ok(tc && tc.type === "tool_call");

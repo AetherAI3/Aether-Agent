@@ -25,7 +25,7 @@ import {
   type V2ControlOutcome,
 } from "../core/headless_protocol.js";
 import { LineBuffer } from "../core/brain_protocol.js";
-import { resolveLocalModelSelection } from "../core/local_ollama.js";
+import { isLocalModelId, resolveLocalModelSelection } from "../core/local_ollama.js";
 import {
   HeadlessCheckpointStore,
   captureHeadlessWorkspace,
@@ -48,7 +48,7 @@ export const EXEC_EXIT = {
   cancelled: 130,
 } as const;
 export type ExecPermission = "deny" | "read-only" | "workspace-write";
-export const EXEC_V1_TOOLS = ["read_file", "write_file", "repo_search"] as const;
+export const EXEC_V1_TOOLS = ["read_file", "list_directory", "patch_file", "write_file", "repo_search"] as const;
 export interface ExecOptions {
   permission: ExecPermission;
   allowedTools: readonly string[];
@@ -94,7 +94,11 @@ function allowed(permission: ExecPermission, tool: string, declared: ReadonlySet
   return { ok: true, reason: "declared-and-authorized" };
 }
 
-function verificationStatus(result: ToolResult | null, configured: boolean): VerifyOutcome {
+/** The headless terminal frame serializes this object whole, so it keeps its
+ * pre-#275 key set; the `aether agent` check reading is not part of that contract. */
+type HeadlessVerification = Omit<VerifyOutcome, "check">;
+
+function verificationStatus(result: ToolResult | null, configured: boolean): HeadlessVerification {
   if (!configured) return { status: "unverified", remaining: 0, exitCode: -1 };
   if (result?.exitCode === 0) return { status: "ok", remaining: 0, exitCode: 0 };
   return { status: "incomplete", remaining: 0, exitCode: result?.exitCode || 1 };
@@ -195,8 +199,8 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
         if (!requestedModel) {
           throw new Error("--exec-driver cloud requires an explicit --model so checkpoints cannot drift with the server default");
         }
-        if (requestedModel.startsWith("ollama:")) {
-          throw new Error("an ollama: model cannot be sent to the Aether cloud driver");
+        if (isLocalModelId(requestedModel)) {
+          throw new Error("an Ollama model cannot be sent to the Aether cloud driver");
         }
         if (requestedModel.startsWith("aether-")) {
           throw new Error(
@@ -213,8 +217,8 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
     }
   } catch (error) {
     const explicit = ctx.flags.model?.trim();
-    const message = explicit && driver === "ollama" && !explicit.startsWith("ollama:")
-      ? `Model ${JSON.stringify(explicit)} is unavailable to aether exec. Use an explicit ollama:<tag>; bare and hosted model ids are rejected.`
+    const message = explicit && driver === "ollama" && !isLocalModelId(explicit)
+      ? `Model ${JSON.stringify(explicit)} is unavailable to aether exec. Use an explicit ollama/<tag>; bare and hosted model ids are rejected.`
       : error instanceof Error ? error.message : String(error);
     process.stderr.write(`aether exec: ${String(redactHeadless(message))}\n`);
     return EXEC_EXIT.usage;
@@ -493,6 +497,10 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
       const correlation = event.type === "tool_call" && event.id ? event.id : writer.sessionId;
       writer.emit("agent_event", { event }, correlation);
       if (event.type === "tool_call") {
+        if (event.name === "patch_file") {
+          const preview = exec.previewPatch(event.args);
+          writer.emit("patch_preview", { output: preview.output, valid: preview.exitCode === 0 }, event.id);
+        }
         const decision = allowed(permission, event.name, declared);
         writer.emit("permission_decision", { tool: event.name, approved: decision.ok, reason: decision.reason }, event.id);
         const result = decision.ok
@@ -518,7 +526,7 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
     brain.close();
   }
 
-  let verification: VerifyOutcome;
+  let verification: HeadlessVerification;
   let verificationOutput = "[cancelled before verification]";
   let verificationAuthoritative = false;
   let verificationCommitBound = false;
@@ -595,6 +603,9 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
   process.removeListener("SIGTERM", onSignal);
   process.stdin.removeListener("data", onStdin);
   process.stdin.removeListener("end", onStdinEnd);
+  // Attaching a data listener resumes stdin. Leave no flowing stream behind
+  // after the headless session, or an embedded runner can remain alive.
+  if (!process.stdin.isTTY) process.stdin.pause();
   return exitCode;
 }
 

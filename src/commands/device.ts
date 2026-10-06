@@ -16,7 +16,7 @@ import type { CommandFlags } from "../core/command_dispatch.js";
 import { saveConfig } from "../core/config.js";
 import { VERSION } from "../version.js";
 import { renderHealthReport } from "../core/health.js";
-import { isCredentialSafeUrl } from "../core/transport.js";
+import { ApiClient, isCredentialSafeUrl } from "../core/transport.js";
 import { DEVICE_ENROLL_PATH } from "../core/device_runtime/contract.js";
 import { deviceRuntimeEnabled } from "../core/device_runtime/enablement.js";
 import { loadEnrollment, saveEnrollment, type EnrollmentRecord } from "../core/device_runtime/identity.js";
@@ -44,8 +44,7 @@ const SCHEDULED_TASK_NAME = "AetherDeviceRuntime";
 interface EnrollResponse {
   device_id?: string;
   device_token?: string;
-  device_command_key?: string;
-  display_name?: string;
+  command_key_hex?: string;
 }
 
 function daemonScriptPath(): string {
@@ -201,24 +200,29 @@ async function enroll(ctx: AppContext, flags: CommandFlags): Promise<number> {
   }
   let resp: EnrollResponse;
   try {
-    resp = await ctx.api.postJson<EnrollResponse>(DEVICE_ENROLL_PATH, {
-      display_name: hostname(),
-      client: "aether-cli",
+    // The saved device bearer must point to the same Cloud that minted it.
+    // An explicit --base-url changes both the enrollment request and record.
+    const api = resolved.url.replace(/\/+$/, "") === ctx.cfg.baseUrl.replace(/\/+$/, "")
+      ? ctx.api : new ApiClient(resolved.url, ctx.tokens);
+    resp = await api.postJson<EnrollResponse>(DEVICE_ENROLL_PATH, {
+      client_label: hostname(),
+      allowed_projects: [],
     });
   } catch (err) {
     process.stderr.write(`enrollment failed: ${err instanceof Error ? err.message : String(err)}\n`);
     return DEVICE_EXIT.failed;
   }
-  if (!resp.device_id || !resp.device_token || !resp.device_command_key) {
+  if (!resp.device_id || !resp.device_token ||
+      !resp.command_key_hex || !/^[0-9a-f]{64}$/i.test(resp.command_key_hex)) {
     process.stderr.write("enrollment response was missing the device id, token, or command key.\n");
     return DEVICE_EXIT.failed;
   }
   const record: EnrollmentRecord = {
     device_id: resp.device_id,
     device_token: resp.device_token,
-    device_command_key: resp.device_command_key,
+    device_command_key: resp.command_key_hex,
     // Display metadata only — the hostname never authenticates the device.
-    display_name: resp.display_name ?? hostname(),
+    display_name: hostname(),
     base_url: resolved.url,
     enrolled_at: Date.now(),
   };

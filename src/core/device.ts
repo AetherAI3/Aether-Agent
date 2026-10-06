@@ -39,8 +39,8 @@ export function classifyPoll(r: PollResponse): PollResult {
 }
 
 /** Start a device-grant login. Unauthed endpoint. */
-export async function requestDeviceCode(api: ApiClient): Promise<DeviceCode> {
-  return api.postJson<DeviceCode>(DEVICE_CODE_PATH, { client_id: "aether-cli" });
+export async function requestDeviceCode(api: ApiClient, signal?: AbortSignal): Promise<DeviceCode> {
+  return api.postJson<DeviceCode>(DEVICE_CODE_PATH, { client_id: "aether-cli" }, signal);
 }
 
 // Consecutive non-HTTP polling failures (network down, DNS failure, timeout,
@@ -59,15 +59,18 @@ export async function pollForToken(
   api: ApiClient,
   code: DeviceCode,
   sleep: (ms: number) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<string> {
   let interval = code.interval;
   const deadline = Date.now() + code.expires_in * 1000;
   let consecutiveNetworkErrors = 0;
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("login cancelled", "AbortError");
     await sleep(interval * 1000);
+    if (signal?.aborted) throw signal.reason ?? new DOMException("login cancelled", "AbortError");
     let resp: PollResponse;
     try {
-      resp = await api.postJson<PollResponse>(DEVICE_TOKEN_PATH, { device_code: code.device_code });
+      resp = await api.postJson<PollResponse>(DEVICE_TOKEN_PATH, { device_code: code.device_code }, signal);
       consecutiveNetworkErrors = 0;
     } catch (err) {
       // The poll endpoint returns 400 with a string `error` body for pending/

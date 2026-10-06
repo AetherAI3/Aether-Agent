@@ -329,6 +329,20 @@ const say = (out: Writable, result: ActionResult): void => {
   out.write(`${result.ok ? theme.cyan("✔") : "✗"} ${result.message}\n`);
 };
 
+/**
+ * Hand a verifier reading to the active RC session of the launch project, if
+ * there is one (issue #219). Nothing here is awaited: the RC modules load
+ * lazily so a plain `aether review` never pays for them up front, and neither
+ * the output nor the exit code waits on, or depends on, the broker. The frame
+ * is sanitized and persisted before any upload, so a CLI that exits first
+ * leaves it for the next flush.
+ */
+function publishToRc(ctx: AppContext, reading: VerificationReading): void {
+  void import("./rc_verification.js")
+    .then(({ publishVerificationReading }) => publishVerificationReading(ctx.api, ctx.flags.cwd, reading))
+    .catch(() => {});
+}
+
 export async function runReview(
   ctx: AppContext,
   deps: ReviewDeps,
@@ -341,6 +355,13 @@ export async function runReview(
     return 1;
   }
   const { state, counts, verification } = read;
+
+  // A STORED verification read against the tree in front of us is a verifier
+  // reading the viewer should see too — this is where "stale" comes from.
+  // Only a reading about an actual record is published: "nothing is recorded"
+  // is not evidence, and would overwrite a gate verdict the record never saw.
+  // Fire-and-forget; a no-op without an active RC session for this project.
+  if ((flags.json || sub === "" || sub === "show") && verification.record) publishToRc(ctx, verification);
 
   if (flags.json) {
     deps.out.write(
@@ -396,8 +417,19 @@ export async function runReview(
     deps.out.write(result.output.endsWith("\n") ? result.output : result.output + "\n");
     deps.out.write(`  Tests:   ${result.reading.status} — ${result.reading.reason}\n`);
     if (!result.written) {
-      deps.out.write(theme.dim("  nothing was recorded — this run cannot be attributed to a working tree.\n"));
+      deps.out.write(
+        theme.dim(
+          result.completed
+            ? "  nothing was recorded — this run cannot be attributed to a working tree.\n"
+            : "  nothing was recorded — the check did not run to completion.\n",
+        ),
+      );
     }
+    // The completed reading, for an active RC session's viewer. testsEvent
+    // carries the status and a fixed reason only — never the command, its
+    // output or the reason printed above. With no command nothing ran: the
+    // stored reading still describes the tree, so nothing replaces it.
+    if (result.reading.cause !== "no_command") publishToRc(ctx, result.reading);
     return result.reading.status === "verified" ? 0 : 1;
   }
   const selection = selectionFrom(state, flags);

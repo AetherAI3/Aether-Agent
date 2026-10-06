@@ -12,6 +12,14 @@ import {
 } from "../scripts/verify-production.js";
 import { DEFAULT_CONFIG } from "../src/core/config.js";
 
+const QR_FILES = [
+  "package.json", "LICENSE", "NOTICE.md", "src/index.d.ts", "lib/main.js", "vendor/QRCode/LICENSE",
+  "vendor/QRCode/index.js", "vendor/QRCode/QR8bitByte.js", "vendor/QRCode/QRBitBuffer.js",
+  "vendor/QRCode/QRErrorCorrectLevel.js", "vendor/QRCode/QRMaskPattern.js", "vendor/QRCode/QRMath.js",
+  "vendor/QRCode/QRMode.js", "vendor/QRCode/QRPolynomial.js", "vendor/QRCode/QRRSBlock.js",
+  "vendor/QRCode/QRUtil.js",
+];
+
 const manifest = {
   name: "aether-agents",
   version: "1.2.3",
@@ -22,11 +30,11 @@ const manifest = {
     "dist/src", "ATS_ACCEPTABLE_USE_POLICY.md", "README.md", "assets/aether-agent-hero.png", "COMMANDS.md", "LICENSE", "NOTICE.md",
     "docs/generated/commands.md", "docs/generated/model-catalogue.md",
     "docs/model-catalogue/catalogue.json", "docs/model-catalogue/index.html",
-    "packages/ats-skills", "packages/ats-skills-source.json",
+    "packages/ats-skills", "packages/qrcode-terminal", "packages/ats-skills-source.json",
   ],
   engines: { node: ">=24" },
-  dependencies: { "aether-ats-skills": "0.2.0" },
-  bundledDependencies: ["aether-ats-skills"],
+  dependencies: { "aether-ats-skills": "0.2.0", "aether-rc-qr": "0.1.0" },
+  bundledDependencies: ["aether-ats-skills", "aether-rc-qr"],
   repository: { type: "git", url: "https://github.com/AetherAI3/aether-agent" },
   scripts: { prepack: "npm run build" },
 };
@@ -72,6 +80,7 @@ const pack: PackReport = {
     "node_modules/aether-browser/src/index.js",
     "node_modules/aether-context/package.json",
     "node_modules/aether-context/bin/aether-context.js",
+    ...QR_FILES.flatMap((file) => [`packages/qrcode-terminal/${file}`, `node_modules/aether-rc-qr/${file}`]),
     "packages/ats-skills-source.json",
     ...["package.json", "README.md", "LICENSE", "SETTINGS.md", "src/index.js", "src/index.d.ts", "src/browser.js", "src/browser_recovery.js", "src/browser_transport.js", "src/vision_skill.js", "src/settings.js", "src/strategy_library.js", "src/journal.js", "src/memory_lease.js", "python/bridge.py", "python/memory_lease.py", "bin/aether-ats-skills.js"].map((path) => `packages/ats-skills/${path}`),
   ].map((path) => ({ path, size: 1 })),

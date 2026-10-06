@@ -240,6 +240,9 @@ export class CloudBrain implements Brain {
             model: task.model,
             effort: task.effort,
             capabilities: this.opts.localToolCapabilities ?? TOOLS,
+            readFileRanges: true,
+            readFileRevisions: process.platform === "linux",
+            writeFilePreconditions: true,
             maxUvt: this.opts.maxUvt,
             protocolVersion: DEV_PROTOCOL_VERSION,
           }),
@@ -344,7 +347,7 @@ export class CloudBrain implements Brain {
             reconnects = 0;
           }
           if (frame.type === "custody") appendCustody(frame.custody);
-          if (frame.type === "error") failed = frame.msg;
+          if (frame.type === "error") failed = cloudErrorEvent(frame).msg;
           if (frame.type === "done") {
             sawDone = true;
             doneOk = frame.ok !== false;
@@ -401,13 +404,15 @@ export class CloudBrain implements Brain {
       // receipts persist here too — the client-held log is the only copy.
       let failed: string | null = null;
       let sawDone = false;
+      let doneOk = true;
       for await (const frame of decodeSse(stream)) {
         if (this.aborted) break;
         if (frame.type === "custody") appendCustody(frame.custody);
-        if (frame.type === "error") failed = frame.msg;
-        if (frame.type === "done") sawDone = true;
+        if (frame.type === "error") failed = cloudErrorEvent(frame).msg;
+        if (frame.type === "done") { sawDone = true; doneOk = frame.ok !== false; }
         const ev = mapLegacyFrame(frame);
         if (ev) queue.push(ev);
+        if (failed || sawDone) break;
       }
       if (failed) {
         queue.push({ type: "done", ok: false, result: failed, remaining: 0, reason: "" });
@@ -416,7 +421,7 @@ export class CloudBrain implements Brain {
       } else if (!sawDone) {
         queue.push({ type: "done", ok: false, result: withHint(new StreamIncompleteError()), remaining: 0, reason: "" });
       } else {
-        queue.push({ type: "done", ok: true, result: "", remaining: 0, reason: "" });
+        queue.push({ type: "done", ok: doneOk, result: doneOk ? "" : "The cloud request failed.", remaining: 0, reason: "" });
       }
     } catch (err) {
       if (err instanceof StreamUnavailableError) {
@@ -428,10 +433,14 @@ export class CloudBrain implements Brain {
           queue.push({ type: "monologue", text: r.response ?? "", depth: 0 });
           queue.push({ type: "done", ok: true, result: r.response ?? "", remaining: 0, reason: "" });
         } catch (e2) {
-          queue.push({ type: "error", msg: withHint(e2) });
+          const message = withHint(e2);
+          queue.push({ type: "error", msg: message });
+          queue.push({ type: "done", ok: false, result: message, remaining: 0, reason: "transport-error" });
         }
       } else {
-        queue.push({ type: "error", msg: withHint(err) });
+        const message = withHint(err);
+        queue.push({ type: "error", msg: message });
+        queue.push({ type: "done", ok: false, result: message, remaining: 0, reason: "transport-error" });
       }
     }
   }
@@ -526,6 +535,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Public messages and support identifiers survive transport without exposing internal reasons. */
+function cloudErrorEvent(frame: Extract<StreamFrame, { type: "error" }>): Extract<BrainEvent, { type: "error" }> {
+  const details = [frame.refId, frame.errorCode].filter(Boolean).join(" · ");
+  const message = sanitizeServerText(frame.msg || "The cloud request failed.");
+  return {
+    type: "error", msg: details ? `${message} (support reference: ${details})` : message,
+    ...(frame.refId ? { requestId: frame.refId } : {}),
+    ...(frame.errorCode ? { errorCode: frame.errorCode } : {}),
+  };
+}
+
 /** Map a dev-session frame onto the bridge event vocabulary (null = ignore). */
 function mapDevFrame(f: StreamFrame): BrainEvent | null {
   switch (f.type) {
@@ -538,7 +558,7 @@ function mapDevFrame(f: StreamFrame): BrainEvent | null {
     case "delta":
       return { type: "monologue", text: f.text, depth: 0 };
     case "error":
-      return { type: "error", msg: f.msg };
+      return cloudErrorEvent(f);
     case "done":
       return null; // devPump emits its own terminal done
     default:
@@ -560,7 +580,7 @@ function mapLegacyFrame(f: StreamFrame): BrainEvent | null {
     case "task_failed":
       return { type: "error", msg: f.msg ?? "task failed" };
     case "error":
-      return { type: "error", msg: f.msg };
+      return cloudErrorEvent(f);
     case "done":
       return null; // the pump emits its own terminal done after the loop
     case "memory": {

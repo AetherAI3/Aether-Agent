@@ -24,13 +24,13 @@ aether                                  # no args = interactive REPL
 <!-- CLI-COMMANDS:END -->
 
 <!-- SLASH-COMMANDS:START -->
-`help`, `models`, `model`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`, `voice`, `preview`,
-`clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`, `code-review`, `writing-skills`,
-`writing-plans`, `queue`, `steer`, `btw`, `pin`, `drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`,
-`goals`, `memory`, `workflow`, `workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`,
-`delegate`, `tree`, `broadcast`, `gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`,
-`revert`, `photogen`, `frame`, `re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`,
-`agent-create`, `browser`, `ats`
+`help`, `auth`, `models`, `model`, `switch`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`,
+`voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`,
+`code-review`, `writing-skills`, `writing-plans`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`, `btw`,
+`pin`, `drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`, `workflow`, `workflow-templates`,
+`workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`, `broadcast`, `gather`,
+`scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`, `frame`, `re-frame`,
+`videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`, `ats`
 <!-- SLASH-COMMANDS:END -->
 
 ## Runtime capability requirements
@@ -97,6 +97,16 @@ One host loop drives a pluggable brain: cloud (UVT-metered) by default,
 every tool call locally, and verifies the result itself — the final status is
 derived from your test command's exit code, never the brain's self-report.
 Every run ends with a verdict line: `✓ ok · 4 files changed · tests green · 3m12s`.
+The line is rendered from how the turn ended plus what the check actually did.
+Only a check that ran to completion and exited non-zero reads as failing
+(`2 tests failing`, or `check failed (exit 2)` when no count can be parsed). A
+run that is cancelled, times out, hits the model output limit, is refused, or
+loses its connection names that reason and says `verification not run`; a check
+that itself times out or is cancelled says so instead of reporting a red run.
+With `--json`, the final `turn_outcome` record carries the same reading under
+`verification` (`state`, `exit_code`, `failing`, `reason`), and so does the
+session manifest. In a git checkout, a completed check is also recorded for
+`aether review`, bound to the tree it ran against.
 
 | Flag | Meaning |
 |---|---|
@@ -224,6 +234,21 @@ instead of trusting a PID file; an unverifiable stale PID is never signalled.
   "readyUrl": "http://127.0.0.1:5173"
 }
 ```
+
+While an `aether rc` session is active for the project, `preview start`,
+`status` and `stop` publish the phases they observe (`starting`, `ready`,
+`failed`, `stopping`, `stopped`) to viewers under a session-scoped handle. They
+never publish the loopback URL, port, PIDs, argv or child error text. A viewer
+link appears only for the declared preview while it is `ready`, and only when
+the declaration carries an optional `"publicUrl"`. That value must be a public
+`https://` origin and path with no credentials, query, fragment, IP address,
+private or loopback-resolving host name (`.local`, `.internal`, `.ts.net`,
+`.test`, `.onion`, `localtest.me`, `*.nip.io`, a name spelling an IPv4 address,
+…) or token-shaped segment (long random runs, UUIDs, hex digests). The check is
+conservative: a name it cannot prove public is refused. While an RC session is
+active, a refused `publicUrl` stops `preview start` before anything starts;
+without one it is ignored with a warning. Publication is best-effort and never
+changes a preview's result or exit code.
 
 Use `--no-open` in automation. A headless machine always receives the URL and
 an honest “not opened” result. `/preview start|open|logs|status|stop` uses the
@@ -503,7 +528,8 @@ mirrors the live registry in `src/commands/slash_registry.ts`.
 |---|---|
 | `/help` | Show the grouped command menu. |
 | `/models` | List chat models (numbered; `›` current, `🔒` locked). |
-| `/model <n\|id>` | Switch model — opens the picker with no arg. Restarts the session. |
+| `/model <n\|id>` | Choose a hosted model or `ollama:<tag>`; no arg opens the picker. The console shows a continuation brief before switching. |
+| `/switch <subcommand>` | Review the pending brief (`brief`), revise `goal`, `constraints`, or `outstanding` (`edit`), then `continue`, `fresh`, or `cancel`. The saved draft stays unsent. |
 | `/agents` | View active agent sessions (name, status, time, UVT, task). |
 | `/agent <n\|id>` | Switch orchestrator (Neo / Kronus) — opens the picker with no arg. |
 | `/tier` | Show your plan tier, default, and available counts. |

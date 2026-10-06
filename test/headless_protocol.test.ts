@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -70,7 +71,7 @@ test("exec resolves absent models from local config then the safe Ollama default
   const savedBrain = new FakeBrain([successfulEvent]);
   const saved = await runModelSelection(savedCtx, savedBrain);
   assert.equal(saved.code, 0);
-  assert.equal(saved.frames[0]?.["model"], "ollama:gemma3:4b");
+  assert.equal(saved.frames[0]?.["model"], "ollama/gemma3:4b");
   assert.equal(savedBrain.tasks[0]?.model, "gemma3:4b");
 
   const defaultCtx = context(root);
@@ -79,7 +80,7 @@ test("exec resolves absent models from local config then the safe Ollama default
   const defaultBrain = new FakeBrain([successfulEvent]);
   const fallback = await runModelSelection(defaultCtx, defaultBrain);
   assert.equal(fallback.code, 0);
-  assert.equal(fallback.frames[0]?.["model"], `ollama:${DEFAULT_OLLAMA_MODEL}`);
+  assert.equal(fallback.frames[0]?.["model"], `ollama/${DEFAULT_OLLAMA_MODEL}`);
   assert.equal(defaultBrain.tasks[0]?.model, DEFAULT_OLLAMA_MODEL);
 });
 
@@ -90,7 +91,7 @@ test("exec reports a namespaced Ollama id but sends only the normalized tag to t
   const brain = new FakeBrain([successfulEvent]);
   const run = await runModelSelection(ctx, brain);
   assert.equal(run.code, 0);
-  assert.equal(run.frames[0]?.["model"], "ollama:qwen2.5-coder:14b");
+  assert.equal(run.frames[0]?.["model"], "ollama/qwen2.5-coder:14b");
   assert.equal(brain.tasks[0]?.model, "qwen2.5-coder:14b");
 });
 
@@ -287,6 +288,35 @@ test("undeclared tools and permission escalation are denied with receipts", asyn
   assert.match(brain.results[2]!.result.output, /outside workspace/);
   assert.match(brain.results[3]!.result.output, /network-disabled/);
   assert.equal(lines.filter((line) => JSON.parse(line).type === "terminal").length, 1);
+  assert.deepEqual(validateHeadlessFrames(lines), []);
+});
+
+test("headless patch emits the exact preview before permission and mutation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aether-headless-patch-"));
+  const target = join(root, "space é.txt");
+  writeFileSync(target, "before\nafter\n");
+  const expected_sha256 = createHash("sha256").update(readFileSync(target)).digest("hex");
+  const brain = new FakeBrain([
+    { type: "tool_call", id: "patch-1", name: "patch_file", args: {
+      path: "space é.txt", expected_sha256, old_text: "before", new_text: "updated",
+    } },
+    successfulEvent,
+  ]);
+  const lines: string[] = [];
+  const code = await runHeadlessExec(context(root), "patch", {
+    permission: "workspace-write", allowedTools: ["patch_file"], capabilityPacks: [],
+    timeoutMs: 5000, verifyCommand: successfulVerify, brain,
+    writeLine: (line) => lines.push(line.trimEnd()),
+  });
+  assert.equal(code, 0);
+  const frames = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+  const previewIndex = frames.findIndex((frame) => frame["type"] === "patch_preview");
+  const permissionIndex = frames.findIndex((frame) => frame["type"] === "permission_decision");
+  const receiptIndex = frames.findIndex((frame) => frame["type"] === "tool_receipt");
+  assert.ok(previewIndex >= 0 && previewIndex < permissionIndex && permissionIndex < receiptIndex);
+  assert.match(String(frames[previewIndex]?.["output"]), /- "before"\n\+ "updated"/);
+  assert.equal(frames[permissionIndex]?.["approved"], true);
+  assert.equal(readFileSync(target, "utf8"), "updated\nafter\n");
   assert.deepEqual(validateHeadlessFrames(lines), []);
 });
 

@@ -2,6 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildChatRequest, buildDevSessionRequest } from "../src/core/envelope.js";
 
+test("dev-session request advertises range reads only for a capable host", () => {
+  const base = { task: "inspect", capabilities: ["read_file"], protocolVersion: 1 };
+  assert.equal(buildDevSessionRequest(base).read_file_ranges, undefined);
+  assert.equal(buildDevSessionRequest({ ...base, readFileRanges: true }).read_file_ranges, true);
+  assert.equal(buildDevSessionRequest(base).read_file_revisions, undefined);
+  assert.equal(buildDevSessionRequest({ ...base, readFileRevisions: true }).read_file_revisions, true);
+  assert.equal(buildDevSessionRequest(base).write_file_preconditions, undefined);
+  assert.equal(buildDevSessionRequest({ ...base, writeFilePreconditions: true }).write_file_preconditions, true);
+});
+
 test("buildChatRequest nulls empty model/agent and defaults to auto", () => {
   assert.deepEqual(buildChatRequest({ prompt: "hi", manualModel: false }), {
     query: "hi",

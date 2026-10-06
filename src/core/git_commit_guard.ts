@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 
 export interface GitRunResult {
   ok: boolean;
@@ -23,12 +24,13 @@ export interface GitRunner {
  */
 export const GIT_GLOBAL_ARGS: readonly string[] = [
   "--no-optional-locks",
+  "--literal-pathspecs",
   "-c",
   "core.literalPathspecs=true",
 ];
 
 /**
- * The pathspec appended to the two repository-state probes.
+ * The pathspec appended to the dirty-worktree probe.
  *
  * `git status` reports the WHOLE repository, not the directory it runs in.
  * Unbounded, the probe is O(entire repository) even when the agent's workspace
@@ -48,20 +50,33 @@ export const STATUS_PROBE: readonly string[] = [
   ...WORKSPACE_PATHSPEC,
 ];
 
-/** `git diff --cached` probe: staged paths in the workspace subtree. */
+/** A commit consumes the ENTIRE index, including staged paths outside a nested
+ * workspace. Inspect all staged paths so unrelated user work cannot be swept in. */
 export const STAGED_PROBE: readonly string[] = [
   "diff",
   "--cached",
   "--name-only",
   "-z",
-  ...WORKSPACE_PATHSPEC,
 ];
 
 export class SpawnGitRunner implements GitRunner {
+  private repoRoot: string | null = null;
   constructor(private readonly cwd: string) {}
 
   run(args: string[]): GitRunResult {
-    const result = spawnSync("git", [...GIT_GLOBAL_ARGS, ...args], {
+    // Porcelain names are repo-relative even when cwd is a workspace subtree.
+    // Candidate staging/reset/drift checks must use that same path base.
+    let argv = args;
+    const separator = args.indexOf("--");
+    if (["add", "reset", "diff"].includes(args[0] ?? "") && separator >= 0 && args[separator + 1] !== ".") {
+      if (!this.repoRoot) {
+        const root = spawnSync("git", [...GIT_GLOBAL_ARGS, "rev-parse", "--show-toplevel"], { cwd: this.cwd, encoding: "utf8" });
+        if (root.status !== 0) return { ok: false, stdout: "", stderr: "unable to resolve git root", exitCode: 1 };
+        this.repoRoot = root.stdout.trim();
+      }
+      argv = [...args.slice(0, separator + 1), ...args.slice(separator + 1).map(path => resolve(this.repoRoot!, path))];
+    }
+    const result = spawnSync("git", [...GIT_GLOBAL_ARGS, ...argv], {
       cwd: this.cwd,
       shell: false,
       encoding: "utf8",
@@ -170,7 +185,7 @@ export class GitCommitGuard {
     this.initError = dirty.ok && staged.ok ? null : "not a usable git repository";
   }
 
-  commit(message: string): GitCommitResult {
+  commit(message: string, ownedPaths?: ReadonlySet<string>): GitCommitResult {
     if (this.initError) return { output: "[git_commit refused: " + this.initError + "]", exitCode: 1 };
 
     const dirty = this.runner.run([...STATUS_PROBE]);
@@ -185,6 +200,7 @@ export class GitCommitGuard {
       parseNulPaths(staged.stdout),
     );
     if (!plan.ok) return { output: "[git_commit refused: " + plan.reason + "]", exitCode: 1 };
+    if (ownedPaths) plan.candidates = plan.candidates.filter(path => ownedPaths.has(path));
     if (!plan.candidates.length) return { output: "[nothing new to commit]", exitCode: 0 };
 
     const added = this.runner.run(["add", "-A", "--", ...plan.candidates]);

@@ -13,7 +13,7 @@ export interface AetherConfig {
   baseUrl: string;
   /** Default model id when --model is not passed (server smart-routes if empty). */
   defaultModel: string;
-  /** Namespaced local selection (`ollama:<tag>`). Kept separate so choosing a
+  /** Namespaced local selection (`ollama/<tag>`). Kept separate so choosing a
    * local model cannot rewrite or leak into the hosted default. */
   localModel?: string;
   /** Edit/command gating. Mirrors Aether Agent desktop "skip-perms" setting. */
@@ -78,4 +78,6 @@ export interface CatalogResponse {
   models: CatalogItem[];
   tier: string;
   default: string;
+  /** Opaque authenticated owner. Older servers omit it; do not infer identity then. */
+  account_id?: string | null;
 }

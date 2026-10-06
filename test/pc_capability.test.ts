@@ -183,3 +183,18 @@ test("CLI cannot turn --yes into PC browser approval", () => {
     assert.equal(result.stdout, "");
   }
 });
+
+
+test("PC doctor reports denied interface enumeration as unavailable without losing the report", async () => {
+  const report = await pcDoctor("claude", process.cwd(), false, {
+    wait: async () => {},
+    networkInterfaces: () => { throw new Error("interface enumeration denied"); },
+    fetchHead: async () => { throw new Error("unexpected remote request"); },
+    processProbe: () => ({ state: "measured", items: [] }),
+  });
+  const metric = report.metrics.find((item) => item.id === "network.interfaces");
+  assert.equal(metric?.state, "unavailable");
+  assert.equal(metric?.value, null);
+  assert.match(metric?.reason ?? "", /enumeration denied/);
+  assert.equal(report.networkProbe.state, "not-checked");
+});

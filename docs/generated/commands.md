@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:a8c24ac055d15ec28da0252b99970330b8e6d8d1c2994e8b54f4fd126680e11f -->
+<!-- manifest-digest: sha256:c9524e6cca9e6dc684b59996bcd16fdab2b5a0a0a8007ff3be2b8bff5d7cdc8e -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -126,7 +126,7 @@ Command flags:
 - `--body <value>`
 - `--base <value>`
 
-#### `aether ship [--title t] [--base b]`
+#### `aether ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]`
 
 publish the head branch and open a pull request
 
@@ -140,6 +140,8 @@ Command flags:
 - `--approve <value>`
 - `--title <value>`
 - `--body <value>`
+- `--pr-draft`
+- `--draft-file <value>`
 - `--base <value>`
 
 ### Account
@@ -315,17 +317,29 @@ this help, or detail for one command
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.help`
 
+#### `/auth [status|login|continue|new|draft]`
+
+repair hosted login and explicitly continue a rejected task
+
+Permission: `account` · Availability: `runtime-dependent` · Telemetry: `slash.auth` · Requires: `aether.hosted`
+
 #### `/models`
 
-interactive model picker
+list installed Ollama models locally or account models when hosted
 
-Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.models` · Requires: `aether.catalogue`
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.models` · Requires: `aether.catalogue`, `ollama.local`
 
-#### `/model <n|id>`
+#### `/model <tag|n|id>`
 
-switch model \(no arg → picker\)
+choose a model, then continue this task or start fresh
 
-Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.model` · Requires: `aether.catalogue`
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.model` · Requires: `aether.catalogue`, `ollama.local`
+
+#### `/switch <subcommand>`
+
+review and decide a pending model switch
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.switch`
 
 #### `/agent <n|id>`
 
@@ -469,6 +483,42 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 ### Steering
 
+#### `/shell-result`
+
+explicitly share the last local shell result with chat \(bounded\)
+
+Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.shell-result`
+
+#### `/shell-reset`
+
+discard local shell cwd/environment/functions; never replay
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.shell-reset`
+
+#### `/terminal`
+
+start an explicit Linux interactive terminal \(Python 3 and TTY required\)
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal`
+
+#### `/terminal-attach`
+
+reattach the current local terminal
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-attach`
+
+#### `/terminal-stop`
+
+stop the current local terminal and its process group
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-stop`
+
+#### `/terminal-status`
+
+show the current local terminal ID and state
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.terminal-status`
+
 #### `/queue <task>`
 
 queue a task \(runs when current finishes\)
@@ -533,9 +583,9 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 ### Goals & Workflows
 
-#### `/goal <desc|view|start|pause|resume|cancel|complete|note>`
+#### `/goal <command>`
 
-create/manage a goal \(agent plans phases\)
+draft and edit goal plans, or run one accepted phase with host verification
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.goal`
 
@@ -683,7 +733,7 @@ review changes, pick files or hunks, commit
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.review`
 
-#### `/ship [--title t] [--base b]`
+#### `/ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]`
 
 publish the head branch and open a pull request
 

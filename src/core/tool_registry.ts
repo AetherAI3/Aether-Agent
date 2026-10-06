@@ -32,11 +32,19 @@ const stringArg = (
 export const TOOL_DEFINITIONS: Readonly<Record<ToolName, ToolDefinition>> = {
   read_file: {
     sideEffect: "read",
-    args: { path: stringArg(4096) },
+    args: { path: stringArg(4096), start_line: { type: "integer", required: false, min: 1, max: 1_000_000 }, max_lines: { type: "integer", required: false, min: 1, max: 200 }, offset: { type: "integer", required: false, min: 0, max: Number.MAX_SAFE_INTEGER }, max_bytes: { type: "integer", required: false, min: 4, max: 4096 }, expected_revision: stringArg(128, false) },
+  },
+  list_directory: {
+    sideEffect: "read",
+    args: { path: stringArg(4096), cursor: stringArg(4096, false), limit: { type: "integer", required: false, min: 1, max: 100 } },
+  },
+  patch_file: {
+    sideEffect: "write",
+    args: { path: stringArg(4096), expected_sha256: stringArg(64), old_text: stringArg(1024 * 1024, true, true), new_text: stringArg(1024 * 1024, true, true), start_line: { type: "integer", required: false, min: 1, max: 1_000_000 } },
   },
   write_file: {
     sideEffect: "write",
-    args: { path: stringArg(4096), content: stringArg(1024 * 1024, true, true) },
+    args: { path: stringArg(4096), content: stringArg(1024 * 1024, true, true), expected_revision: stringArg(128, false), replace_token: stringArg(128, false) },
   },
   run_shell: {
     sideEffect: "shell",
@@ -113,6 +121,13 @@ export function validateToolCall(name: string, rawArgs: unknown): ToolValidation
       return { ok: false, error: key + " must be from " + rule.min + " to " + rule.max };
     }
     validated[key] = value;
+  }
+  if (name === "read_file" && (validated["start_line"] !== undefined || validated["max_lines"] !== undefined)
+    && (validated["offset"] !== undefined || validated["max_bytes"] !== undefined)) {
+    return { ok: false, error: "line and byte ranges cannot be combined" };
+  }
+  if (name === "write_file" && (validated["expected_revision"] === undefined) !== (validated["replace_token"] === undefined)) {
+    return { ok: false, error: "replacement requires expected_revision and replace_token together" };
   }
   return { ok: true, name: name as ToolName, args: validated };
 }

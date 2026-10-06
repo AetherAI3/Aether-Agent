@@ -17,9 +17,10 @@ import {
   buildMediaPrompt, dispatchGeneration, downloadMediaFile,
   ensureOutputDir, recordOutput, listOutput, findOutput, openOutput, clearOutput,
   parseStoryboard, saveStoryboard, loadStoryboard, listStoryboards,
-  type MediaKind, type GenFlags, type GenResult, type Storyboard,
+  type MediaKind, type GenFlags, type GenResult, type RecordedOutput, type Storyboard,
 } from "../core/vision.js";
 import { shortId } from "../core/media_history_store.js";
+import { rcArtifactObserver } from "./rc_artifacts.js";
 
 // Media pipeline state — persists across turns in the same REPL session.
 // Cleared on REPL restart. Used by /re-frame and /re-cut.
@@ -56,6 +57,11 @@ function parseSlashFlags(raw: string, _kind: MediaKind): { prompt: string; flags
 }
 
 const SF = theme.dim;
+
+/** Record a generation and hand the committed entry to an active RC session. */
+function record(ctx: AppContext, result: GenResult): RecordedOutput {
+  return recordOutput(result, { onCommitted: rcArtifactObserver(ctx) });
+}
 
 // LOOP-01 round 2: dispatchGeneration()/downloadMediaFile() already throw a
 // classified HttpError (401/402/403/5xx) or the shared network-outage/timeout
@@ -100,7 +106,7 @@ export async function photogenSlash(ctx: AppContext, out: Writable, arg: string,
           model: modelKey, prompt: vp, kind, filepath, filename: basename(filepath),
           url: resp.media_url, timestamp: new Date().toISOString(), flags,
         };
-        const { entry, warning } = recordOutput(result);
+        const { entry, warning } = record(ctx, result);
         if (warning) out.write(SF(`  ⚠  ${warning.message}\n`));
         out.write(`  ${theme.iceBlue("↓")} #${entry.sequence}  ${entry.filename}\n`);
         out.write(`  ${SF(resp.media_url)}\n\n`);
@@ -122,7 +128,7 @@ export async function reframeSlash(ctx: AppContext, out: Writable, arg: string):
     const resp = await dispatchGeneration(ctx.api, editPrompt, "vision_gpt_image2", flags);
     if (resp.media_url) {
       const filepath = await downloadMediaFile(ctx.api, resp.media_url, ensureOutputDir(), "vision_gpt_image2", "image", resp.filename);
-      const { entry, warning } = recordOutput({ model: "vision_gpt_image2", prompt: editPrompt, kind: "image", filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags });
+      const { entry, warning } = record(ctx, { model: "vision_gpt_image2", prompt: editPrompt, kind: "image", filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags });
       if (warning) out.write(SF(`  ⚠  ${warning.message}\n`));
       out.write(`${theme.iceBlue("↓")} #${entry.sequence}  ${entry.filename}\n`);
       _lastMediaUrl = resp.media_url; _lastMediaModel = "vision_gpt_image2";
@@ -143,7 +149,7 @@ export async function videogenSlash(ctx: AppContext, out: Writable, arg: string,
     if (resp.media_url) {
       out.write(SF("downloading video...\n"));
       const filepath = await downloadMediaFile(ctx.api, resp.media_url, ensureOutputDir(), modelKey, kind, resp.filename);
-      const { entry, warning } = recordOutput({ model: modelKey, prompt: fullPrompt, kind, filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags });
+      const { entry, warning } = record(ctx, { model: modelKey, prompt: fullPrompt, kind, filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags });
       if (warning) out.write(SF(`  ⚠  ${warning.message}\n`));
       out.write(`${theme.iceBlue("↓")} #${entry.sequence}  ${entry.filename}\n  ${SF(resp.media_url)}\n\n`);
       _lastMediaUrl = resp.media_url; _lastMediaModel = modelKey; _lastMediaKind = kind;
@@ -176,7 +182,7 @@ export async function animateSlash(ctx: AppContext, out: Writable, arg: string):
     const resp = await dispatchGeneration(ctx.api, prompt, "vision_seedance", { model: "seedance", ref: refUrl, duration: 5 });
     if (resp.media_url) {
       const filepath = await downloadMediaFile(ctx.api, resp.media_url, ensureOutputDir(), "vision_seedance", "video", resp.filename);
-      const { entry, warning } = recordOutput({ model: "vision_seedance", prompt, kind: "video", filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags: { model: "seedance", ref: refUrl, duration: 5 } });
+      const { entry, warning } = record(ctx, { model: "vision_seedance", prompt, kind: "video", filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags: { model: "seedance", ref: refUrl, duration: 5 } });
       if (warning) out.write(SF(`  ⚠  ${warning.message}\n`));
       out.write(`${theme.iceBlue("↓")} #${entry.sequence}  ${entry.filename}\n`);
       _lastMediaUrl = resp.media_url; _lastMediaModel = "vision_seedance"; _lastMediaKind = "video";
@@ -194,7 +200,7 @@ export async function recutSlash(ctx: AppContext, out: Writable, arg: string): P
     const resp = await dispatchGeneration(ctx.api, editPrompt, modelKey, { model: modelKey, ref: _lastMediaUrl });
     if (resp.media_url) {
       const filepath = await downloadMediaFile(ctx.api, resp.media_url, ensureOutputDir(), modelKey, "video", resp.filename);
-      const { entry, warning } = recordOutput({ model: modelKey, prompt: editPrompt, kind: "video", filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags: {} });
+      const { entry, warning } = record(ctx, { model: modelKey, prompt: editPrompt, kind: "video", filepath, filename: basename(filepath), url: resp.media_url, timestamp: new Date().toISOString(), flags: {} });
       if (warning) out.write(SF(`  ⚠  ${warning.message}\n`));
       out.write(`${theme.iceBlue("↓")} #${entry.sequence}  ${entry.filename}\n`);
       _lastMediaUrl = resp.media_url;
@@ -327,7 +333,7 @@ async function sbRender(ctx: AppContext, sb: Storyboard, phase: string, out: Wri
         if (resp.media_url) {
           const fp = await downloadMediaFile(ctx.api, resp.media_url, ensureOutputDir(), mk, "image");
           s.generated_frame_url = resp.media_url; s.generated_frame_path = fp;
-          recordOutput({ model: mk, prompt: s.keyframe_prompt, kind: "image", filepath: fp, filename: basename(fp), url: resp.media_url, timestamp: new Date().toISOString(), flags: {} });
+          record(ctx, { model: mk, prompt: s.keyframe_prompt, kind: "image", filepath: fp, filename: basename(fp), url: resp.media_url, timestamp: new Date().toISOString(), flags: {} });
           out.write(`    ${theme.iceBlue("✓")} scene ${s.index}\n`);
         }
       } catch (err) { writeErr(out, err, "    "); }
@@ -343,7 +349,7 @@ async function sbRender(ctx: AppContext, sb: Storyboard, phase: string, out: Wri
         const resp = await dispatchGeneration(ctx.api, s.animation_prompt, "vision_seedance", { model: "seedance", ref: s.generated_frame_url, duration: s.duration_sec });
         if (resp.media_url) {
           const fp = await downloadMediaFile(ctx.api, resp.media_url, ensureOutputDir(), "vision_seedance", "video");
-          recordOutput({ model: "vision_seedance", prompt: s.animation_prompt, kind: "video", filepath: fp, filename: basename(fp), url: resp.media_url, timestamp: new Date().toISOString(), flags: {} });
+          record(ctx, { model: "vision_seedance", prompt: s.animation_prompt, kind: "video", filepath: fp, filename: basename(fp), url: resp.media_url, timestamp: new Date().toISOString(), flags: {} });
           out.write(`    ${theme.iceBlue("✓")} scene ${s.index}\n`);
         }
       } catch (err) { writeErr(out, err, "    "); }

@@ -34,7 +34,7 @@ export function configPath(): string {
 
 export function loadConfig(): AetherConfig {
   const cfg = loadConfigFile();
-  // Migrate the brief pre-release shape that stored an ollama: id in the
+  // Migrate the brief pre-release shape that stored an Ollama id in the
   // hosted default slot. This is in-memory until the next explicit config
   // write; no read-only command rewrites the user's file.
   if (!cfg.localModel && isLocalModelId(cfg.defaultModel)) {
