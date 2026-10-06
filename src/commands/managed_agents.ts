@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { Writable } from "node:stream";
 import type { AppContext } from "../core/context.js";
 import {
-  ManagedAgentsClient, MANAGED_AGENT_ID, managedAgentError,
+  ManagedAgentsClient, MANAGED_AGENT_ID, managedAgentError, probeManagedReadiness,
+  type ManagedReadiness, type ReadinessGate,
   type ManagedAgent, type ManagedAgentConfig, type AgentMessage,
 } from "../core/managed_agents.js";
 import { theme } from "../ui/theme.js";
@@ -64,6 +65,19 @@ const HELP = [
   "Settings: name, purpose, prompt, tone, model, project, total-uvt, run-uvt, daily-uvt.",
   "New agents start as drafts with zero budget. Configure UVT limits, then activate.",
 ].join("\n") + "\n";
+
+function readinessLine(readiness: ManagedReadiness): string {
+  return (["registry", "dm", "model_uvt"] as const).map(key => {
+    const gate = readiness[key];
+    return `${key}: ${gate.state} (${gate.code}) · ${gate.reason} ${gate.state === "enabled" ? "" : gate.remedy}`.trim();
+  }).join("\n") + "\n";
+}
+
+function writeGateError(gate: ReadinessGate, ctx: AppContext, out: Writable): void {
+  out.write(ctx.flags.json
+    ? JSON.stringify({ error: { code: gate.code, message: gate.reason, remedy: gate.remedy } }) + "\n"
+    : `✗ ${gate.code}: ${sanitizeTerm(gate.reason)} ${sanitizeTerm(gate.remedy)}\n`);
+}
 
 function cell(value: string, width: number): string {
   const safe = sliceVisible(sanitizeTerm(value).replace(/[\r\n\t]/g, " "), width);
@@ -278,13 +292,18 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
   try {
     if (!(await ctx.tokens.get())) throw new Error("Sign in with `aether auth login` to sync your agents.");
     if (ctx.flags.local) throw new Error("Managed agents require your Aether account. Omit --local to sync with Cloud.");
+    const readiness = await probeManagedReadiness(ctx.api, signal);
+    if (readiness.registry.state !== "enabled") { writeGateError(readiness.registry, ctx, deps.err ?? process.stderr); return 1; }
+    if (readiness.dm.state !== "enabled") { writeGateError(readiness.dm, ctx, deps.err ?? process.stderr); return 1; }
+    if (ctx.flags.json) out.write(JSON.stringify({ type: "readiness", readiness }) + "\n");
+    else out.write(readinessLine(readiness));
     let agent = id ? await client.get(id, signal) : await pickManagedAgent(await client.list(signal), out, signal);
     if (!agent) return 0;
     closeSession = await deps.hooks?.beforeChat?.(ctx, agent, surface);
     const thread = await client.thread(agent.agent_id, signal);
     if (typeof thread["id"] !== "string") throw new Error("Cloud did not return a conversation ID.");
     const conversationId = thread["id"];
-    const send = async (body: string): Promise<void> => {
+    const send = async (body: string): Promise<boolean> => {
       const nonce = randomUUID();
       let receipt;
       try { receipt = await client.send(agent!.agent_id, conversationId, body, nonce, signal); }
@@ -292,13 +311,14 @@ export async function cmdManagedAgentChat(ctx: AppContext, id: string | undefine
         // No automatic replay with a new nonce: the server may already have saved it.
         throw new Error(`${managedAgentError(error)} Delivery is unconfirmed; check the shared conversation before sending again.`);
       }
-      if (ctx.flags.json) out.write(JSON.stringify(receipt) + "\n");
-      else {
-        const admission = receipt.admission;
-        surface.write(theme.dim(`Message saved · ${sanitizeTerm(admission?.state ?? "admission not reported")}${admission?.reason ? ` · ${sanitizeTerm(admission.reason)}` : ""}`) + "\n");
-      }
+      const state = receipt.admission?.state ?? "unreported";
+      const accepted = state === "admitted" || state === "replied";
+      const code = accepted ? "ADMITTED" : "SEND_NOT_ADMITTED";
+      if (ctx.flags.json) out.write(JSON.stringify({ type: "message_admission", code, state }) + "\n");
+      else surface.write(theme.dim(`${accepted ? "Message admitted" : "Message saved; execution not accepted"} · ${sanitizeTerm(state)}`) + "\n");
+      return accepted;
     };
-    if (prompt.trim()) { await send(prompt); return 0; }
+    if (prompt.trim()) return await send(prompt) ? 0 : 1;
     if (!ctx.flags.json) {
       out.write(renderAgent(agent) + theme.dim("Shared Online DM · /refresh · /exit") + "\n");
       const help = deps.hooks?.help?.(agent);
@@ -440,9 +460,13 @@ export async function cmdManagedAgents(ctx: AppContext, argv: string[], deps: Ma
     if (ctx.flags.local) throw new Error("Managed agents require your Aether account. Omit --local to sync with Cloud.");
     const [verb = "list", id, ...rest] = argv;
     if (verb === "chat") return await cmdManagedAgentChat(ctx, id, rest.join(" "), deps);
+    const readiness = verb === "list" || verb === "show" ? await probeManagedReadiness(ctx.api, deps.signal) : undefined;
+    if (readiness?.registry.state !== undefined && readiness.registry.state !== "enabled") {
+      writeGateError(readiness.registry, ctx, deps.err ?? process.stderr); return 1;
+    }
     if (verb === "list") {
       const agents = await client.list(deps.signal);
-      out.write(ctx.flags.json ? JSON.stringify({ agents }) + "\n" : renderManagedAgents(agents, (out as Writable & { columns?: number }).columns ?? 80));
+      out.write(ctx.flags.json ? JSON.stringify({ readiness, agents }) + "\n" : readinessLine(readiness!) + renderManagedAgents(agents, (out as Writable & { columns?: number }).columns ?? 80));
       return 0;
     }
     let agent: ManagedAgent;
@@ -467,7 +491,7 @@ export async function cmdManagedAgents(ctx: AppContext, argv: string[], deps: Ma
         agent = await client.control(agent, verb as "activate" | "pause" | "resume" | "retire", deps.signal);
       }
     } else { out.write(HELP); return 2; }
-    out.write(ctx.flags.json ? JSON.stringify({ agent }) + "\n" : renderAgent(agent));
+    out.write(ctx.flags.json ? JSON.stringify({ ...(readiness ? { readiness } : {}), agent }) + "\n" : (readiness ? readinessLine(readiness) : "") + renderAgent(agent));
     if (verb === "create" && !ctx.flags.json) out.write(theme.dim(`Saved to your account. Configure UVT limits, then activate: aether agent activate ${agent.agent_id}`) + "\n");
     return 0;
   } catch (error) {

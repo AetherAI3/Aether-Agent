@@ -221,6 +221,16 @@ export function fastCheckSpecs(
       }),
     },
     {
+      id: "online.terminal.readiness",
+      category: "online",
+      title: "Terminal managed agents",
+      run: (): CheckOutcome => ({
+        configured: axis("unknown", { evidence: "account entitlement needs an authenticated Cloud probe" }),
+        severity: "warning",
+        remediation: LIVE_HINT,
+      }),
+    },
+    {
       id: "tools.schemas",
       category: "tools",
       title: "Tool schema coverage",

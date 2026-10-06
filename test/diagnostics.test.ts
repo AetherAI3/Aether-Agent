@@ -143,6 +143,7 @@ test("fast doctor is local, ordered, fail-soft, and content-redacted", async () 
     "agent.transport",
     "auth.credential",
     "agent.catalog",
+    "online.terminal.readiness",
     "tools.schemas",
     "tools.gates",
     "memory.health",

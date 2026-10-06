@@ -401,15 +401,17 @@ check is an error, so it is safe to gate scripts on.
 call, no session, no opener launch, no credential refresh, no write. Covers
 runtime, workspace, git, transport config, auth config, tools, memory, MCP
 registry, persistence, the media output index, the opener, GitHub, and
-Protocol-C receipt storage.
+Protocol-C receipt storage. Terminal Online readiness is listed as unverified
+until an authenticated live probe runs.
 
 **`aether doctor --live`** — proves the paths end to end, right now:
 authenticated catalog fetch, a dev session, sequence-numbered frames,
 pause/resume/steer acknowledgement, a sandboxed tool write/read/compare/delete
 round trip, clean session close, a real browser open confirmed by a loopback
 callback, GitHub identity, branch freshness compared **without fetching**, the
-MCP broker, and a Protocol-C receipt round trip. Billing is accounted across
-the run and reported as `spend.none`; the agent loop runs only when the server
+MCP broker, a Protocol-C receipt round trip, and terminal managed-agent
+registry, DM, and model/UVT readiness without sending a message. Billing is
+accounted across the run and reported as `spend.none`; the agent loop runs only when the server
 confirms a non-billable doctor session, and is reported as unproven otherwise.
 `--no-ui` skips the browser proof on a headless box (reported as skipped, not
 passed).

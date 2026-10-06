@@ -134,6 +134,12 @@ aether agent list
 aether agent chat
 ```
 
+`aether agent list` and `show` report fresh registry, DM, and model/UVT
+readiness for the signed-in account. `aether doctor --live` checks the same
+read-only Cloud contract; plain `aether doctor` leaves account readiness
+unverified. A saved DM is reported as admitted only when Cloud confirms
+message admission.
+
 ATS is the trading adapter for account agents. Create a workspace with `aether agent create ATS Atlas`; guided setup covers memory, strategies, and data settings.
 
 | Capability | Current status |
