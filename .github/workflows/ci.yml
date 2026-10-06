@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   # A stalled hosted run must not hold the fallback runner queue.
-  group: ${{ github.workflow }}-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '-self-hosted' || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -24,9 +24,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # VPS fallback qualifies Linux only; it must never impersonate Windows.
-        os: ${{ fromJSON(vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["ubuntu-latest"]' || '["ubuntu-latest","windows-latest"]') }}
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && matrix.os == 'ubuntu-latest' && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || matrix.os }}
+        include:
+          - os: ubuntu-latest
+            self_hosted_runner: '["self-hosted","Linux","X64","aether-agent-ci"]'
+          - os: windows-latest
+            self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-windows-ci"]'
+    # Only trusted same-repository PRs or opted-in main pushes may use fallback
+    # runners. Windows additionally requires its own explicit opt-in.
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && (matrix.os == 'ubuntu-latest' || vars.AETHER_CI_SELF_HOSTED_WINDOWS == '1') && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -41,6 +46,16 @@ jobs:
           AETHER_JOB: test-${{ matrix.os }}
         run: >-
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
+
+      - name: Upload exact-source evidence
+        id: exact_source_upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true # Keep tests running; the final gate still fails on upload error.
+        with:
+          name: aether-exact-head-test-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: aether-exact-head-source.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -89,39 +104,56 @@ jobs:
           AETHER_EXPECTED_AGENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/verify-ats-execution-parity.mjs --atsv2 _atsv2 --report ats-execution-parity.json
 
-      - name: Emit exact-head production package report
-        run: npm run verify:production
-
       - name: Upload ATS execution parity evidence
-        if: always()
+        id: parity_upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true
         with:
           name: aether-ats-execution-parity-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ats-execution-parity.json
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload exact-source evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: aether-exact-head-test-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
-          path: aether-exact-head-source.json
-          if-no-files-found: error
-          retention-days: 90
+      # Emit the compact, machine-readable package summary on both release
+      # platforms. The release-coherence suite binds the packet's named host
+      # measurement to this same npm pack result, so a value from one runner
+      # cannot be relabelled as evidence from the other.
+      - name: Emit exact-head production package report
+        run: npm run verify:production
 
-  # Install the packed tarball into an empty project and drive the CLI on each
-  # available platform. Packaging alone cannot detect missing runtime files.
-  # The VPS fallback's Linux result does not establish Windows qualification.
+      - name: Record interim evidence in downloadable logs
+        if: always()
+        env:
+          AETHER_EVIDENCE_JOB: test-${{ matrix.os }}
+          AETHER_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AETHER_UPLOAD_OUTCOMES: exact=${{ steps.exact_source_upload.outcome }},parity=${{ steps.parity_upload.outcome }}
+        run: node scripts/ci-interim-evidence.mjs aether-exact-head-source.json ats-execution-parity.json
+
+      - name: Require artifact uploads
+        if: ${{ always() && (steps.exact_source_upload.outcome == 'failure' || steps.parity_upload.outcome == 'failure') }}
+        run: node -e "throw new Error('Required artifact upload failed; see interim evidence in the job log')"
+
+  # Install the PACKED tarball into an empty project and drive the CLI, on both
+  # release platforms. `npm pack --dry-run` in supply-chain proves a tarball can
+  # be built; it does not prove the tarball contains what the CLI needs at
+  # runtime. A module that compiles but is not covered by package.json "files"
+  # passes every other job here and throws MODULE_NOT_FOUND on a user's first
+  # command, which is the failure this job exists to catch.
   clean-install:
     name: Clean install (${{ matrix.os }})
     needs: build-and-test
+    # Keep package smoke tests available when only an upstream artifact upload
+    # failed. They report their own result and never make build-and-test green.
+    if: ${{ !cancelled() && needs['build-and-test'].result != 'cancelled' }}
     strategy:
       fail-fast: false
       matrix:
-        # VPS fallback qualifies Linux only; it must never impersonate Windows.
-        os: ${{ fromJSON(vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["ubuntu-latest"]' || '["ubuntu-latest","windows-latest"]') }}
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && matrix.os == 'ubuntu-latest' && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || matrix.os }}
+        include:
+          - os: ubuntu-latest
+            self_hosted_runner: '["self-hosted","Linux","X64","aether-agent-ci"]'
+          - os: windows-latest
+            self_hosted_runner: '["self-hosted","Windows","X64","aether-agent-windows-ci"]'
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && (matrix.os == 'ubuntu-latest' || vars.AETHER_CI_SELF_HOSTED_WINDOWS == '1') && fromJSON(matrix.self_hosted_runner) || matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -218,8 +250,8 @@ jobs:
               if (ats.version !== '0.2.0') throw new Error('unexpected aether-ats-skills version');
               if (qr.version !== '0.1.0') throw new Error('unexpected aether-rc-qr version');
               exactKeys(agent.dependencies, ['aether-ats-skills', 'aether-rc-qr']);
-              exactKeys(qr.dependencies, []);
               exactKeys(ats.dependencies, ['aether-browser', 'aether-context']);
+              exactKeys(qr.dependencies, []);
               if (ats.dependencies['aether-browser'].version !== '0.2.2') throw new Error('unexpected aether-browser version');
               if (ats.dependencies['aether-context'].version !== '0.3.1') throw new Error('unexpected aether-context version');
               console.log('clean-install dependency graph verified');
@@ -228,7 +260,7 @@ jobs:
         shell: bash
 
   supply-chain:
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -243,6 +275,16 @@ jobs:
           AETHER_JOB: supply-chain
         run: >-
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
+
+      - name: Upload exact-source evidence
+        id: exact_source_upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true
+        with:
+          name: aether-exact-head-supply-chain-${{ github.event.pull_request.head.sha || github.sha }}
+          path: aether-exact-head-source.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -300,6 +342,22 @@ jobs:
               ;;
           esac
 
+      - name: Upload dependency-audit evidence
+        id: audit_upload
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true
+        with:
+          name: aether-dependency-audit-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/npm-audit.json
+            ${{ runner.temp }}/npm-audit.stderr
+            ${{ runner.temp }}/npm-bulk-audit.stderr
+            aether-npm-audit-classification.json
+            aether-npm-bulk-audit.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Type-check exact head
         run: npm run typecheck
 
@@ -318,41 +376,31 @@ jobs:
       - name: Generate CycloneDX SBOM
         run: npm sbom --sbom-format cyclonedx > aether-agents.cdx.json
 
-      - name: Upload dependency-audit evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: aether-dependency-audit-${{ github.event.pull_request.head.sha || github.sha }}
-          path: |
-            ${{ runner.temp }}/npm-audit.json
-            ${{ runner.temp }}/npm-audit.stderr
-            ${{ runner.temp }}/npm-bulk-audit.stderr
-            aether-npm-audit-classification.json
-            aether-npm-bulk-audit.json
-          if-no-files-found: error
-          retention-days: 90
-
       - name: Upload SBOM
-        if: always()
+        id: sbom_upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true
         with:
           name: aether-agents-sbom-${{ github.event.pull_request.head.sha || github.sha }}
           path: aether-agents.cdx.json
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload exact-source evidence
+      - name: Record interim evidence in downloadable logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: aether-exact-head-supply-chain-${{ github.event.pull_request.head.sha || github.sha }}
-          path: aether-exact-head-source.json
-          if-no-files-found: error
-          retention-days: 90
+        env:
+          AETHER_EVIDENCE_JOB: supply-chain
+          AETHER_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AETHER_UPLOAD_OUTCOMES: exact=${{ steps.exact_source_upload.outcome }},audit=${{ steps.audit_upload.outcome }},sbom=${{ steps.sbom_upload.outcome }}
+        run: node scripts/ci-interim-evidence.mjs aether-exact-head-source.json aether-npm-audit-classification.json aether-agents.cdx.json
+
+      - name: Require artifact uploads
+        if: ${{ always() && (steps.exact_source_upload.outcome == 'failure' || steps.audit_upload.outcome == 'failure' || steps.sbom_upload.outcome == 'failure') }}
+        run: node -e "throw new Error('Required artifact upload failed; see interim evidence in the job log')"
 
   pypi-launcher:
     name: PyPI launcher
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - name: Checkout repository
@@ -367,6 +415,16 @@ jobs:
           AETHER_JOB: pypi-launcher
         run: >-
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
+
+      - name: Upload exact-source evidence
+        id: exact_source_upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true
+        with:
+          name: aether-exact-head-pypi-launcher-${{ github.event.pull_request.head.sha || github.sha }}
+          path: aether-exact-head-source.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -411,35 +469,14 @@ jobs:
           "$RUNNER_TEMP/launcher/bin/aether-agent" self --version
           "$RUNNER_TEMP/launcher/bin/aether-agent" self --help > /dev/null
 
-      - name: Upload exact-source evidence
+      - name: Record interim evidence in downloadable logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: aether-exact-head-pypi-launcher-${{ github.event.pull_request.head.sha || github.sha }}
-          path: aether-exact-head-source.json
-          if-no-files-found: error
-          retention-days: 90
-
-  qualification-boundary:
-    name: Platform qualification boundary
-    if: ${{ always() && vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    needs: [build-and-test, clean-install, supply-chain, pypi-launcher]
-    runs-on: [self-hosted, Linux, X64, aether-agent-ci]
-    timeout-minutes: 5
-    steps:
-      - name: Record the Windows qualification gap
-        shell: bash
         env:
-          TEST_RESULT: ${{ needs.build-and-test.result }}
-          INSTALL_RESULT: ${{ needs.clean-install.result }}
-          SUPPLY_RESULT: ${{ needs.supply-chain.result }}
-          PYPI_RESULT: ${{ needs.pypi-launcher.result }}
-        run: |
-          echo "::warning title=Windows qualification unavailable::VPS fallback runs Linux only. Hosted Windows full tests and clean-install qualification remain outstanding."
-          {
-            echo "VPS fallback runs Linux qualification only."
-            echo "Hosted Windows full tests and clean-install qualification were not run."
-            echo "Separate local focused Windows tests do not establish full Windows release qualification."
-            echo "Linux job results: tests=$TEST_RESULT; clean install=$INSTALL_RESULT; supply chain=$SUPPLY_RESULT; PyPI launcher=$PYPI_RESULT."
-            echo "Failed ATS source/parity checks or evidence uploads remain failures."
-          } >> "$GITHUB_STEP_SUMMARY"
+          AETHER_EVIDENCE_JOB: pypi-launcher
+          AETHER_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AETHER_UPLOAD_OUTCOMES: exact=${{ steps.exact_source_upload.outcome }}
+        run: node scripts/ci-interim-evidence.mjs aether-exact-head-source.json
+
+      - name: Require artifact uploads
+        if: ${{ always() && steps.exact_source_upload.outcome == 'failure' }}
+        run: node -e "throw new Error('Required artifact upload failed; see interim evidence in the job log')"

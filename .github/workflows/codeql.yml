@@ -15,12 +15,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '-self-hosted' || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && '-self-hosted' || '' }}
   cancel-in-progress: true
 
 jobs:
   analyze:
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -40,22 +40,35 @@ jobs:
         run: >-
           node -e "const cp=require('node:child_process');const fs=require('node:fs');const actual=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();const expected=process.env.AETHER_EXPECTED_SHA;if(actual!==expected)throw new Error('checkout mismatch: expected '+expected+', got '+actual);const record={schema:'aether.exact-head-source/v1',expected,actual,job:process.env.AETHER_JOB,os:process.platform};const json=JSON.stringify(record);console.log(json);fs.writeFileSync('aether-exact-head-source.json',json+'\n')"
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
-        with:
-          languages: javascript-typescript
-          build-mode: none
-          ram: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '3000' || '6000' }}
-          threads: 2
-
-      - name: Analyze
-        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
-
       - name: Upload exact-source evidence
-        if: always()
+        id: exact_source_upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true # Finish analysis before failing on unavailable evidence.
         with:
           name: aether-exact-head-codeql-${{ github.event.pull_request.head.sha || github.sha }}
           path: aether-exact-head-source.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          ram: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AETHER_CI_SELF_HOSTED_PR == format('{0}', github.event.pull_request.number)) || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && '3000' || '6000' }}
+          threads: 2
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+
+      - name: Record interim evidence in downloadable logs
+        if: always()
+        env:
+          AETHER_EVIDENCE_JOB: codeql
+          AETHER_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AETHER_UPLOAD_OUTCOMES: exact=${{ steps.exact_source_upload.outcome }}
+        run: node scripts/ci-interim-evidence.mjs aether-exact-head-source.json
+
+      - name: Require artifact upload
+        if: ${{ always() && steps.exact_source_upload.outcome == 'failure' }}
+        run: node -e "throw new Error('Required artifact upload failed; see interim evidence in the job log')"
