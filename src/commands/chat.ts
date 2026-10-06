@@ -60,6 +60,17 @@ import type { TaskCommand } from "../core/brain.js";
 import { getRegistry } from "../core/context_registry.js";
 import { prepareToolApproval, requestToolApproval, terminalSafeReview } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
+import {
+  TRANSIENT_READ_AUTO_RETRIES,
+  checkpointDoneEvent,
+  checkpointLines,
+  classifyToolFailure,
+  defaultToolFailureBudget,
+  hostMayRetry,
+  operationKey,
+  type ToolFailureBudget,
+  type ToolFailureOrigin,
+} from "../core/tool_failure_budget.js";
 import type { SkillRefusal } from "../core/skills/skill_errors.js";
 import { renderHud, timerLive } from "../core/hud.js";
 import {
@@ -788,6 +799,9 @@ export interface LocalTurnDeps {
   modelOutputLimitBytes?: number;
   /** Shared absolute deadline when called through runTurn. */
   deadlineAt?: number;
+  /** Repeated-failure budget (#285). Default: one per turn, bound to the
+   * workspace. `false` disables it for a deliberate embed. */
+  failureBudget?: ToolFailureBudget | false;
 }
 
 export async function runLocalTurn(
@@ -848,6 +862,7 @@ export async function runLocalTurn(
   else signal?.addEventListener("abort", forwardAbort, { once: true });
   controller.signal.addEventListener("abort", onAbort, { once: true });
   const progress = new LocalBrainProgressTracker();
+  const failures = deps.failureBudget === false ? null : (deps.failureBudget ?? defaultToolFailureBudget(cwd, exec));
   const modelOutput = new ModelOutputBudget(deps.modelOutputLimitBytes);
   const deadlineMs = chatTurnDeadlineMs();
   const deadlineAt = deps.deadlineAt ?? Date.now() + deadlineMs;
@@ -903,13 +918,46 @@ export async function runLocalTurn(
         // operator gate then decides about whatever survived. A skill can only
         // subtract here — it is never consulted again after this line.
         const refusal = skillGuard ? skillGuard(ev.name) : null;
-        if (refusal) {
-          brain.sendToolResult(ev.id, refusalToolResult(refusal));
+        const prepared = refusal ? null : prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
+        const call = { name: ev.name, args: ev.args };
+        const key = operationKey(call, { policy: Boolean(refusal), ...(prepared?.ok ? { binding: prepared.binding } : {}) });
+        const deliver = (result: ToolResult, origin: ToolFailureOrigin | null): void => {
+          if (origin) failures?.record(key, call, result, origin);
+          const note = origin ? failures?.repeatNote(key) : null;
+          brain.sendToolResult(ev.id, note && result.exitCode !== 0 ? { ...result, output: `${result.output}\n${note}` } : result);
+        };
+        // Same repeated-failure budget as hostLoop, checked before any prompt
+        // or execution: a spent operation is refused once, then stops the turn.
+        failures?.noteModelRound(brain.modelRound?.());
+        const decision = failures?.check(key, call) ?? { action: "allow" as const };
+        if (decision.action === "stop") {
+          brain.sendToolResult(ev.id, decision.result);
+          // Close before anything yields, so the brain cannot start one more
+          // model request on the strength of that result.
+          closeBrain();
+          const stopped = checkpointDoneEvent(decision.checkpoint);
+          renderer.event(stopped);
+          if (!ctx.flags.json) {
+            process.stderr.write(checkpointLines(decision.checkpoint).map((line) => "  " + line).join("\n") + "\n");
+          }
+          lifecycle.transition("completing");
+          const outcome = lifecycle.finalize("incomplete", {
+            message: stopped.result,
+            hint: decision.checkpoint.recovery,
+            retryable: false,
+            partialOutput,
+          });
+          terminalError = new ChatTurnError(stopped.result, outcome);
+          break;
+        }
+        if (decision.action === "refuse") {
+          deliver(decision.result, null);
+        } else if (refusal || !prepared) {
+          if (refusal) deliver(refusalToolResult(refusal), "policy");
         } else {
           // executeAsync so the two web tools (web_search/web_fetch) work too.
-          const prepared = prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
           if (!prepared.ok) {
-            brain.sendToolResult(ev.id, { output: `[tool ${ev.name} rejected: ${prepared.error}]`, exitCode: 1 });
+            deliver({ output: `[tool ${ev.name} rejected: ${prepared.error}]`, exitCode: 1 }, "validation");
             lastMeaningfulAt = Date.now();
             modelOutput.reset();
             noteStreamingActivity(lifecycle);
@@ -924,25 +972,35 @@ export async function runLocalTurn(
             lastMeaningfulAt,
             timeout,
           );
-          const remaining = timeoutMs > 0
-            ? Math.max(1, timeoutMs - (Date.now() - lastMeaningfulAt))
-            : undefined;
-          const toolOptions: RunOptions = {
-            signal: controller.signal,
-            ...(approvalContext !== undefined ? { expectedShellContext: approvalContext } : {}),
-            expectedToolCall: prepared.binding,
-            ...(remaining === undefined ? {} : { timeoutMs: remaining }),
+          const execute = (): Promise<ToolResult> => {
+            const remaining = timeoutMs > 0
+              ? Math.max(1, timeoutMs - (Date.now() - lastMeaningfulAt))
+              : undefined;
+            const toolOptions: RunOptions = {
+              signal: controller.signal,
+              ...(approvalContext !== undefined ? { expectedShellContext: approvalContext } : {}),
+              expectedToolCall: prepared.binding,
+              ...(remaining === undefined ? {} : { timeoutMs: remaining }),
+            };
+            return boundedLocalOperation(
+              () => exec.executeAsync(ev.name, prepared.args, toolOptions),
+              controller.signal,
+              timeoutMs,
+              lastMeaningfulAt,
+              timeout,
+            );
           };
-          const result = approved
-            ? await boundedLocalOperation(
-                () => exec.executeAsync(ev.name, prepared.args, toolOptions),
-                controller.signal,
-                timeoutMs,
-                lastMeaningfulAt,
-                timeout,
-              )
-            : { output: `[tool ${ev.name} blocked: permission denied]`, exitCode: 1 };
-          brain.sendToolResult(ev.id, result);
+          if (!approved) {
+            deliver({ output: `[tool ${ev.name} blocked: permission denied]`, exitCode: 1 }, "approval");
+          } else {
+            let result = await execute();
+            // Read-only transient failures only; a mutation is never replayed.
+            for (let retry = 0; retry < TRANSIENT_READ_AUTO_RETRIES; retry += 1) {
+              if (controller.signal.aborted || !hostMayRetry(ev.name, classifyToolFailure(ev.name, result))) break;
+              result = await execute();
+            }
+            deliver(result, "execution");
+          }
         }
         lastMeaningfulAt = Date.now();
         modelOutput.reset();

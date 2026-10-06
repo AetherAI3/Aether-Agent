@@ -85,6 +85,20 @@ import {
 import { sanitizeServerText } from "../core/transport.js";
 import { turnOutcomeRecord } from "./chat.js";
 import { openRcCodingObserver } from "./rc_observation.js";
+import {
+  TRANSIENT_READ_AUTO_RETRIES,
+  checkpointDoneEvent,
+  checkpointLines,
+  checkpointRecord,
+  checkpointSummary,
+  classifyToolFailure,
+  defaultToolFailureBudget,
+  hostMayRetry,
+  operationKey,
+  type ToolFailureBudget,
+  type ToolFailureCheckpoint,
+  type ToolFailureOrigin,
+} from "../core/tool_failure_budget.js";
 
 export { prepareWorkspace } from "./code_support.js";
 
@@ -291,6 +305,7 @@ export class CodeTurnLifecycle {
   private done: BrainDone | null = null;
   private fatal: Extract<BrainEvent, { type: "routing_drift" }> | null = null;
   private final: { report: CodeRunReport; verification: VerifyOutcome | null } | null = null;
+  private checkpoint: ToolFailureCheckpoint | null = null;
 
   constructor(prompt: string, opts: TurnLifecycleOptions = {}) {
     this.lifecycle = new TurnLifecycle(prompt, opts);
@@ -317,6 +332,18 @@ export class CodeTurnLifecycle {
 
   get hasTerminalFrame(): boolean {
     return this.terminalFrameSeen;
+  }
+
+  /** The host's repeated-failure checkpoint, when the budget stopped the run. */
+  get failureCheckpoint(): ToolFailureCheckpoint | null {
+    return this.checkpoint;
+  }
+
+  /** Record that the host — not the brain — ended the cycle (#285). The
+   * terminal `done` frame follows through observe(); this names why. */
+  noteFailureCheckpoint(checkpoint: ToolFailureCheckpoint): void {
+    if (this.lifecycle.outcome || this.checkpoint) return;
+    this.checkpoint = checkpoint;
   }
 
   observe(ev: BrainEvent): CodeTurnObservation {
@@ -400,7 +427,12 @@ export class CodeTurnLifecycle {
       // Finalized outside reduce(): still expose a report, so no caller has to
       // assert one into existence.
       this.final ??= {
-        report: { outcome: settled, check: verification?.check ?? checkNotRun(this.notRunReason()), cause: settled.message },
+        report: {
+          outcome: settled,
+          check: verification?.check ?? checkNotRun(this.notRunReason()),
+          cause: settled.message,
+          ...(this.checkpoint ? { stopped: this.checkpoint } : {}),
+        },
         verification,
       };
       return settled;
@@ -408,7 +440,10 @@ export class CodeTurnLifecycle {
     this.toCompleting();
     const { outcome, cause } = this.reduce(verification);
     const check = verification?.check ?? checkNotRun(this.notRunReason());
-    this.final = { report: { outcome, check, cause }, verification };
+    this.final = {
+      report: { outcome, check, cause, ...(this.checkpoint ? { stopped: this.checkpoint } : {}) },
+      verification,
+    };
     return { ...outcome };
   }
 
@@ -459,7 +494,18 @@ export class CodeTurnLifecycle {
         hint: sanitizeServerText(this.fatal.remediation),
       });
     }
+    // A real error after the stop keeps its own cause.
     if (this.thrown !== null) return byTurn(...thrownFinalization(this.thrown));
+    // The host stopped a repeated tool failure. The work it preserved was
+    // still checked (that reading stays on the report), but the task was not
+    // finished, so a green check cannot turn the stop into a success.
+    if (this.checkpoint) {
+      return byTurn("incomplete", {
+        message: checkpointSummary(this.checkpoint),
+        hint: this.checkpoint.recovery,
+        retryable: false,
+      });
+    }
     if (this.eofBeforeTerminal) {
       return byTurn("incomplete", {
         message: "connection ended before the coding brain delivered a terminal frame",
@@ -565,6 +611,7 @@ export function emitCodeTurnOutcome(
       failing: report.check.failing,
       reason: report.check.reason,
     },
+    ...(report.stopped ? { checkpoint: checkpointRecord(report.stopped) } : {}),
   };
   write(JSON.stringify(record) + "\n");
 }
@@ -634,7 +681,9 @@ export function codeRunRecord(
       ? "cancelled"
       : outcome.state === "timed_out"
         ? "timed-out"
-        : (verification?.status ?? "error");
+        : report.stopped
+          ? "no-progress"
+          : (verification?.status ?? "error");
   const remaining = check.state === "failed" ? (check.failing ?? 0) : 0;
   return { finalStatus, remaining, verification: check };
 }
@@ -1117,6 +1166,7 @@ export async function cmdCode(
     await hostLoop(brain, exec, onEvent, taskCmd, onToolResult, gate, run.guard, {
       meaningfulProgressTimeoutMs: progressTimeoutMs,
       signal: commandAbort.signal,
+      onFailureCheckpoint: (checkpoint) => turn.noteFailureCheckpoint(checkpoint),
     });
     if (!turn.hasTerminalFrame) turn.noteIncompleteEof();
   } catch (err) {
@@ -1177,6 +1227,9 @@ export async function cmdCode(
   // so a run that ended before (or during) its check never reads as failing.
   if (!ctx.flags.json) {
     const secs = (Date.now() - startedAt) / 1000;
+    if (report.stopped) {
+      process.stderr.write("\n" + checkpointLines(report.stopped).map((line) => "  " + line).join("\n") + "\n");
+    }
     process.stderr.write("\n  " + runSummary(report, touched.size, secs) + "\n");
   }
   if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
@@ -1285,6 +1338,14 @@ export interface HostLoopOptions {
   modelOutputLimitBytes?: number;
   /** Command-owned cancellation authority, shared with host verification. */
   signal?: AbortSignal;
+  /**
+   * Repeated-failure budget (#285). Default: one fresh budget per call, bound
+   * to the task's workspace. `false` disables it for a deliberate library
+   * embed; the CLI never does.
+   */
+  failureBudget?: ToolFailureBudget | false;
+  /** Told once when the budget stops the cycle, before the terminal frame. */
+  onFailureCheckpoint?: (checkpoint: ToolFailureCheckpoint) => void;
 }
 
 export async function hostLoop(
@@ -1304,6 +1365,8 @@ export async function hostLoop(
   const timeoutMs = options.meaningfulProgressTimeoutMs ?? DEFAULT_CODE_MEANINGFUL_PROGRESS_TIMEOUT_MS;
   const segmentTimeoutMs = options.modelSegmentTimeoutMs ?? codeModelSegmentTimeoutMs();
   const signal = options.signal;
+  const failures =
+    options.failureBudget === false ? null : (options.failureBudget ?? defaultToolFailureBudget(task.cwd, exec));
   let lastMeaningfulAt = Date.now();
   let modelSegmentStartedAt = lastMeaningfulAt;
   let brainClosed = false;
@@ -1347,23 +1410,63 @@ export async function hostLoop(
           // normal failed tool result, so the loop continues and the model
           // learns why instead of silently retrying.
           const refusal = skillGuard ? skillGuard(ev.name) : null;
-          if (refusal) {
-            const denied: ToolResult = refusalToolResult(refusal);
-            onToolResult?.(ev.id, denied);
-            brain.sendToolResult(ev.id, denied);
+          const prepared = refusal ? null : prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
+          const call = { name: ev.name, args: ev.args };
+          const key = operationKey(call, { policy: Boolean(refusal), ...(prepared?.ok ? { binding: prepared.binding } : {}) });
+          // Every result reaches the brain under the call's own id, exactly
+          // once. A failure the budget has seen before carries a short host
+          // note so the model can see the bound coming (#285).
+          const deliver = (result: ToolResult, origin: ToolFailureOrigin | null): void => {
+            if (origin) failures?.record(key, call, result, origin);
+            const note = origin ? failures?.repeatNote(key) : null;
+            const delivered = note && result.exitCode !== 0 ? { ...result, output: `${result.output}\n${note}` } : result;
+            onToolResult?.(ev.id, delivered);
+            brain.sendToolResult(ev.id, delivered);
             lastMeaningfulAt = Date.now();
             modelSegmentStartedAt = lastMeaningfulAt;
             modelOutput.reset();
+          };
+          // Repeated-failure budget, BEFORE any prompt or execution: an
+          // operation that already spent its class budget under unchanged
+          // state is refused once (answered, not run, not prompted), and a
+          // request after that refusal ends the cycle.
+          failures?.noteModelRound(brain.modelRound?.());
+          const decision = failures?.check(key, call) ?? { action: "allow" as const };
+          if (decision.action === "refuse") {
+            deliver(decision.result, null);
             break;
           }
-          const prepared = prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
-          if (!prepared.ok) {
-            const denied: ToolResult = { output: `[tool ${ev.name} rejected: ${prepared.error}]`, exitCode: 1 };
-            onToolResult?.(ev.id, denied);
-            brain.sendToolResult(ev.id, denied);
+          if (decision.action === "stop") {
+            onToolResult?.(ev.id, decision.result);
+            brain.sendToolResult(ev.id, decision.result);
+            // Close synchronously, before anything awaits: an in-process brain
+            // resumed by that result must not get one more model request in.
+            // For a remote or child-process brain the delivery is best-effort:
+            // its session is being torn down by this same stop.
+            closeBrain();
+            options.onFailureCheckpoint?.(decision.checkpoint);
+            // The stop is itself progress; a deadline that lapsed while the
+            // model dithered must not swallow the checkpoint's terminal frame.
             lastMeaningfulAt = Date.now();
             modelSegmentStartedAt = lastMeaningfulAt;
-            modelOutput.reset();
+            await boundedCodeOperation(
+              () => onEvent(checkpointDoneEvent(decision.checkpoint)),
+              timeoutMs,
+              lastMeaningfulAt,
+              signal,
+              segmentTimeoutMs,
+              modelSegmentStartedAt,
+            );
+            code = 1;
+            terminal = true;
+            break;
+          }
+          if (refusal || !prepared) {
+            if (refusal) deliver(refusalToolResult(refusal), "policy");
+            break;
+          }
+          if (!prepared.ok) {
+            deliver({ output: `[tool ${ev.name} rejected: ${prepared.error}]`, exitCode: 1 }, "validation");
             break;
           }
           const approvalContext = exec.shellContext;
@@ -1377,29 +1480,37 @@ export async function hostLoop(
                 modelSegmentStartedAt,
               )
             : true;
-          const remaining = remainingCodeProgressMs(timeoutMs, lastMeaningfulAt);
-          const runOptions: RunOptions = {
-            expectedShellContext: approvalContext,
-            expectedToolCall: prepared.binding,
-            ...(signal ? { signal } : {}),
-            ...(timeoutMs > 0 ? { timeoutMs: Math.max(1, remaining) } : {}),
+          if (!approved) {
+            deliver({ output: `[denied: ${ev.name} not approved by user]`, exitCode: 1 }, "approval");
+            break;
+          }
+          const execute = (): Promise<ToolResult> => {
+            const remaining = remainingCodeProgressMs(timeoutMs, lastMeaningfulAt);
+            const runOptions: RunOptions = {
+              expectedShellContext: approvalContext,
+              expectedToolCall: prepared.binding,
+              ...(signal ? { signal } : {}),
+              ...(timeoutMs > 0 ? { timeoutMs: Math.max(1, remaining) } : {}),
+            };
+            return boundedCodeOperation(
+              () => exec.executeAsync(ev.name, prepared.args, runOptions),
+              timeoutMs,
+              lastMeaningfulAt,
+              signal,
+              segmentTimeoutMs,
+              modelSegmentStartedAt,
+            );
           };
-          const result: ToolResult = approved
-            ? await boundedCodeOperation(
-                () => exec.executeAsync(ev.name, prepared.args, runOptions),
-                timeoutMs,
-                lastMeaningfulAt,
-                signal,
-                segmentTimeoutMs,
-                modelSegmentStartedAt,
-              )
-            : { output: `[denied: ${ev.name} not approved by user]`, exitCode: 1 };
+          let result = await execute();
+          // A transient failure of a READ-ONLY tool is retried by the host,
+          // within the same approval and the same deadlines, under the same
+          // call id. A mutation is never replayed: its outcome may be unknown.
+          for (let retry = 0; retry < TRANSIENT_READ_AUTO_RETRIES; retry += 1) {
+            if (signal?.aborted || !hostMayRetry(ev.name, classifyToolFailure(ev.name, result))) break;
+            result = await execute();
+          }
           if (signal?.aborted) throw codeSignalReason(signal);
-          onToolResult?.(ev.id, result);
-          brain.sendToolResult(ev.id, result);
-          lastMeaningfulAt = Date.now();
-          modelSegmentStartedAt = lastMeaningfulAt;
-          modelOutput.reset();
+          deliver(result, "execution");
           break;
         }
         case "done":

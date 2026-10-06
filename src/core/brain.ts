@@ -32,6 +32,14 @@ export interface Brain {
   ): BrainControlResult | Promise<BrainControlResult> | void;
   /** Tear down (kill the subprocess / abort the stream). */
   close(): void;
+  /**
+   * Optional: which model reply the outstanding tool_call came from. Calls
+   * batched into one reply share a round, so the host's repeated-failure
+   * budget (#285) never stops a run on a repeat the model has not yet seen
+   * a result for. A brain that cannot tell omits it; every call is then
+   * treated as its own round.
+   */
+  modelRound?(): number;
 }
 
 // A minimal single-consumer async queue: producers push events (from a
