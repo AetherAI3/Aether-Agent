@@ -94,7 +94,7 @@ jobs:
         id: pack
         shell: bash
         run: |
-          npm pack --json --ignore-scripts > pack-metadata.json
+          node scripts/npm-pack-reproducible.mjs > pack-metadata.json
           tarball="$(node -e "const fs=require('node:fs');const p=JSON.parse(fs.readFileSync('pack-metadata.json','utf8'));process.stdout.write(p[0].filename)")"
           test -n "$tarball"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
