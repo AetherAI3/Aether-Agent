@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:a6782c9b02f22412eed1228630eb5cac5b23b775bbcacde2da1c70cef1f73c0c -->
+<!-- manifest-digest: sha256:1d3e7bedfbe81257bd1f33cef71dd0d32631c5d0b943e483ed37a1a8e9c70918 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -329,9 +329,15 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 #### `/model <n|id>`
 
-switch model \(no arg → picker\)
+choose a model, then continue this task or start fresh
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.model` · Requires: `aether.catalogue`
+
+#### `/switch <subcommand>`
+
+review and decide a pending model switch
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.switch`
 
 #### `/agent <n|id>`
 

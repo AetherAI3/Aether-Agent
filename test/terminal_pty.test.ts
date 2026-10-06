@@ -125,7 +125,7 @@ for (const crash of [false, true]) test(`real coding console returns to model ch
   const driver = `import { repl } from './dist/src/commands/chat.js';
 import { ApiClient } from './dist/src/core/transport.js';
 import { DEFAULT_CONFIG } from './dist/src/core/config.js';
-let calls=0; globalThis.fetch=async()=>{ calls++; return new Response('data: {"type":"delta","text":"MODEL_REPLY"}\\n\\ndata: {"type":"done","uvt":0,"cents":0}\\n\\n',{headers:{'content-type':'text/event-stream'}}); };
+let calls=0; globalThis.fetch=async(url)=>{ if(String(url).endsWith('/models')) return Response.json({account_id:'fixture-account'}); calls++; return new Response('data: {"type":"delta","text":"MODEL_REPLY"}\\n\\ndata: {"type":"done","uvt":0,"cents":0}\\n\\n',{headers:{'content-type':'text/event-stream'}}); };
 const tokens={get:async()=> 'fixture'};
 const ctx={cfg:{...DEFAULT_CONFIG,backend:'cloud',baseUrl:'https://stub.test'},flags:{cwd:process.cwd(),json:false,yes:false},tokens,api:new ApiClient('https://stub.test',tokens),confirm:async()=>false};
 await repl(ctx,{noSkills:true}); process.stdout.write('CALLS:'+calls+'\\n');`;

@@ -32,6 +32,7 @@ import { EFFORT_TIERS, normalizeEffort, renderEffortSlider, renderCodeProArt } f
 import { saveConfig } from "../core/config.js";
 import { handleGoalInput, handleGoals } from "./goals.js";
 import { pickModel } from "../ui/model_picker.js";
+import { isLocalModelId, ollamaTagFromId } from "../core/local_ollama.js";
 import { runLogsViewer } from "../ui/logs_viewer.js";
 
 import { pinSlash, dropSlash, snapshotSlash, limitSlash, auditReceiptSlash, purgeSlash } from "./slash_context.js";
@@ -58,6 +59,8 @@ export interface SlashResult {
   /** Set when the user confirmed a model/agent switch: the REPL must restart
    * the brain + clear context with the new selection. */
   restart?: { model?: string; agent?: string };
+  /** Console model switches wait for an explicit reviewed choice. */
+  modelSwitch?: { model: string; label: string; contextWindow: number | null };
 }
 
 type Kind = "model" | "orchestrator";
@@ -149,19 +152,24 @@ export async function handleSlash(
       // The coding REPL only gives a handoff, and never replays the arguments.
       out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
       break;
-    case "models":
-      await showPicker(ctx, out, "model", signal);
+    case "models": {
+      const r = await showPicker(ctx, out, "model", signal);
+      if (r?.model) return { exit: false, modelSwitch: { model: r.model, label: r.label ?? r.model, contextWindow: r.contextWindow ?? null } };
       break;
+    }
     case "model": {
       if (!arg) {
         const r = await showPicker(ctx, out, "model", signal);
-        if (r) return { exit: false, restart: r };
+        if (r) return { exit: false, ...(r.model ? { modelSwitch: { model: r.model, label: r.label ?? r.model, contextWindow: r.contextWindow ?? null } } : { restart: r }) };
         break;
       }
       const r = await select(ctx, out, arg, "model", signal);
-      if (r) return { exit: false, restart: r };
+      if (r) return { exit: false, ...(r.model ? { modelSwitch: { model: r.model, label: r.label ?? r.model, contextWindow: r.contextWindow ?? null } } : { restart: r }) };
       break;
     }
+    case "switch":
+      out.write("/switch continue|fresh|cancel|brief|edit is available at an idle coding console after /model.\n");
+      break;
     case "agent": {
       if (!arg) {
         const r = await showPicker(ctx, out, "orchestrator", signal);
@@ -434,7 +442,7 @@ async function showPicker(
   out: Writable,
   kind: Kind,
   signal?: AbortSignal,
-): Promise<{ model?: string; agent?: string } | null> {
+): Promise<{ model?: string; agent?: string; label?: string; contextWindow?: number | null } | null> {
   const cat = await getCatalog(ctx, false, signal, out);
   const items = byKind(cat, kind);
 
@@ -475,10 +483,14 @@ async function select(
   arg: string,
   kind: Kind,
   signal?: AbortSignal,
-): Promise<{ model?: string; agent?: string } | null> {
+): Promise<{ model?: string; agent?: string; label?: string; contextWindow?: number | null } | null> {
   if (!arg) {
     out.write(`usage: /${kind === "model" ? "model" : "agent"} <n|id>\n`);
     return null;
+  }
+  if (kind === "model" && isLocalModelId(arg)) {
+    if (!ollamaTagFromId(arg)) { out.write(`invalid local model id: ${arg}\n`); return null; }
+    return { model: arg, label: arg, contextWindow: null };
   }
   const cat = await getCatalog(ctx, false, signal, out);
   const item = resolveSelection(byKind(cat, kind), arg);
@@ -497,7 +509,7 @@ export async function confirmSwitch(
   item: CatalogItem,
   kind: Kind,
   tier: string,
-): Promise<{ model?: string; agent?: string } | null> {
+): Promise<{ model?: string; agent?: string; label?: string; contextWindow?: number | null } | null> {
   if (!item.available) {
     // Same dim styling + "check: /tier or `aether models`" pointer as
     // httpStatusHint(403) (errors.ts) — a tier lock reached via the picker
@@ -506,9 +518,14 @@ export async function confirmSwitch(
     out.write(theme.dim(`${item.id} is locked on tier ${tier} — check: /tier or \`aether models\`\n`));
     return null;
   }
+  if (kind === "model") {
+    // The console displays a bounded, editable continuation brief before the
+    // user chooses continue, fresh, or cancel. No model call occurs here.
+    return { model: item.id, label: item.label, contextWindow: item.context_window };
+  }
   out.write(
     theme.dim(
-      `⚠ Switching ${kind === "model" ? "model" : "orchestrator"} to ${item.label} will ` +
+      `⚠ Switching orchestrator to ${item.label} will ` +
         `restart the session and clear context.\n`,
     ),
   );
@@ -517,7 +534,7 @@ export async function confirmSwitch(
     out.write("kept current session.\n");
     return null;
   }
-  return kind === "model" ? { model: item.id } : { agent: item.id };
+  return { agent: item.id };
 }
 
 /** `/effort` — show the dial; `/effort <tier|1-5>` — set it. The tier persists

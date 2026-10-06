@@ -24,13 +24,13 @@ aether                                  # no args = interactive REPL
 <!-- CLI-COMMANDS:END -->
 
 <!-- SLASH-COMMANDS:START -->
-`help`, `auth`, `models`, `model`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`, `voice`,
-`preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`, `code-review`,
-`writing-skills`, `writing-plans`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`, `btw`, `pin`,
-`drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`, `workflow`, `workflow-templates`, `workflow-template`,
-`vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`, `broadcast`, `gather`, `scaffold`,
-`port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`, `frame`, `re-frame`, `videogen`,
-`sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`, `ats`
+`help`, `auth`, `models`, `model`, `switch`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`,
+`voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`,
+`code-review`, `writing-skills`, `writing-plans`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`, `btw`,
+`pin`, `drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`, `workflow`, `workflow-templates`,
+`workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`, `broadcast`, `gather`,
+`scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`, `frame`, `re-frame`,
+`videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`, `ats`
 <!-- SLASH-COMMANDS:END -->
 
 ## Runtime capability requirements
@@ -511,7 +511,8 @@ mirrors the live registry in `src/commands/slash_registry.ts`.
 |---|---|
 | `/help` | Show the grouped command menu. |
 | `/models` | List chat models (numbered; `›` current, `🔒` locked). |
-| `/model <n\|id>` | Switch model — opens the picker with no arg. Restarts the session. |
+| `/model <n\|id>` | Choose a hosted model or `ollama:<tag>`; no arg opens the picker. The console shows a continuation brief before switching. |
+| `/switch <subcommand>` | Review the pending brief (`brief`), revise `goal`, `constraints`, or `outstanding` (`edit`), then `continue`, `fresh`, or `cancel`. The saved draft stays unsent. |
 | `/agents` | View active agent sessions (name, status, time, UVT, task). |
 | `/agent <n\|id>` | Switch orchestrator (Neo / Kronus) — opens the picker with no arg. |
 | `/tier` | Show your plan tier, default, and available counts. |

@@ -46,18 +46,27 @@ function fakeCtx(answer: boolean): AppContext {
   } as unknown as AppContext;
 }
 
-test("/model switch prompts and, on yes, signals a restart", async () => {
+test("/model proposes a reviewed switch without restarting or prompting", async () => {
   const out: string[] = [];
+  await primeCatalog(fakeCtx(true));
   const res = await handleSlash(fakeCtx(true), "/model opus", {
     write: (s: string) => out.push(s),
   } as never);
-  assert.deepEqual(res.restart, { model: "opus" });
-  assert.match(out.join(""), /restart the session and clear context/i);
+  assert.deepEqual(res.modelSwitch, { model: "opus", label: "opus", contextWindow: null });
+  assert.equal(res.restart, undefined);
+  assert.doesNotMatch(out.join(""), /restart the session and clear context/i);
 });
 
-test("/model switch on no does NOT restart", async () => {
+test("/model never restarts before the console's explicit choice", async () => {
+  await primeCatalog(fakeCtx(false));
   const res = await handleSlash(fakeCtx(false), "/model opus", { write: () => {} } as never);
   assert.equal(res.restart, undefined);
+  assert.equal(res.modelSwitch?.model, "opus");
+});
+
+test("/model accepts a validated local Ollama id without a hosted catalogue", async () => {
+  const res = await handleSlash(fakeCtx(false), "/model ollama:qwen2.5-coder:7b", { write: () => {} } as never);
+  assert.equal(res.modelSwitch?.model, "ollama:qwen2.5-coder:7b");
 });
 
 test("/mcp no longer prints coming soon", async () => {
