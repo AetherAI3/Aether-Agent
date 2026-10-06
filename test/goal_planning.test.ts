@@ -98,7 +98,7 @@ test("draft edits, acceptance, and reopening preserve exactly reviewed phases", 
     assert.equal(getGoalForWorkspace(id, root)?.phases.length, 2, "edit stays unsaved");
     await handleGoal(h.ctx, h.out, "save", "");
     assert.equal(getGoalForWorkspace(id, root)?.phases.length, 1);
-    assert.match(h.output(), /Drafted and accepted plans do not execute work/);
+    assert.match(h.output(), /Planning does not execute work/);
   } finally {
     if (old === undefined) delete process.env["AETHER_GOALS_FILE"];
     else process.env["AETHER_GOALS_FILE"] = old;

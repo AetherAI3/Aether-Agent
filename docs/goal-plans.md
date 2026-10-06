@@ -19,4 +19,8 @@ The draft stays in the current console session and is not persisted until accept
 
 `/goal edit [id]` reopens a saved plan as a separate draft. The saved copy remains intact until `/goal save` is confirmed. `/goal view [id]` and `/goals <id>` display the accepted plan, including constraints and verification status. Existing goals without plan metadata remain readable; reopening one marks the missing information for review.
 
-Planning text is never evidence that work has run. `/goal start` changes tracking status only. Completing a phase is a separate manual status action; execution of a saved phase is outside this planning flow.
+Planning text is never evidence that work has run. `/goal run [id]` explicitly executes **one** accepted phase in the selected workspace through the existing host coding loop. It uses the accepted objective, constraints, phase notes and criteria, selected model, normal tool permissions, and accepted check command. It records an attempt ID, session/turn ID, workspace, model, tree change, and host check receipt. A later phase needs another `/goal run`.
+
+`/goal run pause [id]` and `/goal run cancel [id]` request cooperative cancellation of a live run, including its tools or final check. `/goal run resume [id]` reconciles the prior session before continuing from its checkpoint; it never automatically replays a finished phase. A missing, failed, stale, or unattributable check leaves the phase unresolved. Free-form criteria the host check cannot prove remain visible as verification pending, even when the check is green. Publication requires a separate ship action.
+
+`/goal start` changes **manual tracking** status only. `/goal complete` marks a phase **manually complete** and does not certify tests. Changing an accepted phase's scope invalidates its earlier run receipt.

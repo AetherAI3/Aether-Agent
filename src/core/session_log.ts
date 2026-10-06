@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { BrainEvent } from "./brain_protocol.js";
 import type { ToolResult } from "./tool_executor.js";
 import type { CheckReading } from "./verify_gate.js";
+import type { VerificationRecord } from "./verification_record.js";
 import { registerRestore } from "../ui/restore.js";
 import { normalizeWorkspace } from "./workspace_scope.js";
 import { logsRoot } from "./logs_root.js";
@@ -196,6 +197,8 @@ interface ManifestEnd {
   finalStatus: string;
   remaining?: number;
   verification?: CheckReading;
+  verificationRecord?: VerificationRecord;
+  hostRefusals?: string[];
 }
 
 export class SessionLog {
@@ -339,7 +342,7 @@ export class SessionLog {
    * test run (ground truth), never from the brain's self-report. `remaining` =
    * failing tests when not ok (only written when > 0). `verification` is the
    * check reading the footer and JSON outcome rendered, recorded beside them. */
-  close(finalStatus: FinalStatus, ended: string, remaining = 0, verification?: CheckReading): void {
+  close(finalStatus: FinalStatus, ended: string, remaining = 0, verification?: CheckReading, verificationRecord?: VerificationRecord, hostRefusals?: string[]): void {
     this.flush();
     this.unregisterFlush();
     // Read the repository identity HERE and nowhere else. The run is over, so
@@ -356,7 +359,7 @@ export class SessionLog {
     } catch {
       this.repo = undefined;
     }
-    this.writeManifest({ ended, finalStatus, remaining, ...(verification ? { verification } : {}) });
+    this.writeManifest({ ended, finalStatus, remaining, ...(verification ? { verification } : {}), ...(verificationRecord ? { verificationRecord } : {}), ...(hostRefusals?.length ? { hostRefusals } : {}) });
   }
 
   /** The manifest body — the authoritative record of this session, and the only
@@ -410,6 +413,16 @@ export class SessionLog {
           failing: end.verification.failing,
         },
       }),
+      ...(end?.verificationRecord && {
+        verificationRecord: {
+          command: redactInline(end.verificationRecord.command),
+          ranAt: end.verificationRecord.ranAt,
+          head: end.verificationRecord.head,
+          treeDigest: end.verificationRecord.treeDigest,
+          exitCode: end.verificationRecord.exitCode,
+        },
+      }),
+      ...(end?.hostRefusals?.length && { hostRefusals: end.hostRefusals.slice(0, 16).map(redactInline) }),
     };
   }
 

@@ -52,7 +52,7 @@ import {
 import { continuationTask, resolveResume, resumeReplayLines, wroteFile, type ResolvedResume } from "../core/handoff.js";
 import { resumeHint } from "./resume.js";
 import { createWorktree, mergeHint, repoRoot, type Worktree } from "../core/worktree.js";
-import { recordingRunner } from "../core/verify_run.js";
+import { recordingRunner, type VerifyRunResult } from "../core/verify_run.js";
 import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js";
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
@@ -83,6 +83,8 @@ import {
   nonHttpErrorHint,
 } from "../core/errors.js";
 import { sanitizeServerText } from "../core/transport.js";
+import { redactInline } from "../core/redaction.js";
+import { isPublicationToolCall } from "../core/goal_run.js";
 import { turnOutcomeRecord } from "./chat.js";
 import { openRcCodingObserver } from "./rc_observation.js";
 import {
@@ -155,6 +157,24 @@ export function codeMeaningfulProgressTimeoutMs(
 /** Approve (or refuse) one brain-emitted tool call before the host executes it. */
 export type ToolGate = (call: { name: string; args: Record<string, unknown> }) => Promise<boolean>;
 
+/** Read-only correlation hooks for an explicit saved-goal phase run. */
+export interface CodeRunStarted {
+  sessionId: string;
+  turnId: string;
+  workspace: string;
+  model: string;
+  checkCommand: string | null;
+}
+export interface CodeRunFinished extends CodeRunStarted {
+  report: CodeRunReport;
+  verification: VerifyOutcome | null;
+  /** Exact tree-bound receipt produced by this turn's host check. */
+  recordedCheck: Pick<VerifyRunResult, "reading" | "written"> | null;
+  touchedFiles: string[];
+  /** Host permission, policy, and missing-tool refusals remain visible even if a check is green. */
+  hostRefusals?: string[];
+}
+
 export interface CodeOpts {
   /** Use the local Python/Ollama brain instead of the cloud API. */
   local: boolean;
@@ -184,6 +204,17 @@ export interface CodeOpts {
   skill?: string;
   /** `--no-skills`: load no skill. The project's own AGENTS.md still applies. */
   noSkills?: boolean;
+  /** An explicit goal run is already bound to this checkout. */
+  workspaceMode?: "current";
+  /** Cancel the brain, tools, and final check from an external controller. */
+  signal?: AbortSignal;
+  /** Persist session/turn identity and the host's actual outcome. */
+  runObserver?: {
+    started: (run: CodeRunStarted) => void | Promise<void>;
+    finished: (run: CodeRunFinished) => void | Promise<void>;
+  };
+  /** Goal phase execution never performs a ship action. */
+  forbidPublication?: boolean;
 }
 
 const nowIso = (): string => new Date().toISOString();
@@ -802,6 +833,8 @@ export async function cmdCode(
       return 1;
     }
     cwd = worktree.dir;
+  } else if (opts.workspaceMode === "current") {
+    cwd = ctx.flags.cwd;
   } else {
     const ws = await prepareWorkspace(ctx, label, io, workspaceRun);
     if (!ws.proceed) return ws.error ? 1 : 0;
@@ -955,8 +988,11 @@ export async function cmdCode(
   };
   const onSigint = (): void => abortForSignal("SIGINT", 130);
   const onSigterm = (): void => abortForSignal("SIGTERM", 143);
+  const onExternalAbort = (): void => commandAbort.abort(opts.signal?.reason ?? new DOMException("coding turn cancelled", "AbortError"));
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigterm);
+  if (opts.signal?.aborted) onExternalAbort();
+  else opts.signal?.addEventListener("abort", onExternalAbort, { once: true });
 
   try {
 
@@ -988,10 +1024,26 @@ export async function cmdCode(
   // One correlation identity owns the production run. A brain `done` event is
   // advisory; the lifecycle remains completing until host verification below.
   const turn = new CodeTurnLifecycle(task || label);
+  const correlation: CodeRunStarted = {
+    sessionId: log?.sessionId ?? "",
+    turnId: turn.turnId,
+    workspace: cwd,
+    model: resolvedModel,
+    checkCommand: opts.testCmd ?? null,
+  };
+  await opts.runObserver?.started(correlation);
   const progressTimeoutMs = codeMeaningfulProgressTimeoutMs();
 
   const interactive = Boolean(opts.interactive) && Boolean(process.stdin.isTTY);
-  const onToolResult = (id: string, result: ToolResult): void => log?.toolResult(id, result, nowIso());
+  const hostRefusals: string[] = [];
+  const onToolResult = (id: string, result: ToolResult): void => {
+    log?.toolResult(id, result, nowIso());
+    if (result.exitCode !== 0 && hostRefusals.length < 16
+      && (/^\[(?:denied:|refused by host policy:|tool .* rejected:|unknown tool:)/i.test(result.output)
+        || result.exitCode === 127)) {
+      hostRefusals.push(redactInline(sanitizeServerText(result.output)).slice(0, 240));
+    }
+  };
   let confirmToolReview = ctx.confirm;
 
   // Permission gate: every brain-emitted mutating/shell tool call is approved
@@ -1000,6 +1052,10 @@ export async function cmdCode(
   // non-TTY (CI/pipe) an un-pre-approved call FAILS CLOSED rather than running
   // unattended. `--yes` or `permissionMode: skip` opt out.
   const gate: ToolGate = async ({ name, args }) => {
+    if (opts.forbidPublication && isPublicationToolCall(name, args)) {
+      process.stderr.write("✗ publishing is a separate ship action; this goal phase tool call was refused.\n");
+      return false;
+    }
     let patchPreview: string | undefined;
     if (name === "patch_file") {
       const preview = exec.previewPatch(args);
@@ -1190,7 +1246,8 @@ export async function cmdCode(
     // on this path and on the animated one alike.
     turn.settle(null);
     const refused = turn.report!;
-    log?.close("incomplete", nowIso(), 0, refused.check);
+    log?.close("incomplete", nowIso(), 0, refused.check, undefined, hostRefusals);
+    await opts.runObserver?.finished({ ...correlation, report: refused, verification: null, recordedCheck: null, touchedFiles: [...touched], hostRefusals });
     emitCodeTurnOutcome(refused, ctx.flags.json);
     if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
     return EXIT_ROUTING_REFUSED;
@@ -1205,7 +1262,10 @@ export async function cmdCode(
   // writer, so `aether review` reads back the same result this run reports —
   // bound to this tree, and stale after the next edit.
   const checkRoot = opts.testCmd ? repoRoot(workspaceRun, cwd) : null;
-  const checkRunner = checkRoot ? recordingRunner(exec, workspaceRun, checkRoot) : exec;
+  const checkCapture: { result: Pick<VerifyRunResult, "reading" | "written"> | null } = { result: null };
+  const checkRunner = checkRoot ? recordingRunner(exec, workspaceRun, checkRoot, (result) => {
+    checkCapture.result = { reading: result.reading, written: result.written };
+  }) : exec;
   const { report, verification } = await verifyCodeTurn(turn, checkRunner, {
     testCmd: opts.testCmd,
     signal: commandAbort.signal,
@@ -1220,7 +1280,8 @@ export async function cmdCode(
   emitCodeTurnOutcome(report, ctx.flags.json);
   const record = codeRunRecord(report, verification);
   const verifyExit = verification?.exitCode ?? 1;
-  log?.close(record.finalStatus, nowIso(), record.remaining, record.verification);
+  log?.close(record.finalStatus, nowIso(), record.remaining, record.verification, checkCapture.result?.written ?? undefined, hostRefusals);
+  await opts.runObserver?.finished({ ...correlation, report, verification, recordedCheck: checkCapture.result, touchedFiles: [...touched], hostRefusals });
   // The verdict line — printed even with --no-log (which used to end with
   // NOTHING); suppressed under --json (the outcome record carries the same
   // reading). Rendered from the turn outcome plus what the check actually did,
@@ -1260,6 +1321,7 @@ export async function cmdCode(
     exec.close();
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigterm);
+    opts.signal?.removeEventListener("abort", onExternalAbort);
   }
 }
 

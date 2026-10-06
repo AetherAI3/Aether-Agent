@@ -139,11 +139,12 @@ export async function verifyAndRecord(
  * with the same attribution and staleness rules, from the same single writer.
  * The caller still receives the raw result and classifies it itself.
  */
-export function recordingRunner(exec: VerifyRunner, run: Runner, root: string): VerifyRunner {
+export function recordingRunner(exec: VerifyRunner, run: Runner, root: string, onResult?: (result: VerifyRunResult) => void): VerifyRunner {
   return {
     async executeAsync(_name: string, args: Record<string, unknown>, options?: RunOptions): Promise<ToolResult> {
       const command = typeof args["command"] === "string" ? args["command"] : "";
       const result = await verifyAndRecord(exec, run, root, command, options ? { run: options } : {});
+      onResult?.(result);
       return { output: result.output, exitCode: result.exitCode };
     },
   };

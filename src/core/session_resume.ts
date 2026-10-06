@@ -50,6 +50,9 @@ export interface SessionManifest {
   remaining?: number;
   /** The command this session's verify gate ran, when one was named. */
   testCmd?: string;
+  /** Exact tree-bound host check receipt, when the final check was recordable. */
+  verificationRecord?: { command: string; ranAt: string; head: string | null; treeDigest: string; exitCode: number };
+  hostRefusals?: string[];
   /** The rules and skills the run was conducted under. */
   context?: SessionContext;
 }
