@@ -261,7 +261,14 @@ export async function runPreviewSupervisor(launchJson: string): Promise<number> 
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  if (!readyUrl) {
+  // A stop that lands before readiness (SIGINT/SIGTERM, or POST /stop) is
+  // still a stop. The child's exit is the one this supervisor asked for — on
+  // Unix a SIGTERM death closes with no code, which `closed` records as 1 — so
+  // it is not "exited before readiness". It ends through the same confirmed
+  // cleanup as a stop after readiness, below, rather than leaving a failed
+  // state that `preview stop` reads as unconfirmed cleanup and the next
+  // `status` or `start` republishes as a failure.
+  if (!readyUrl && !stopping) {
     const error = spawnError ? `launch failed: ${spawnError}` : closed !== null
       ? `dev command exited before readiness (exit ${closed})`
       : "timed out waiting for a reachable loopback ready URL";
@@ -273,8 +280,10 @@ export async function runPreviewSupervisor(launchJson: string): Promise<number> 
     return 1;
   }
 
-  state = { ...state, phase: "ready", url: readyUrl };
-  writeState(launch.statePath, state);
+  if (readyUrl) {
+    state = { ...state, phase: "ready", url: readyUrl };
+    writeState(launch.statePath, state);
+  }
 
   if (closed === null) await new Promise<void>((resolve) => child!.once("close", () => resolve()));
   if (!stopping) {

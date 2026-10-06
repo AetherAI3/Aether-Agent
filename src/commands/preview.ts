@@ -404,11 +404,16 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
       try {
         while (!cancelled && Date.now() < deadline) {
           await sleep(100);
+          // A cancel is final once it has signalled the tree. Whatever is read
+          // after it is the supervisor reacting to that signal, and must not
+          // turn the user's cancel into a launch failure (or a ready preview).
+          if (cancelled) break;
           const state = readState(paths.statePath);
           if (!state || state.instanceId !== instanceId) continue;
           // "ready" is reported only once the control channel confirms it.
           if (state.phase !== "ready") note(state.phase);
           const live = await previewControlRequest(state, paths.statePath, "GET", "/status");
+          if (cancelled) break;
           if (live.kind === "ok" && live.state.phase === "ready") {
             note("ready");
             return showOpen(live.state, options.noOpen ?? false, out, err, options.open);

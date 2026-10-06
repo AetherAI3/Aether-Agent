@@ -413,6 +413,39 @@ test("launch failure is explicit and stale state never causes a PID signal", { t
   assert.doesNotThrow(() => process.kill(process.pid, 0));
 });
 
+test("a stop that lands before readiness is a confirmed stop, not a failed launch", { timeout: 30_000 }, async (t) => {
+  // The supervisor recorded the exit it had just caused as "dev command exited
+  // before readiness (exit 1)" and left that failed state behind, so `preview
+  // stop` reported unconfirmed cleanup and the next status republished a failure.
+  const root = tempProject();
+  const script = join(root, "slow.mjs");
+  writeFileSync(script, "setInterval(() => {}, 1000);", "utf8"); // never prints a ready URL
+  const paths = previewPaths(root);
+  const startErr = sink();
+  // Once its supervisor is gone the start waits out its own deadline, so keep
+  // that short; the stop lands well inside it.
+  const starting = cmdPreview(context(root), ["start"], {
+    command: process.execPath, args: [script], timeoutMs: "5000", noOpen: true, out: sink().stream, err: startErr.stream,
+  });
+  t.after(async () => {
+    await starting;
+    if (existsSync(paths.statePath)) await cmdPreview(context(root), ["stop"], { out: sink().stream, err: sink().stream });
+  });
+  const phase = (): string | null => {
+    try { return (JSON.parse(readFileSync(paths.statePath, "utf8")) as PreviewState).phase; } catch { return null; }
+  };
+  for (let i = 0; i < 400 && phase() !== "starting"; i += 1) await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  assert.equal(phase(), "starting");
+
+  const out = sink(); const err = sink();
+  const stopped = await cmdPreview(context(root), ["stop"], { out: out.stream, err: err.stream });
+  assert.equal(stopped, PREVIEW_EXIT.ok, err.text());
+  assert.match(out.text(), /Preview stopped/);
+  assert.equal(existsSync(paths.statePath), false, "the supervisor removed its state once the child was gone");
+  await starting;
+  assert.doesNotMatch(startErr.text(), /exited before readiness/, "the requested stop was not recorded as the child failing");
+});
+
 test("only a terminal failed state with dead recorded processes permits identity-bound replacement", { timeout: 15_000 }, async () => {
   const root = tempProject(); const out = sink(); const err = sink();
   const paths = previewPaths(root);
