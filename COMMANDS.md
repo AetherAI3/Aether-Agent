@@ -235,6 +235,21 @@ instead of trusting a PID file; an unverifiable stale PID is never signalled.
 }
 ```
 
+While an `aether rc` session is active for the project, `preview start`,
+`status` and `stop` publish the phases they observe (`starting`, `ready`,
+`failed`, `stopping`, `stopped`) to viewers under a session-scoped handle. They
+never publish the loopback URL, port, PIDs, argv or child error text. A viewer
+link appears only for the declared preview while it is `ready`, and only when
+the declaration carries an optional `"publicUrl"`. That value must be a public
+`https://` origin and path with no credentials, query, fragment, IP address,
+private or loopback-resolving host name (`.local`, `.internal`, `.ts.net`,
+`.test`, `.onion`, `localtest.me`, `*.nip.io`, a name spelling an IPv4 address,
+…) or token-shaped segment (long random runs, UUIDs, hex digests). The check is
+conservative: a name it cannot prove public is refused. While an RC session is
+active, a refused `publicUrl` stops `preview start` before anything starts;
+without one it is ignored with a warning. Publication is best-effort and never
+changes a preview's result or exit code.
+
 Use `--no-open` in automation. A headless machine always receives the URL and
 an honest “not opened” result. `/preview start|open|logs|status|stop` uses the
 same project declaration and lifecycle inside the REPL. This local opener is

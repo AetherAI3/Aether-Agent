@@ -41,6 +41,7 @@ import type { CountTotal } from "../diff_counts.js";
 import type { MediaEntry } from "../media_history.js";
 import type { TreeWorker } from "../orchestrator.js";
 import type { PreviewState } from "../preview_contract.js";
+import { redactInline } from "../redaction.js";
 import type { VerificationCause, VerificationReading, VerificationStatus } from "../verification_record.js";
 import { VIEWER_EVENT_TYPES, type ViewerEventType } from "./viewer_profile.js";
 
@@ -423,7 +424,7 @@ function promptWords(prompt: string): string[] {
  * mixed-case base64url run. With no server filename the label is the media
  * URL's last path segment, and for an unguessable-link CDN that IS the link.
  */
-function capabilityShaped(stem: string): boolean {
+function stemCapabilityShaped(stem: string): boolean {
   if (UUID_SHAPE.test(stem)) return true;
   if ((stem.match(/[A-Za-z0-9]{16,}/g) ?? []).some((run) => /[A-Za-z]/.test(run) && /\d/.test(run))) return true;
   return (stem.match(/[A-Za-z0-9_-]{20,}/g) ?? [])
@@ -477,7 +478,7 @@ function artifactTitle(entry: MediaEntry): string {
     (model.length >= 4 && name.includes(model))
     || (promptPrefix.length >= 8 && name.includes(promptPrefix))
     || promptWords(entry.prompt).some((word) => name.includes(word))
-    || capabilityShaped(stem)
+    || stemCapabilityShaped(stem)
   ) {
     return generic;
   }
@@ -511,25 +512,101 @@ export function artifactEvent(entry: MediaEntry): RcProducedEvent {
   });
 }
 
+/** The supervisor's phases plus the one the CLI proves: its state was removed. */
+export type PreviewDisplayPhase = PreviewState["phase"] | "stopped";
+
+/** A phase the preview command observed, already bound to a viewer handle. */
+export interface PreviewObservation {
+  phase: PreviewDisplayPhase;
+  instanceId: string;
+  url?: string;
+}
+
+/** The Cloud display bound for a single string, URLs included. */
+const MAX_DISPLAY_URL = 512;
 /**
- * preview — from the supervisor's own state file.
- *
- * The URL is published ONLY when it is not loopback. A `http://127.0.0.1:5173`
- * is useless to somebody watching from another machine and still discloses a
- * local port, so it is dropped rather than shown. `error` is omitted: it is
- * free text from a child process, and the phase already says "failed".
+ * Hosts that only resolve inside a machine, a LAN, a tailnet or a private
+ * namespace, plus the reserved `.test`/`.invalid` names and onion services. A
+ * Tailscale Funnel name is public, but nothing in a `*.ts.net` name tells it
+ * from a tailnet-only MagicDNS name, so the whole suffix is refused.
  */
-export function previewEvent(state: PreviewState, isLoopback: (url: string) => boolean): RcProducedEvent {
-  let url: string | undefined;
-  if (state.url && !isLoopback(state.url)) {
-    try {
-      const parsed = new URL(state.url);
-      if (parsed.protocol === "https:" && parsed.host && !parsed.username && !parsed.password
-          && !parsed.search && !parsed.hash) url = state.url;
-    } catch {
-      // A malformed URL is not a usable viewer link.
-    }
+const PRIVATE_HOST =
+  /(?:^|\.)(?:localhost|localdomain|local|internal|intranet|lan|home|corp|private|home\.arpa|ts\.net|test|invalid|onion)$/;
+/** Public wildcard-DNS names that resolve to loopback or to the address spelled in the name. */
+const LOOPBACK_DNS = /(?:^|\.)(?:localtest\.me|lvh\.me|vcap\.me|nip\.io|sslip\.io|xip\.io|traefik\.me)$/;
+/** An IPv4 address spelled inside a DNS name: `10.0.0.5.example`, `192-168-1-2.example`. */
+const EMBEDDED_IPV4 = /(?:^|[.-])\d{1,3}(?:[.-]\d{1,3}){3}(?:[.-]|$)/;
+const UUID_SHAPED = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/**
+ * A capability token, not a page name: a UUID, a 20+ run of letters and
+ * digits, a 16+ hex digest, or a 20+ mixed-case base64url run. Ordinary slugs
+ * (`release-notes-2024`) are none of these.
+ */
+function urlPartCapabilityShaped(part: string): boolean {
+  const mixed = (run: string): boolean => /\d/.test(run) && /[A-Za-z]/.test(run);
+  if (UUID_SHAPED.test(part)) return true;
+  if ((part.match(/[A-Za-z0-9]{20,}/g) ?? []).some(mixed)) return true;
+  if ((part.match(/[0-9a-f]{16,}/gi) ?? []).some(mixed)) return true;
+  return (part.match(/[A-Za-z0-9_-]{20,}/g) ?? [])
+    .some((run) => /[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run));
+}
+
+/**
+ * The approved viewer-link projection: public HTTPS origin + path, or nothing.
+ *
+ * Refusal is the default answer, and a refused URL is OMITTED, never repaired.
+ * Stripping a signed link's query would publish a different URL than the one
+ * that works, and "fixing" a private host is not possible. Refused:
+ *   - anything not https, or carrying userinfo, a query or a fragment (even an
+ *     empty `?`/`#`) — that is where signatures and credentials travel;
+ *   - every IP literal (the parser normalizes `2130706433` and `0x7f.1`), so
+ *     loopback, RFC 1918, link-local, CGNAT/tailnet and machine addresses are
+ *     all out without enumerating ranges;
+ *   - single-label hosts and private namespaces (`.local`, `.internal`,
+ *     `.ts.net`, `.test`, `.onion`, ...);
+ *   - public DNS names that resolve to loopback or a private address
+ *     (`localtest.me`, `*.nip.io`, any name spelling an IPv4 address);
+ *   - token-shaped host labels or path segments (long random runs, UUIDs, hex
+ *     digests), because a capability link is a credential even without a
+ *     query string;
+ *   - a projection longer than the Cloud's 512-character display bound, or one
+ *     the inline secret scrubber would rewrite.
+ */
+export function previewDisplayUrl(raw: string, isLoopback: (url: string) => boolean): string | undefined {
+  if (typeof raw !== "string" || !raw || raw.length > MAX_DISPLAY_URL) return undefined;
+  if (/[\u0000- \u007f-\u009f?#]/.test(raw) || isLoopback(raw)) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
   }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash) return undefined;
+  const host = parsed.hostname.toLowerCase();
+  if (!host.includes(".") || host.endsWith(".") || host.startsWith("[") || /^[\d.]+$/.test(host)) return undefined;
+  if (PRIVATE_HOST.test(host) || LOOPBACK_DNS.test(host) || EMBEDDED_IPV4.test(host)) return undefined;
+  const projected = `${parsed.origin}${parsed.pathname}`;
+  if (projected.length > MAX_DISPLAY_URL || isLoopback(projected)) return undefined;
+  if ([...host.split("."), ...parsed.pathname.split("/")].some(urlPartCapabilityShaped)) return undefined;
+  return redactInline(projected) === projected ? projected : undefined;
+}
+
+/**
+ * preview — a phase the preview command observed from the supervisor.
+ *
+ * The supervisor only ever records a loopback URL, and a loopback URL is
+ * useless to somebody on another machine while still disclosing a local port,
+ * so it never becomes a link. A URL appears only when the caller passes an
+ * operator-declared public URL AND it survives previewDisplayUrl. `error`,
+ * pids and the control port are omitted: the error is free text from a child
+ * process, and the phase already says "failed".
+ */
+export function previewEvent(
+  state: PreviewState | PreviewObservation,
+  isLoopback: (url: string) => boolean,
+): RcProducedEvent {
+  const url = state.url ? previewDisplayUrl(state.url, isLoopback) : undefined;
   return displayEvent("preview", {
       phase: state.phase,
       instance_id: state.instanceId,
