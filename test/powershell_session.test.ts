@@ -55,6 +55,19 @@ test("Windows PowerShell retains native cwd, exports and functions for user and 
     assert.deepEqual(events.filter(event => event.state === "running").map(event => event.origin), ["user", "user", "model"]);
     assert.ok(events.every(event => event.profile === "powershell" && event.sessionId === session.id));
     assert.ok(events.filter(event => event.state === "completed").every(event => event.exitCode === 0 && event.cwd.includes("space ü")));
+    const firstQueued = exec.runUserCommand("Start-Sleep -Milliseconds 200; Write-Output USER_FIRST");
+    while (!events.some(event => event.command.includes("USER_FIRST") && event.state === "running")) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const queuedModel = { command: "Write-Output MODEL_SECOND" };
+    const secondQueued = exec.executeAsync("run_shell", queuedModel, {
+      expectedShellContext: exec.shellContext,
+      expectedToolCall: toolCallBinding("run_shell", queuedModel) ?? undefined,
+    });
+    assert.match((await firstQueued).output, /USER_FIRST/);
+    assert.match((await secondQueued).output, /MODEL_SECOND/);
+    assert.deepEqual(events.slice(-4).map(event => `${event.origin}:${event.state}`),
+      ["user:running", "user:completed", "model:running", "model:completed"]);
     const stale = await exec.executeAsync("run_shell", { command: "Write-Output STALE" }, { expectedShellContext: approval });
     assert.equal(stale.exitCode, 1);
     assert.match(stale.output, /fresh approval/);
