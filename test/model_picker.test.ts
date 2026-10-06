@@ -203,6 +203,10 @@ test("locked and duplicate-label rows show distinct IDs and a visible reason", (
   assert.match(frame, /first-id/);
   assert.match(frame, /locked-id/);
   assert.match(frame, /LOCKED: requires pro/);
+  const narrow = stripAnsi(renderPicker(groups, flat, 1, { width: 40, height: 10 }));
+  assert.match(narrow, /first-id · Same/);
+  assert.match(narrow, /LOCK locked-id/);
+  assert.match(narrow, /LOCKED: requires pro/);
 });
 
 test("no-result filter keeps the original model without an accidental choice", () => {

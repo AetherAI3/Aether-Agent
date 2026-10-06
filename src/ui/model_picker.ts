@@ -247,7 +247,7 @@ export function renderPicker(
       const id = sanitizeTerm(item.id).replace(/\s+/g, " ").trim();
       let body: string;
       if (compact) {
-        body = clipped(`${marker} ${label} · ${id}${lock}`, inner);
+        body = clipped(`${marker} ${item.available ? "" : "LOCK "}${id} · ${label}`, inner);
       } else {
         const provider = sanitizeTerm(item.provider ?? "");
         const left = clipped(`${marker} ${label}${provider ? ` · ${provider}` : ""}${lock}`, Math.floor(inner * 0.58));
