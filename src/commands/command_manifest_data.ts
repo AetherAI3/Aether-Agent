@@ -4050,6 +4050,46 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:shell-profile",
+    "surface": "slash",
+    "name": "shell-profile",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "[list|status|use cmd|use powershell]",
+    "summary": "inspect or switch the local console shell profile",
+    "detailedHelp": "/shell-profile lists executable and version readiness; /shell-profile status shows the active profile, session and cwd. On Windows, /shell-profile use powershell opts into a persistent native PowerShell process; /shell-profile use cmd restores one-shot cmd.exe. Switching discards shell state and staged results without replay. Linux/macOS keep persistent Bash.",
+    "section": "Steering",
+    "hidden": false,
+    "permissionClass": "local-write",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.shell-profile",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:shell-profile",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "shell-profile",
+      "usage": "/shell-profile [list|status|use cmd|use powershell]",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "Local coding console only; explicit Windows PowerShell opt-in with cmd compatibility."
+    }
+  },
+  {
     "key": "slash:shell-result",
     "surface": "slash",
     "name": "shell-result",

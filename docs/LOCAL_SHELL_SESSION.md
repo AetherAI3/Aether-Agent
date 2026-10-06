@@ -8,10 +8,12 @@ below describe `main`; check your installed version and the
 
 In the coding chat console (`aether` or `aether chat`), leading `!` submits directly to the
 local host. It makes no model request. On Linux and macOS the console selects
-`/bin/bash --noprofile --norc`; an unavailable Bash or unsupported platform
-returns a visible refusal, with no silent shell substitution. Windows retains
-the existing fresh noninteractive `cmd.exe` user-command path; it does not
-share cwd, exports or functions.
+`/bin/bash --noprofile --norc`. Windows starts with the existing one-shot
+`cmd.exe` compatibility profile. Run `/shell-profile list` to inspect native
+PowerShell executable/version readiness, then `/shell-profile use powershell`
+to opt into a persistent PowerShell session. `/shell-profile status` reports
+the active profile, session and cwd; `/shell-profile use cmd` returns to cmd.
+No Bash syntax is translated into PowerShell syntax.
 
 ```text
 !cd subdir
@@ -26,6 +28,15 @@ environment comes from the host's credential-free `childEnv` allowlist, not
 all of the parent's environment. Explicit exports affect this session's child
 commands only; they never modify the host process or another session.
 
+For Windows PowerShell, use native commands such as `Set-Location 'sub dir'`,
+`$env:DEMO = 'hello world'`, and `function Get-Demo { 'ready' }`. User commands
+and separately approved local-model shell tools share that selected session.
+The PowerShell child is launched with `-NoProfile -NonInteractive` and the same
+filtered environment; no profile script or parent credential is inherited.
+Changing profiles explicitly discards cwd, environment, functions, queued
+submissions and a staged `/shell-result`, without replaying commands. Cmd
+continues to start a fresh process for each command.
+
 The `aether agent` host tool loop also owns a fresh Bash session per coding run,
 created **after** selecting its checkout/worktree. Hosted `aether chat` still
 uses its existing server-side chat tools: those do not execute locally or
@@ -36,12 +47,12 @@ tools. Online account-agent and ATS chats remain separate surfaces.
 
 - Leading whitespace before `!` is accepted; empty `!` prints a local usage
   error. `\!literal` sends literal-leading-`!` text to chat.
-- A bracketed multiline TTY paste beginning with `!` is one Bash submission,
+- A bracketed multiline TTY paste beginning with `!` is one shell submission,
   preserving its embedded newlines. Line-mode stdin is one command per line.
-- Quoting and pipelines follow Bash syntax. stdin belongs to the host protocol;
-  `!` programs receive `/dev/null`. For input-driven programs on Linux, use the
+- Quoting and pipelines follow the active shell's native syntax. stdin belongs
+  to the host protocol; noninteractive `!` commands do not own it. For input-driven programs on Linux, use the
   [interactive terminal](#interactive-linux-terminal).
-- Commands show user/model origin, session ID, command ID, real cwd, state,
+- Commands show user/model origin, shell profile, session ID, command ID, real cwd, state,
   bounded output and exit code. The prompt shows cwd (and lost state). Model
   approvals show both shell cwd and the independent file-tool workspace root.
 - `!` submissions made while a model turn is busy retain their shell type and
@@ -103,13 +114,13 @@ or coding worktree requires a new host session, never a retargeted executor.
 Model approvals are bound to the displayed session/cwd/state revision; if
 another local operation changes it before execution, the tool is refused.
 
-`exit`, a Bash crash, cancellation, timeout, invalid cwd or broken protocol
+`exit`, a shell crash, cancellation, timeout, invalid cwd or broken protocol
 ends the session visibly. Use `/shell-reset` to start fresh at the original
 workspace root. State is not reconstructed and a mutating command is never
-replayed. Timeout/cancellation terminate the process group and escalate to
-SIGKILL. Background jobs are awaited as part of the command, so they belong
-to its timeout/cancellation scope. Deliberately detached processes are outside
-this non-PTY session-control guarantee.
+replayed. Bash timeout/cancellation terminate the process group and escalate
+to SIGKILL. Windows PowerShell uses `taskkill /T /F` for its child tree. Bash
+background jobs are awaited as part of the command; deliberately detached
+processes remain outside this non-PTY session-control guarantee.
 
 ## Automatic commit ownership
 

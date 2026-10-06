@@ -1357,11 +1357,18 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       if (input.kind === "share") input = consoleShell.share(input);
       if (input.kind === "error") { process.stdout.write(input.message + "\n"); return "completed"; }
       if (input.kind === "empty") return "completed";
+      if (input.kind === "profile") {
+        if (consoleShell.profileCommand(input)) {
+          skillOpts = { ...skillOpts, exec: consoleShell.exec };
+          queue.length = 0;
+        }
+        return "completed";
+      }
       if (input.kind !== "chat") {
         turnAbort = new AbortController();
         try {
           const result = await consoleShell.run(input, turnAbort.signal);
-          if (result !== "completed") queue.length = 0;
+          if (result !== "completed" || input.kind === "reset-shell") queue.length = 0;
           return result;
         } finally { turnAbort = null; }
       }
@@ -1505,7 +1512,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         let result = await runQueuedTurn(input, authContinuation);
         while (result === "completed" && queue.length > 0) {
           const next = queue.shift()!;
-          const preview = next.kind === "chat" ? next.text : next.kind === "shell" ? "!" + next.command : next.kind === "share" ? "/shell-result" : "/shell-reset";
+          const preview = next.kind === "chat" ? next.text : next.kind === "shell" ? "!" + next.command : next.kind === "share" ? "/shell-result" : next.kind === "profile" ? "/shell-profile" : "/shell-reset";
           process.stdout.write(`\n→ Queued: "${previewLine(preview)}"\n`);
           result = await runQueuedTurn(next);
         }
@@ -2039,6 +2046,11 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     const sharedShellResult = input.kind === "share";
     if (input.kind === "share") input = consoleShell.share(input, true);
     if (input.kind === "error") { process.stdout.write(input.message + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
+    if (input.kind === "profile") {
+      if (consoleShell.profileCommand(input)) skillOpts = { ...skillOpts, exec: consoleShell.exec };
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
     let t = input.kind === "chat" ? input.text : "";
     let authReplay = false;
     if (continuation.pending && !t.startsWith("/switch")) {

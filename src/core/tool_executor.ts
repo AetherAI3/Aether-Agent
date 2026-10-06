@@ -76,6 +76,8 @@ export interface ToolResult {
 export interface ToolExecutionContext {
   readonly mode: "coding" | "pc";
   readonly shellSession?: ShellSession;
+  /** Console-owned identity for a one-shot compatibility shell. */
+  readonly shellContextId?: string | (() => string);
 }
 
 /**
@@ -123,6 +125,7 @@ export class ToolExecutor {
     return this.shellSession ? this.shellSession.withSlot(reserve) : reserve();
   }
   private readonly shellSession?: ShellSession;
+  private readonly shellContextId: () => string;
   private checkout: string | undefined;
 
   constructor(
@@ -136,6 +139,9 @@ export class ToolExecutor {
     // Copy the primitive. A caller changing its context object later cannot
     // upgrade this executor from the PC task's closed tool set.
     this.mode = context.mode;
+    const shellContextId = context.shellContextId;
+    this.shellContextId = typeof shellContextId === "function"
+      ? shellContextId : () => shellContextId ?? "one-shot";
     // Canonicalize the root once (resolve any symlinks in the workspace path).
     const r = resolve(cwd);
     this.root = existsSync(r) ? realpathSync(r) : r;
@@ -147,7 +153,7 @@ export class ToolExecutor {
 
   /** Directory shown to the user; never substitutes for the file-tool root. */
   get shellCwd(): string { return this.shellSession?.cwd ?? this.root; }
-  get shellContext(): string { return `${this.shellSession?.id ?? "one-shot"}\0${this.shellSession?.revision ?? 0}\0${this.shellCwd}`; }
+  get shellContext(): string { return `${this.shellSession?.id ?? this.shellContextId()}\0${this.shellSession?.revision ?? 0}\0${this.shellCwd}`; }
   get configuredTestCommand(): string { return this.testCmd; }
 
   close(): void { this.shellSession?.close(); }

@@ -6,6 +6,7 @@ import { BoundedOutput } from "../core/bounded_output.js";
 import { sanitizeServerText } from "../core/transport.js";
 import { redactForBundle, scanForSecrets } from "../core/redaction.js";
 import { stripAnsi } from "../ui/text.js";
+import { discoverShellProfiles, type ShellProfile } from "../core/shell_profiles.js";
 
 type ShareAction = "preview" | "lines" | "drop" | "replace" | "mask" | "redact" | "send" | "cancel";
 type ShareInput = { kind: "share"; action: ShareAction; first?: number; last?: number; value?: string };
@@ -43,6 +44,7 @@ const SHARE_USAGE = "usage: /shell-result [preview|lines|drop <first>[-<last>]|r
 export type ConsoleInput =
   | { kind: "shell"; command: string }
   | { kind: "reset-shell" }
+  | { kind: "profile"; action: "list" | "status" | "use"; profile?: "cmd" | "powershell" }
   | ShareInput
   | { kind: "error"; message: string }
   | { kind: "chat"; text: string }
@@ -64,6 +66,11 @@ export function classifyConsoleInput(raw: string): ConsoleInput {
     return { kind: "error", message: SHARE_USAGE };
   }
   if (text === "/shell-reset") return { kind: "reset-shell" };
+  if (text === "/shell-profile" || text === "/shell-profile list") return { kind: "profile", action: "list" };
+  if (text === "/shell-profile status") return { kind: "profile", action: "status" };
+  const profile = /^\/shell-profile use (cmd|powershell)$/.exec(text);
+  if (profile) return { kind: "profile", action: "use", profile: profile[1] as "cmd" | "powershell" };
+  if (text.startsWith("/shell-profile ")) return { kind: "error", message: "usage: /shell-profile [list|status|use cmd|use powershell]" };
   if (text.startsWith("\\!")) return { kind: "chat", text: text.slice(1) };
   if (text.startsWith("!")) {
     const command = text.slice(1).trim();
@@ -75,6 +82,7 @@ export function classifyConsoleInput(raw: string): ConsoleInput {
 /** Local shell presentation is shared by raw TTY and line-mode routing. */
 export class ConsoleShell {
   private terminal: TerminalPty | null = null;
+  private profile: ShellProfile;
   static isTerminalCommand(text: string): boolean { return /^\/terminal(?:\s|$)|^\/terminal-(?:attach|stop|status)$/.test(text.trim()); }
   async terminalCommand(text: string): Promise<void> {
     const command = text.trim();
@@ -112,16 +120,62 @@ export class ConsoleShell {
   private latest: ShellCapture | null = null;
   private staged: StagedShellCapture | null = null;
   private activeUserEvent: ShellCommandEvent | null = null;
-  readonly session: ShellSession;
-  readonly exec: ToolExecutor;
-  constructor(root: string, private readonly write: (text: string) => void, private readonly json = false) {
-    this.session = new ShellSession(root, event => this.event(event));
-    this.exec = new ToolExecutor(root, undefined, { mode: "coding", ...(process.platform === "win32" ? {} : { shellSession: this.session }) });
+  session: ShellSession;
+  exec: ToolExecutor;
+  constructor(private readonly root: string, private readonly write: (text: string) => void, private readonly json = false) {
+    this.profile = process.platform === "win32" ? "cmd" : "bash";
+    this.session = new ShellSession(root, event => this.event(event), this.profile);
+    this.exec = this.newExecutor();
+  }
+  private newExecutor(): ToolExecutor {
+    return new ToolExecutor(this.root, undefined, { mode: "coding",
+      ...(this.profile === "cmd" ? { shellContextId: () => this.session.id } : { shellSession: this.session }) });
+  }
+  /** Profile selection only runs at a console command boundary. */
+  profileCommand(input: Extract<ConsoleInput, { kind: "profile" }>): boolean {
+    if (input.action === "status") {
+      const status = { type: "shell_profile", profile: this.profile, sessionId: this.session.id,
+        cwd: this.session.cwd, state: this.session.state, executable: this.session.shell };
+      this.write(this.json ? JSON.stringify(status) + "\n"
+        : `Shell ${status.profile} | ${status.state} | session ${status.sessionId} | cwd ${sanitizeServerText(status.cwd)} | ${sanitizeServerText(status.executable)}\n`);
+      return false;
+    }
+    const profiles = discoverShellProfiles();
+    if (input.action === "list") {
+      if (this.json) this.write(JSON.stringify({ type: "shell_profiles", active: this.profile, profiles }) + "\n");
+      else for (const item of profiles) this.write(`${item.profile === this.profile ? "*" : " "} ${item.profile}: ${item.ready ? `ready | ${item.version} | ${item.executable}` : `unavailable | ${item.reason}`}\n`);
+      return false;
+    }
+    const wanted = profiles.find(item => item.profile === input.profile);
+    if (!wanted) {
+      this.write("This shell profile is unavailable on this platform. Run /shell-profile list.\n"); return false;
+    }
+    if (!wanted.ready || !wanted.executable) {
+      this.write(`${wanted.reason ?? "Shell executable unavailable."}\n`); return false;
+    }
+    if (this.profile === wanted.profile) {
+      this.write(`Shell ${this.profile} is already active; state preserved.\n`); return false;
+    }
+    if (this.terminal || this.session.busy) {
+      this.write("Stop the active terminal or wait for the shell command before changing profiles.\n"); return false;
+    }
+    const old = this.profile;
+    this.exec.close();
+    this.session.close();
+    this.profile = wanted.profile;
+    this.session = new ShellSession(this.root, event => this.event(event), wanted.profile, wanted.executable);
+    this.exec = this.newExecutor();
+    this.latest = null; this.staged = null; this.activeUserEvent = null;
+    const changed = { type: "shell_profile_changed", from: old, profile: this.profile,
+      sessionId: this.session.id, cwd: this.session.cwd, executable: wanted.executable, version: wanted.version };
+    this.write(this.json ? JSON.stringify(changed) + "\n"
+      : `Shell switched to ${this.profile} (${sanitizeServerText(wanted.version ?? "version unknown")}); session ${this.session.id}; cwd ${sanitizeServerText(this.session.cwd)}. Previous shell state and staged result discarded; commands were not replayed.\n`);
+    return true;
   }
   private event(event: ShellCommandEvent): void {
     if (event.origin === "user" && event.state === "running") this.activeUserEvent = event;
     if (this.json) this.write(JSON.stringify({ type: "shell_command", ...event }) + "\n");
-    else this.write(event.state === "running" ? `[shell ${event.origin} | cwd ${sanitizeServerText(event.cwd)} | session ${event.sessionId} | command ${event.commandId} | running] !${sanitizeServerText(event.command)}\n` : `[shell ${event.origin} | ${event.state} | exit ${event.exitCode} | session ${event.sessionId} | command ${event.commandId} | cwd ${sanitizeServerText(event.cwd)}]\n`);
+    else this.write(event.state === "running" ? `[shell ${event.origin} | profile ${event.profile ?? this.profile} | cwd ${sanitizeServerText(event.cwd)} | session ${event.sessionId} | command ${event.commandId} | running] !${sanitizeServerText(event.command)}\n` : `[shell ${event.origin} | profile ${event.profile ?? this.profile} | ${event.state} | exit ${event.exitCode} | session ${event.sessionId} | command ${event.commandId} | cwd ${sanitizeServerText(event.cwd)}]\n`);
   }
   async run(input: string | Extract<ConsoleInput, { kind: "shell" | "reset-shell" }>, signal?: AbortSignal): Promise<"completed" | "aborted" | "failed"> {
     if (typeof input === "string") input = { kind: "shell", command: input };
@@ -129,13 +183,14 @@ export class ConsoleShell {
     this.activeUserEvent = null;
     if (input.kind === "reset-shell") {
       if (this.terminal) { this.write("Stop the interactive terminal before resetting shell state.\n"); return "failed"; }
+      this.staged = null;
       this.session.reset();
-      this.write(this.json ? JSON.stringify({ type: "shell_reset", sessionId: this.session.id, cwd: this.session.cwd }) + "\n" : "shell reset — cwd/environment/functions cleared; commands were not replayed.\n");
+      this.write(this.json ? JSON.stringify({ type: "shell_reset", profile: this.profile, sessionId: this.session.id, cwd: this.session.cwd }) + "\n" : `shell reset — cwd/environment/functions cleared; commands were not replayed (profile ${this.profile}).\n`);
       return "completed";
     }
-    const fallback = process.platform === "win32" ? {
+    const fallback = this.profile === "cmd" ? {
       sessionId: this.session.id, commandId: randomUUID(), origin: "user" as const,
-      command: input.command, cwd: this.session.cwd,
+      command: input.command, cwd: this.session.cwd, profile: this.profile,
     } : null;
     if (fallback) this.event({ ...fallback, state: "running" });
     let streamed = false;
@@ -161,7 +216,7 @@ export class ConsoleShell {
     // Stream once; retain the bounded capture for explicit sharing. Refusal and
     // state-loss explanations still render even when some output was streamed.
     const visible = streamed ? result.output.split("\n", 1)[0]! : result.output;
-    this.write(this.json ? JSON.stringify({ type: "shell_result", sessionId: this.session.id, ...result }) + "\n" : sanitizeServerText(visible) + "\n");
+    this.write(this.json ? JSON.stringify({ type: "shell_result", profile: this.profile, sessionId: this.session.id, ...result }) + "\n" : sanitizeServerText(visible) + "\n");
     // A normal nonzero exit returns to chat and may drain later submissions.
     return result.exitCode === 130 ? "aborted" : this.session.state === "lost" ? "failed" : "completed";
   }
@@ -296,6 +351,6 @@ export class ConsoleShell {
     this.showPreview(stage);
     return { kind: "empty" };
   }
-  prompt(): string { return `[${sanitizeServerText(this.session.cwd)}${this.session.state === "lost" ? "; shell lost" : ""}] `; }
+  prompt(): string { return `[${this.profile} ${sanitizeServerText(this.session.cwd)}${this.session.state === "lost" ? "; shell lost" : ""}] `; }
   close(): void { this.latest = null; this.staged = null; this.terminal?.stop(); this.session.close(); }
 }

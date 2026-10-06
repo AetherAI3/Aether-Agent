@@ -105,7 +105,9 @@ Explain the failing test
 |---|---|---|
 | **Linux** | Persistent Bash: keeps cwd, exports, and functions. | `/terminal python3` starts a terminal with input and resize support. Requires Python 3 and TTY input/output. |
 | **macOS** | Persistent Bash: keeps cwd, exports, and functions. | Use an external terminal. |
-| **Windows** | Fresh `cmd.exe` per command; cwd and exports do not persist. | Use an external terminal. |
+| **Windows** | One-shot `cmd.exe` by default. `/shell-profile use powershell` explicitly starts a persistent PowerShell session for cwd, environment values, and functions. | Use an external terminal. |
+
+On Windows, run `/shell-profile list` to see the installed executable and version before choosing PowerShell. `/shell-profile status` shows the active profile and cwd; `/shell-profile use cmd` returns to the compatibility profile. Switching or `/shell-reset` discards shell state without replaying commands. PowerShell commands keep their own quoting and syntax; Bash commands are not translated.
 
 **Shell:** Ctrl+C cancels the command; `/shell-reset` starts fresh after cancellation or failure. Commands wait for an active model/tool turn to finish.
 **Linux terminal:** Ctrl+] returns to chat; `/terminal-attach` reconnects; `/terminal-stop` ends it. Local tools pause while that terminal is running, including when detached.
