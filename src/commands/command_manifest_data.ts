@@ -2741,9 +2741,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "[--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]",
+    "args": "[--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]",
     "summary": "publish the head branch and open a pull request",
-    "detailedHelp": "aether ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]\npublish the head branch and open a pull request\n--title sets the PR title; --body sets the PR body; --base selects the target branch. --approve publish authorizes publication; --yes alone does not. --json previews the planned argv without publishing.",
+    "detailedHelp": "aether ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]\npublish the head branch and open a pull request\n--pr-draft prints an editable, revision-bound JSON proposal without publishing; save and edit it, then pass --draft-file to publish that proposal. --title and --body override its text verbatim. --base selects the target branch. --approve publish authorizes publication; --yes alone does not. --json previews the exact planned argv without publishing.",
     "section": "Start",
     "hidden": false,
     "permissionClass": "destructive",
@@ -2808,6 +2808,12 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "body": {
         "type": "string"
       },
+      "pr-draft": {
+        "type": "boolean"
+      },
+      "draft-file": {
+        "type": "string"
+      },
       "base": {
         "type": "string"
       }
@@ -2823,7 +2829,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "ship",
-      "usage": "aether ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]",
+      "usage": "aether ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]",
       "visible": true,
       "disposition": "generated"
     },
@@ -5676,9 +5682,9 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "args": "[--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]",
+    "args": "[--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]",
     "summary": "publish the head branch and open a pull request",
-    "detailedHelp": "/ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]\npublish the head branch and open a pull request\nQuote values containing spaces or newlines. --title sets the PR title; --body sets the PR body; --base selects the target branch. --approve publish authorizes publication; --yes alone does not. --json previews the planned argv without publishing. --body-file is not supported.",
+    "detailedHelp": "/ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]\npublish the head branch and open a pull request\n--pr-draft prints an editable, revision-bound JSON proposal without publishing; edit it and pass --draft-file to use it. Quote values containing spaces or newlines. --title and --body override the draft verbatim. --approve publish authorizes publication; --yes alone does not. --json previews the exact argv without publishing.",
     "section": "UVT Tools",
     "hidden": false,
     "permissionClass": "unknown",
@@ -5700,7 +5706,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "ship",
-      "usage": "/ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]",
+      "usage": "/ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]",
       "visible": true,
       "disposition": "generated"
     },

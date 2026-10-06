@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:e758370d6c6abe5907a7686c50681dede41e883d1efa8274db13713b1c2c8abf -->
+<!-- manifest-digest: sha256:15c07b93fbb6e49fac31bce9d9f19f8c8e4ce36a36011f13a721c90ac6de535c -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -126,7 +126,7 @@ Command flags:
 - `--body <value>`
 - `--base <value>`
 
-#### `aether ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]`
+#### `aether ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]`
 
 publish the head branch and open a pull request
 
@@ -140,6 +140,8 @@ Command flags:
 - `--approve <value>`
 - `--title <value>`
 - `--body <value>`
+- `--pr-draft`
+- `--draft-file <value>`
 - `--base <value>`
 
 ### Account
@@ -731,7 +733,7 @@ review changes, pick files or hunks, commit
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.review`
 
-#### `/ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]`
+#### `/ship [--pr-draft] [--draft-file path] [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]`
 
 publish the head branch and open a pull request
 
