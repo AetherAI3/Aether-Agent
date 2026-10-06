@@ -6,11 +6,12 @@
 terminal run and a browser. Its host foundation and local status/exposure
 controls are on `main`. A live Cloud viewer journey was recorded on
 2026-10-06 on a Windows and a Linux host with a phone viewer —
-[evidence](reviews/2026-10-06-rc-live-journey.md). Two limits remain:
-`aether rc start` needs a device enrolled with `aether device enroll`, which
-the Cloud currently allows only for operator accounts
-([#300](https://github.com/AetherAI3/aether-agent/issues/300)), and a broker
-outage during a run was exercised in tests only. The old draft
+[evidence](reviews/2026-10-06-rc-live-journey.md). RC now obtains its own
+owner-scoped observer device label from Cloud using an installation ID; it
+does not use the operator-only `aether device enroll` path. The label is not
+an authenticator and grants no control authority. The ordinary-account
+deployed journey and a broker outage during a run still need live
+qualification. The old draft
 [PR #108](https://github.com/AetherAI3/aether-agent/pull/108) is not release
 evidence for current `main`.
 

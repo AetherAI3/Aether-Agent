@@ -157,19 +157,14 @@ export function loadEnrollment(): EnrollmentRecord | null {
 /**
  * Identity and display fields only — never the secrets.
  *
- * Remote Control needs to say WHICH device is publishing: `device_id` for the
- * canonical identity the broker checks, `display_name` for the operator, and
- * `base_url` for the endpoint. It has no use for `device_token` or
- * `device_command_key`, and it must not hold them: RC is the process that
- * publishes observation events, so a credential within its reach is one
- * redaction bug away from a viewer stream.
+ * SC-DEVICE status can show which enrolled device it is inspecting without
+ * receiving either secret. Observer-only RC now uses its separate Cloud
+ * owner-scoped device label and does not read this enrollment projection.
  *
  * This is a separate accessor rather than "call loadEnrollment and read only
  * three fields", because the latter is a convention and a convention is not
- * enforceable. A projection is: test/rc_enrollment_metadata.test.ts asserts no
- * RC module references `loadEnrollment`, `device_token`, or
- * `device_command_key` at all — which is only fair to demand once a
- * secret-free accessor exists for them to use instead.
+ * enforceable. Keeping this projection field-by-field also prevents a future
+ * device-runtime status caller from receiving a newly added secret by spread.
  */
 export interface EnrollmentMetadata {
   device_id: string;
@@ -183,7 +178,7 @@ export function loadEnrollmentMetadata(): EnrollmentMetadata | null {
   if (!record) return null;
   // Explicit field-by-field projection, deliberately not a destructuring rest.
   // A rest spread would silently carry any future secret added to
-  // EnrollmentRecord into RC's reach; this way a new field has to be allowed
+  // EnrollmentRecord into a status caller's reach; a new field must be allowed
   // here on purpose.
   return {
     device_id: record.device_id,
