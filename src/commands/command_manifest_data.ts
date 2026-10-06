@@ -3154,7 +3154,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "ownedFlags": {},
     "handler": { "id": "handler:slash:switch", "kind": "host", "module": "src/commands/slash.ts", "symbol": "handleSlash" },
     "docs": { "kind": "manifest", "module": "src/commands/command_manifest_data.ts", "symbol": "COMMAND_MANIFEST_SOURCE", "target": "switch", "usage": "/switch <subcommand>", "visible": true, "disposition": "generated" },
-    "release": { "disposition": "new", "note": null }
+    "release": { "disposition": "new", "note": "Model switching now offers reviewed task continuation, fresh start, and cancellation." }
   },
   {
     "key": "slash:agent",
