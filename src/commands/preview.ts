@@ -9,11 +9,14 @@ import type { CommandFlags } from "../core/command_dispatch.js";
 import { openBrowserChecked } from "../core/browser.js";
 import type { OpenOutcome } from "../core/opener.js";
 import {
-  commandDigest, parsePreviewState, PREVIEW_SCHEMA, previewPathStillNames, previewPaths,
+  commandDigest, isLoopbackUrl, parsePreviewState, PREVIEW_SCHEMA, previewPathStillNames, previewPaths,
   readStablePreviewFile, sanitizePreviewText,
   validatePreviewCommand, type PreviewCommand, type PreviewLaunch, type PreviewState,
 } from "../core/preview_contract.js";
 import { terminateProcessTree } from "../core/process_tree_kill.js";
+import { openRcPreviewPublisher, type RcPreviewPublisher } from "../core/rc/preview.js";
+import { previewDisplayUrl, type PreviewDisplayPhase } from "../core/rc/producers.js";
+import { projectRefFor, rcOutboxPath } from "./rc.js";
 
 export const PREVIEW_EXIT = { ok: 0, usage: 2, declined: 20, unsafe: 21, notRunning: 22, launchFailed: 23, timeout: 24, controlFailed: 25 } as const;
 
@@ -28,6 +31,9 @@ export interface PreviewOptions {
   err?: Writable;
   /** Test seam for the existing safe opener; production uses openBrowserChecked. */
   open?: (url: string) => OpenOutcome;
+  /** Test seam for RC publication: the outbox location, and a hook that
+   *  receives the publisher so a test can await uploads the command never does. */
+  rc?: { outboxPath?: string; opened?: (publisher: RcPreviewPublisher) => void };
 }
 
 interface ProjectPreviewFile {
@@ -37,6 +43,9 @@ interface ProjectPreviewFile {
   cwd?: string;
   readyUrl?: string;
   timeoutMs?: number;
+  /** Where viewers may reach this preview. Declared, never discovered: the
+   *  supervisor only ever learns a loopback URL, which stays local. */
+  publicUrl?: string;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -61,7 +70,98 @@ function loadDeclared(projectRoot: string): ProjectPreviewFile {
       (v["timeoutMs"] !== undefined && !Number.isInteger(v["timeoutMs"]))) {
     throw new Error("invalid .aether/preview.json contract");
   }
+  // `publicUrl` is validated where it is used (publicUrlRefused): it only
+  // matters to an RC session, so it must not break a purely local preview.
   return value as ProjectPreviewFile;
+}
+
+const PUBLIC_URL_RULE =
+  "must be a public https:// origin and path without credentials, query, fragment, IP address, " +
+  "private or loopback-resolving host name, or token-shaped segment";
+
+/** The declared publicUrl when it passes the viewer-link projection. */
+function safePublicUrl(declared: ProjectPreviewFile): string | undefined {
+  const raw: unknown = declared.publicUrl;
+  return typeof raw === "string" && previewDisplayUrl(raw, isLoopbackUrl) !== undefined ? raw : undefined;
+}
+
+/** True when the declaration carries a publicUrl the projection refuses. */
+function publicUrlRefused(projectRoot: string): boolean {
+  const declared = loadDeclared(projectRoot);
+  return declared.publicUrl !== undefined && safePublicUrl(declared) === undefined;
+}
+
+/**
+ * The declared public URL, but only for the declared preview.
+ *
+ * Bound to the command digest so a preview launched from an ad-hoc `--command`
+ * (or with overridden flags) never borrows a URL somebody declared for a
+ * different process. Any failure reads as "no public URL".
+ */
+function declaredPublicUrl(projectRoot: string, digest: string): string | undefined {
+  try {
+    const url = safePublicUrl(loadDeclared(projectRoot));
+    if (url === undefined) return undefined;
+    return commandDigest(resolvePreviewCommand(projectRoot, {})) === digest ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type PreviewIdentity = Pick<PreviewState, "instanceId" | "commandDigest">;
+
+interface PreviewRc {
+  /** Report a phase this command observed or caused; never throws. */
+  observe(preview: PreviewIdentity, phase: PreviewDisplayPhase): void;
+  /** Whether an RC session is active for this project (opens the publisher). */
+  active(): boolean;
+}
+
+/**
+ * Report observed phases to an active RC session, if there is one.
+ *
+ * The publisher opens lazily, keyed exactly as `aether rc` keys its outbox
+ * (the resolved, not realpath'd, cwd). It enqueues durably and never waits for
+ * the upload, so a slow or absent broker cannot change or delay a result.
+ */
+function previewRc(ctx: AppContext, options: PreviewOptions, projectRoot: string): PreviewRc {
+  let publisher: RcPreviewPublisher | null | undefined;
+  const open = (): RcPreviewPublisher | null => {
+    if (publisher === undefined) {
+      try {
+        const rcRoot = resolve(ctx.flags.cwd);
+        publisher = openRcPreviewPublisher(ctx.api, rcRoot, options.rc?.outboxPath ?? rcOutboxPath(projectRefFor(rcRoot)));
+        if (publisher) options.rc?.opened?.(publisher);
+      } catch {
+        publisher = null;
+      }
+    }
+    return publisher;
+  };
+  return {
+    observe(preview, phase): void {
+      try {
+        const opened = open();
+        if (!opened) return;
+        const publicUrl = phase === "ready" ? declaredPublicUrl(projectRoot, preview.commandDigest) : undefined;
+        opened.observe({ phase, instanceId: preview.instanceId, ...(publicUrl ? { publicUrl } : {}) });
+      } catch {
+        // RC observation never changes a preview result.
+      }
+    },
+    active: () => open() !== null,
+  };
+}
+
+/**
+ * Publish `stopped` once the supervisor's state file is gone (the proof
+ * `preview stop` waits for) without holding the command: the poll is bounded
+ * and unref'd. Unconfirmed cleanup leaves the viewer at `stopping`, the truth.
+ */
+function publishStoppedWhenGone(statePath: string, publish: () => void, attempts = 50): void {
+  if (!existsSync(statePath)) { publish(); return; }
+  if (attempts <= 0) return;
+  setTimeout(() => publishStoppedWhenGone(statePath, publish, attempts - 1), 100).unref();
 }
 
 export function resolvePreviewCommand(projectRoot: string, options: PreviewOptions): PreviewCommand {
@@ -207,11 +307,30 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
     err.write(`${sanitizePreviewText(error instanceof Error ? error.message : String(error))}\n`);
     return PREVIEW_EXIT.unsafe;
   }
+  // Every call below reports a phase this command actually observed or caused.
+  // An unreachable or unverified preview is never reported: that state is
+  // unknown, and a viewer is told nothing rather than something guessed.
+  const rc = previewRc(ctx, options, projectRoot);
+  const observe = rc.observe;
 
   if (sub === "start") {
     let command: PreviewCommand;
     try { command = resolvePreviewCommand(projectRoot, options); }
     catch (error) { err.write(`${sanitizePreviewText(error instanceof Error ? error.message : String(error))}\n`); return PREVIEW_EXIT.unsafe; }
+    // A refused publicUrl fails closed only where it would matter: with an RC
+    // session active, rather than silently never showing the declared link.
+    // Without one it is ignored, so RC never blocks local work. The value is
+    // never echoed: a refused URL may be a signed or credential-bearing link.
+    let refusedPublicUrl: boolean;
+    try { refusedPublicUrl = options.command === undefined && publicUrlRefused(projectRoot); }
+    catch (error) { err.write(`${sanitizePreviewText(error instanceof Error ? error.message : String(error))}\n`); return PREVIEW_EXIT.unsafe; }
+    if (refusedPublicUrl) {
+      if (rc.active()) {
+        err.write(`.aether/preview.json publicUrl ${PUBLIC_URL_RULE}.\n`);
+        return PREVIEW_EXIT.unsafe;
+      }
+      err.write(`Ignoring .aether/preview.json publicUrl: it ${PUBLIC_URL_RULE} (no RC session is active).\n`);
+    }
     const digest = commandDigest(command);
     let existing: Awaited<ReturnType<typeof currentState>>;
     try { existing = await currentState(projectRoot, paths.statePath); }
@@ -227,6 +346,10 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
       return PREVIEW_EXIT.controlFailed;
     }
     if (existing.state && existing.ownership === "stale") {
+      // A supervisor-authored failure nobody was watching (e.g. the dev server
+      // exited after ready): tell the viewer before the evidence is removed,
+      // or it keeps showing the old preview as ready.
+      observe(existing.state, "failed");
       if (!removeOwnedState(paths.statePath, existing.state.instanceId)) {
         err.write("Failed to remove the identity-bound failed preview state; no replacement was started.\n");
         return PREVIEW_EXIT.unsafe;
@@ -238,6 +361,7 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
         err.write("A different declared preview is already running; stop it before changing commands.\n");
         return PREVIEW_EXIT.controlFailed;
       }
+      observe(existing.state, existing.state.phase);
       out.write(`Attached to declared preview ${existing.state.instanceId}.\n`);
       return existing.state.phase === "ready" ? showOpen(existing.state, options.noOpen ?? false, out, err, options.open) : PREVIEW_EXIT.ok;
     }
@@ -256,6 +380,12 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
     const launch: PreviewLaunch = {
       schema: PREVIEW_SCHEMA, instanceId, projectRoot, commandDigest: digest, command,
       statePath: paths.statePath, logPath: paths.logPath,
+    };
+    const seen: { phase: PreviewDisplayPhase | null } = { phase: null };
+    const note = (phase: PreviewDisplayPhase): void => {
+      if (phase === seen.phase) return; // transitions, not poll ticks
+      seen.phase = phase;
+      observe(launch, phase);
     };
     try {
       if (existsSync(paths.logPath)) unlinkSync(paths.logPath);
@@ -276,19 +406,39 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
           await sleep(100);
           const state = readState(paths.statePath);
           if (!state || state.instanceId !== instanceId) continue;
+          // "ready" is reported only once the control channel confirms it.
+          if (state.phase !== "ready") note(state.phase);
           const live = await previewControlRequest(state, paths.statePath, "GET", "/status");
-          if (live.kind === "ok" && live.state.phase === "ready") return showOpen(live.state, options.noOpen ?? false, out, err, options.open);
+          if (live.kind === "ok" && live.state.phase === "ready") {
+            note("ready");
+            return showOpen(live.state, options.noOpen ?? false, out, err, options.open);
+          }
           if (state.phase === "failed") { err.write(`${state.error ?? "preview launch failed"}\n`); return PREVIEW_EXIT.launchFailed; }
         }
       } finally {
         process.removeListener("SIGINT", cancel);
         process.removeListener("SIGTERM", cancel);
       }
-      if (cancelled) { err.write("Preview start cancelled; the supervisor process tree was stopped.\n"); return 130; }
+      // terminateProcessTree signals the tree (SIGTERM, or a forced kill on
+      // Windows); it does not prove cleanup. `stopped` waits for that proof.
+      const settle = (): void => {
+        if (rc.active()) publishStoppedWhenGone(paths.statePath, () => note("stopped"));
+      };
+      if (cancelled) {
+        note("stopping");
+        settle();
+        err.write("Preview start cancelled; the supervisor process tree was stopped.\n");
+        return 130;
+      }
       terminateProcessTree(supervisor);
+      // A concurrent `preview stop` already said "stopping"; otherwise this
+      // launch simply never became ready, which is a failure whatever cleanup does.
+      if (seen.phase === "stopping") settle();
+      else note("failed");
       err.write("Timed out waiting for the preview supervisor; its process tree was stopped.\n");
       return PREVIEW_EXIT.timeout;
     } catch (error) {
+      note("failed");
       err.write(`Preview launch failed: ${sanitizePreviewText(error instanceof Error ? error.message : String(error))}\n`);
       return PREVIEW_EXIT.launchFailed;
     }
@@ -304,6 +454,9 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
   }
   if (!live) { err.write("No managed preview is recorded for this project.\n"); return PREVIEW_EXIT.notRunning; }
   if (ownership === "stale") {
+    // A supervisor-authored failure with both processes gone: the one terminal
+    // transition nobody was watching when it happened (e.g. exit after ready).
+    if (sub === "status" || sub === "stop") observe(live, "failed");
     err.write(`Preview state is terminal and stale (${live.instanceId}); no process was signalled.\n`);
     return PREVIEW_EXIT.notRunning;
   }
@@ -315,6 +468,7 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
     return PREVIEW_EXIT.controlFailed;
   }
   if (sub === "status") {
+    observe(live, live.phase);
     out.write(`${live.phase}  pid=${live.childPid}${live.url ? `  ${live.url}` : ""}\n`);
     return live.phase === "ready" ? PREVIEW_EXIT.ok : PREVIEW_EXIT.notRunning;
   }
@@ -329,8 +483,11 @@ export async function cmdPreview(ctx: AppContext, argv: string[], options: Previ
   err.write(`Stopping declared preview ${live.instanceId} (pid ${live.childPid}) and its process tree.\n`);
   const stopped = await previewControlRequest(live, paths.statePath, "POST", "/stop");
   if (stopped.kind !== "ok") { err.write("Supervisor instance challenge failed; no PID was signalled.\n"); return PREVIEW_EXIT.controlFailed; }
+  observe(live, "stopping");
   for (let i = 0; i < 50 && existsSync(paths.statePath); i += 1) await sleep(100);
+  // Unconfirmed cleanup leaves the viewer at "stopping", which is the truth.
   if (existsSync(paths.statePath)) { err.write("Preview stop was requested, but cleanup was not confirmed.\n"); return PREVIEW_EXIT.controlFailed; }
+  observe(live, "stopped");
   out.write("Preview stopped.\n");
   return PREVIEW_EXIT.ok;
 }
@@ -351,8 +508,12 @@ function redactPreviewArgv(argv: readonly string[]): string[] {
 }
 
 export function previewOptionsFromFlags(flags: CommandFlags): PreviewOptions {
+  // `--arg` is repeatable and reads as [] when absent. An empty list must not
+  // override the declaration's args: it would launch the bare executable, and
+  // the launch digest would never match the declared preview again.
+  const args = flags.list("arg");
   return {
-    command: flags.str("command"), args: flags.list("arg"), readyUrl: flags.str("ready-url"),
+    command: flags.str("command"), ...(args.length > 0 ? { args } : {}), readyUrl: flags.str("ready-url"),
     previewCwd: flags.str("preview-cwd"), timeoutMs: flags.str("preview-timeout-ms"), noOpen: flags.bool("no-open"),
   };
 }
