@@ -57,6 +57,7 @@ import { SteerChannel, formatSteerAck } from "../core/steer_channel.js";
 import type { RunOptions, ToolResult } from "../core/tool_executor.js";
 import { ToolExecutor } from "../core/tool_executor.js";
 import { ConsoleShell, classifyConsoleInput, type ConsoleInput } from "./console_input.js";
+import { ConsoleQueue, describeEntry, entryKind, parseQueueCommand, renderDisposition, type QueueCommand, type QueueEntry, type QueueableInput } from "./console_queue.js";
 import { HostRenderer } from "../ui/host_render.js";
 import type { TaskCommand } from "../core/brain.js";
 import { getRegistry } from "../core/context_registry.js";
@@ -1131,7 +1132,7 @@ async function currentConsoleModel(ctx: AppContext): Promise<string> {
 
 function switchDisposition(target: ModelTarget, brief: string, queueCount: number, draftSaved = false): string {
   return `Model switch pending: ${target.label} (${target.destination}).\n` +
-    (queueCount ? `Queued entries: ${queueCount}; they stay queued and will not replay across this switch. Cancel and finish them first.\n` : "Queued entries: none.\n") +
+    (queueCount ? `Queued entries: ${queueCount}; they stay queued and will not replay across this switch. Review them with /queue; remove them with /queue remove <id> or /queue clear.\n` : "Queued entries: none.\n") +
     `Unsent draft: ${draftSaved ? "saved; restored after continue, fresh, or cancel; never sent automatically" : "none"}.\n` +
     (target.contextWindow !== null && target.contextWindow < 2_048 ? "This target's context window is too small for continuation; choose fresh or cancel.\n" : "") +
     `Exact continuation brief for review:\n${brief}\n` +
@@ -1184,11 +1185,6 @@ export function ctrlCDecision(s: {
   }
   if (s.hasDraft) return "clear-line";
   return s.armed ? "exit" : "arm-exit";
-}
-
-/** Truncate a queued-prompt preview to 55 chars for the "⏳ Queued" echo lines. */
-function previewLine(s: string): string {
-  return s.length > 55 ? s.slice(0, 55) + "…" : s;
 }
 
 /** Stable machine terminal record. The prompt itself is deliberately omitted:
@@ -1354,7 +1350,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let pasting = false;
   let pasteAcc = "";
   let carry = ""; // partial escape sequence held across chunk boundaries
-  const queue: ConsoleInput[] = [];
+  const queue = new ConsoleQueue();
+  let runningSlash: string | null = null; // names a running slash command for /queue
   // /steer during a turn goes to that turn's brain when it can acknowledge
   // it; everything else waits for the next turn and is reported as such.
   const steerChannel = new SteerChannel((ack) => {
@@ -1394,8 +1391,25 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       process.stdin.removeListener("data", onData);
       process.stdout.removeListener("resize", onResize);
     };
+    /** Every pending entry is dropped and listed; none of them will resume. */
+    const discardQueue = (reason: string): void => {
+      const removed = queue.clear();
+      process.stdout.write(renderDisposition(
+        `\nQueue discarded (${reason}): ${removed.length} pending ${removed.length === 1 ? "entry" : "entries"} removed; none ran and none will resume.`,
+        removed,
+      ));
+    };
+    /** After a failed entry the rest stay listed but wait for /queue resume. */
+    const holdQueue = (failed: QueueEntry): void => {
+      if (!queue.hold(`${failed.id} failed`)) return;
+      process.stdout.write(renderDisposition(
+        `\nQueue paused (${failed.id} failed): ${queue.length} pending ${queue.length === 1 ? "entry" : "entries"} kept; none ran.`,
+        queue.pending,
+        "/queue resume runs them in order; /queue edit|remove <id> or /queue clear changes them.",
+      ));
+    };
     const finish = (code: number): void => {
-      turnAbort?.abort(); slashAbort?.abort(); queue.length = 0;
+      turnAbort?.abort(); slashAbort?.abort(); discardQueue("session ended");
       cleanup();
       process.stdout.write("\n");
       resolve(code);
@@ -1410,7 +1424,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       if (input.kind === "profile") {
         if (consoleShell.profileCommand(input)) {
           skillOpts = { ...skillOpts, exec: consoleShell.exec };
-          queue.length = 0;
+          discardQueue("shell profile changed");
         }
         return "completed";
       }
@@ -1418,7 +1432,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         turnAbort = new AbortController();
         try {
           const result = await consoleShell.run(input, turnAbort.signal);
-          if (result !== "completed" || input.kind === "reset-shell") queue.length = 0;
+          // Queued shell commands assumed the old shell state: never run them
+          // against a fresh one, and never after the user said stop.
+          if (result === "aborted") discardQueue("cancelled");
+          else if (result === "failed") discardQueue(consoleShell.session.state === "lost" ? "shell state lost" : "shell action failed");
+          else if (input.kind === "reset-shell") discardQueue("shell reset");
           return result;
         } finally { turnAbort = null; }
       }
@@ -1512,9 +1530,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authContinuation);
         if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
         if (outcome.state === "cancelled") {
-          queue.length = 0;
           if (!ctx.flags.json) process.stdout.write("\n" + theme.dim("✗ turn aborted") + "\n");
           steerEnd = "cancelled";
+          discardQueue("turn cancelled");
           return "aborted";
         }
         return "completed";
@@ -1522,12 +1540,12 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), "failed", !sharedShellResult && !authContinuation);
         if (isAbortError(err)) {
-          // User said stop: drop the queued follow-ups too.
-          queue.length = 0;
+          // User said stop: drop the queued follow-ups too, and say which.
           const outcome = turnOutcomeForError(err);
           if (ctx.flags.json && outcome) process.stdout.write(turnOutcomeJson(outcome) + "\n");
           else process.stdout.write("\n" + theme.dim("✗ turn aborted") + "\n");
           steerEnd = "cancelled";
+          discardQueue("turn cancelled");
           return "aborted";
         }
         // ChatTurnError means the Renderer already painted "✗ <msg>" for the
@@ -1574,19 +1592,88 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       }
     };
 
-    const runAndDrain = async (input: ConsoleInput, authContinuation = false): Promise<void> => {
+    const runEntry = async (entry: QueueEntry, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
+      queue.setRunning(entry);
+      try { return await runQueuedTurn(entry.input, authContinuation); }
+      finally { queue.setRunning(null); }
+    };
+
+    /** Run one entry, then drain pending entries in strict order. A failure
+     * pauses the rest; a cancellation discards them (see runQueuedTurn). */
+    const runAndDrain = async (first: QueueEntry, authContinuation = false): Promise<void> => {
       try {
         getRegistry().startAgentTimer();
-        let result = await runQueuedTurn(input, authContinuation);
-        while (result === "completed" && queue.length > 0) {
-          const next = queue.shift()!;
-          const preview = next.kind === "chat" ? next.text : next.kind === "shell" ? "!" + next.command : next.kind === "share" ? "/shell-result" : next.kind === "profile" ? "/shell-profile" : "/shell-reset";
-          process.stdout.write(`\n→ Queued: "${previewLine(preview)}"\n`);
-          result = await runQueuedTurn(next);
+        let entry: QueueEntry | undefined = first;
+        let result = await runEntry(first, authContinuation);
+        while (result === "completed") {
+          entry = queue.shift();
+          if (!entry) break;
+          process.stdout.write(`\n→ Running queued ${entry.id} (${entryKind(entry.input)}): ${describeEntry(entry.input)}\n`);
+          result = await runEntry(entry);
         }
+        if (result === "failed" && entry) holdQueue(entry);
       } finally {
         busy = false;
         getRegistry().startUserTimer();
+      }
+    };
+
+    /** Queue one input behind the active operation. Returns false (and says
+     * why) when it was not queued, so the caller keeps the draft. */
+    const enqueueInput = (input: QueueableInput): boolean => {
+      let toQueue = input;
+      if (input.kind === "share" && input.action === "send") {
+        const bound = consoleShell.stagedCommandId();
+        if (!bound) {
+          process.stdout.write("\nNot queued: a queued /shell-result send must bind to a preview you have reviewed, and none is staged. Draft kept.\n");
+          return false;
+        }
+        toQueue = { ...input, boundCommandId: bound };
+      }
+      const result = queue.enqueue(toQueue);
+      if (!result.ok) { process.stdout.write(`\n${result.message} Draft kept.\n`); return false; }
+      const paused = queue.held ? "; queue PAUSED, /queue resume runs it" : "";
+      process.stdout.write(`\n⏳ Queued ${result.entry.id} (${entryKind(toQueue)}, ${queue.length} pending${paused}): ${describeEntry(toQueue)}\n`);
+      return true;
+    };
+
+    /** /queue management is local bookkeeping: it never calls a model or
+     * starts a process (except /queue resume, which hands entries back to the
+     * ordinary drain). */
+    const handleQueueCommand = async (command: QueueCommand): Promise<void> => {
+      const write = (text: string): void => { process.stdout.write(text); };
+      switch (command.op) {
+        case "usage": write(command.message + "\n"); return;
+        case "list": write(queue.render(runningSlash)); return;
+        case "clear": {
+          const removed = queue.clear();
+          write(removed.length
+            ? renderDisposition(`Cleared ${removed.length} pending ${removed.length === 1 ? "entry" : "entries"}; none ran:`, removed)
+            : "Queue is already empty.\n");
+          return;
+        }
+        case "remove": {
+          const result = queue.remove(command.id);
+          write(result.ok ? `Removed ${result.entry.id} (${entryKind(result.entry.input)}); it will not run.\n` : result.message + "\n");
+          return;
+        }
+        case "edit": {
+          const result = queue.edit(command.id, command.text);
+          write(result.ok ? `Edited ${result.entry.id} (${entryKind(result.entry.input)}, position kept): ${describeEntry(result.entry.input)}\n` : result.message + "\n");
+          return;
+        }
+        case "resume": {
+          if (continuation.pending) { write("Resolve the pending model switch with /switch first; the queue stays as listed.\n"); return; }
+          if (!queue.resume()) { write(queue.length ? "Queue is not paused.\n" : "Queue is empty; nothing to resume.\n"); return; }
+          write(`Queue resumed: ${queue.length} pending ${queue.length === 1 ? "entry runs" : "entries run"} in order${busy ? " after the current operation" : ""}.\n`);
+          if (busy) return;
+          const next = queue.shift();
+          if (!next) return;
+          busy = true;
+          await runAndDrain(next);
+          renderHudLine();
+          return;
+        }
       }
     };
 
@@ -1628,6 +1715,17 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     const onSubmit = async (): Promise<void> => {
       const raw = buf.value;
+      // Queue management works mid-turn and during a pending switch (whose
+      // disposition asks the user to clear entries). It stays out of history:
+      // an edit can carry local shell text.
+      const queueCommand = parseQueueCommand(raw);
+      if (queueCommand) {
+        buf.clear();
+        process.stdout.write("\n");
+        await handleQueueCommand(queueCommand);
+        repaint();
+        return;
+      }
       if (continuation.pending && !raw.trim().startsWith("/switch")) {
         process.stdout.write("\nChoose /switch continue, fresh, cancel, brief, or edit first. Draft preserved.\n");
         repaint();
@@ -1650,16 +1748,23 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       };
       let t = input.kind === "chat" ? input.text : "";
       if (t && heldDraft === t && !t.startsWith("/auth")) heldDraft = null;
+      if (input.kind === "error") {
+        buf.clear(); // a usage error is reported now, never queued
+        process.stdout.write("\n" + input.message + "\n");
+        repaint();
+        return;
+      }
       if (input.kind !== "chat" && input.kind !== "empty") {
-        buf.clear(); // shell commands never enter chat history or prompt context
+        // Shell commands never enter chat history or prompt context. A
+        // rejected enqueue keeps the draft in the composer.
         if (busy) {
-          queue.push(input);
-          process.stdout.write(`\n⏳ Local shell queued (${queue.length}).\n`);
+          if (enqueueInput(input)) buf.clear();
           return;
         }
+        buf.clear();
         process.stdout.write("\n");
         busy = true;
-        await runAndDrain(input);
+        await runAndDrain(queue.allocate(input));
         renderHudLine(); repaint();
         return;
       }
@@ -1684,11 +1789,15 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           return;
         }
         if (t.startsWith("/queue ")) t = t.slice(7).trim();
+        if (!t || t.startsWith("/")) {
+          remember(buf.value);
+          buf.commit(buf.value);
+          if (t) process.stdout.write("\nSlash commands are not queued; run it after the current operation (↑ recalls it).\n");
+          return;
+        }
+        if (!enqueueInput({ kind: "chat", text: t })) return;
         remember(buf.value);
         buf.commit(buf.value);
-        if (!t || t.startsWith("/")) return; // other slashes wait for the turn
-        queue.push({ kind: "chat", text: t });
-        process.stdout.write(`\n⏳ Queued (${queue.length}): "${previewLine(t)}"\n`);
         return;
       }
 
@@ -1721,7 +1830,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           }
         } else if (command === "continue" || command === "fresh") {
           if (queue.length) {
-            process.stdout.write(`Switch paused: ${queue.length} queued entries remain. Cancel and finish them first.\n`);
+            process.stdout.write(`Switch paused: ${queue.length} queued entries remain. Review them with /queue; remove them with /queue remove <id> or /queue clear.\n`);
           } else if (process.env["AETHER_BACKEND"] && (await resolveBackend(ctx)) !== pending.target.destination) {
             process.stdout.write("Switch blocked: AETHER_BACKEND pins a different destination.\n");
           } else {
@@ -1779,6 +1888,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       busy = true;
       if (t.startsWith("/")) {
         slashAbort = new AbortController();
+        runningSlash = `slash command ${sanitizeServerText(t.split(/\s/, 1)[0] ?? "")}`;
         if (t === "/auth" || t.startsWith("/auth ")) {
           const sub = t.slice(5).trim().toLowerCase() || "status";
           try {
@@ -1788,11 +1898,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               const pending = authRepair.takeContinuation();
               if (pending) {
                 process.stdout.write(`Continuing saved task ${pending.turnId} after explicit request.\n`);
-                await runAndDrain({ kind: "chat", text: pending.instruction }, true);
+                await runAndDrain(queue.allocate({ kind: "chat", text: pending.instruction }), true);
               } else process.stdout.write("No safely rejected task is ready. Use /auth status for details.\n");
             } else if (sub === "new") {
               process.stdout.write(authRepair.startNewConversation());
-              queue.length = 0; steerChannel.clearNextTurn(); btwNotes.length = 0;
+              discardQueue("new conversation"); steerChannel.clearNextTurn(); btwNotes.length = 0;
             } else if (sub === "draft") {
               if (buf.value) process.stdout.write("Current draft is still in the input line; clear it before restoring the earlier draft.\n");
               else if (!heldDraft) process.stdout.write("No earlier type-ahead draft is saved.\n");
@@ -1802,7 +1912,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
             if (isAbortError(err)) process.stdout.write("Login cancelled. Task and draft preserved.\n");
             else printError(err, ctx.cfg.baseUrl);
           } finally {
-            slashAbort = null; busy = false;
+            slashAbort = null; busy = false; runningSlash = null;
           }
           if (!buf.value && heldDraft && sub !== "draft") buf.insert(heldDraft);
           renderHudLine(); repaint();
@@ -1813,6 +1923,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         try {
           const res = await handleSlash(ctx, t, process.stdout, slashAbort.signal);
           if (res.exit) {
+            discardQueue("session ended"); // entries held after a failure are listed, not lost silently
             cleanup();
             resolve(0);
             return;
@@ -1834,8 +1945,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           }
         } catch (err) {
           if (isAbortError(err)) {
-            queue.length = 0;
             process.stdout.write(theme.dim("✗ canceled") + "\n");
+            discardQueue("command cancelled");
           } else {
             printError(err, ctx.cfg.baseUrl);
           }
@@ -1844,13 +1955,15 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           setupOwnsInput = false;
           busy = false;
           slashAbort = null;
+          runningSlash = null;
         }
-        if (queue.length && !continuation.pending) { busy = true; await runAndDrain(queue.shift()!); }
+        const next = continuation.pending ? undefined : queue.shift();
+        if (next) { busy = true; await runAndDrain(next); }
         renderHudLine();
         repaint();
         return;
       }
-      await runAndDrain({ kind: "chat", text: t });
+      await runAndDrain(queue.allocate({ kind: "chat", text: t }));
       renderHudLine();
       repaint();
     };
@@ -2089,6 +2202,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   });
 }
 
+const LINE_MODE_QUEUE_NOTE = "Line mode has no pending queue: each input line runs in order after the previous one finishes, so there is nothing to list, edit, remove, clear, or resume. /queue <task> runs the task as the next line.\n";
+
 /** Non-TTY fallback (pipes / CI): a line-oriented readline loop — no raw-mode
  *  key decoding since there's no real terminal to own. `inflight` still wires
  *  Ctrl+C to cancel the current turn/slash-command rather than killing the
@@ -2104,7 +2219,16 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
   process.on("SIGINT", onSigint);
   try {
     if (p) process.stdout.write(p + consoleShell.prompt());
-    for await (const line of rl) {
+    for await (const rawLine of rl) {
+    // Line mode reads the next line only after the previous one finished, so
+    // there is never a pending queue: `/queue <task>` simply runs in order.
+    if (parseQueueCommand(rawLine)) {
+      process.stdout.write(LINE_MODE_QUEUE_NOTE);
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
+    const queuePrefix = /^\s*\/queue[ \t]+/.exec(rawLine);
+    const line = queuePrefix ? rawLine.slice(queuePrefix[0].length) : rawLine;
     if (continuation.pending && !line.trim().startsWith("/switch")) {
       process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");
       if (p) process.stdout.write(p + consoleShell.prompt());

@@ -215,7 +215,7 @@ for (const tty of [false, true]) {
       submit('hello');
       await until(() => calls === 1 && releaseModel !== null, 'model turn running');
       submit('!echo QUEUED_SHELL');
-      ${tty ? "await until(() => observed.includes('Local shell queued'), 'shell queued during model turn');" : ""}
+      ${tty ? "await until(() => observed.includes('(user shell, 1 pending)'), 'shell queued during model turn');" : ""}
       await releaseTurn(1);
       await until(() => completed() === 3, 'queued shell completion');
       submit(${JSON.stringify(`!"${process.execPath}" -e "process.exit(7)"`)});
