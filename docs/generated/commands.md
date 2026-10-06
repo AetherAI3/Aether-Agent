@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:1d3e7bedfbe81257bd1f33cef71dd0d32631c5d0b943e483ed37a1a8e9c70918 -->
+<!-- manifest-digest: sha256:e758370d6c6abe5907a7686c50681dede41e883d1efa8274db13713b1c2c8abf -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -583,7 +583,7 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 #### `/goal <command>`
 
-draft, edit, and accept a repository\-grounded goal plan; work is not executed
+draft and edit goal plans, or run one accepted phase with host verification
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.goal`
 

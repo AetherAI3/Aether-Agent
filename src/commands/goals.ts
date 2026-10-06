@@ -9,6 +9,7 @@ import {
   setPhaseNote, type Goal,
 } from "../core/goals.js";
 import { acceptedGoal, draftGoalPlan, renumberPhases, validateGoalDraft } from "../core/goal_planning.js";
+import { acceptedScopeDigest } from "../core/goal_run.js";
 import { renderGoalChain, renderPhaseDetail } from "../ui/goal_chain.js";
 import { resolve } from "node:path";
 
@@ -41,8 +42,17 @@ function showPlan(out: Writable, goal: Goal): void {
     if (phase.description) out.write(`   ${safe(phase.description)}\n`);
     for (const criterion of phase.completionCriteria ?? []) out.write(`   Done when: ${safe(criterion)}\n`);
     if (phase.userNote) out.write(`   Note: ${safe(phase.userNote)}\n`);
+    if (phase.completionMethod) out.write(`   Completion: ${phase.completionMethod === "manual" ? "manually marked; tests not certified" : "host verified"}\n`);
+    if (phase.run) {
+      out.write(`   Run: ${phase.run.state} — ${safe(phase.run.reason)}\n`);
+      if (phase.run.sessionId) out.write(`   Session ${safe(phase.run.sessionId)}; turn ${safe(phase.run.turnId ?? "unknown")}\n`);
+      if (phase.run.check) out.write(`   Host check: ${safe(phase.run.check.state)} — ${safe(phase.run.check.reason)}\n`);
+      if (phase.run.verification) out.write(`   Tree receipt: ${safe(phase.run.verification.status)} — ${safe(phase.run.verification.reason)}\n`);
+      if (phase.run.baseline && phase.run.resulting) out.write(`   Diff receipt: ${phase.run.baseline.digest.slice(0, 12)} → ${phase.run.resulting.digest.slice(0, 12)} (${phase.run.baseline.digest === phase.run.resulting.digest ? "no tree change" : "working tree changed"})\n`);
+      if (phase.run.touchedFiles?.length) out.write(`   Files touched: ${safe(phase.run.touchedFiles.join(", "))}\n`);
+    }
   }
-  out.write("Drafted and accepted plans do not execute work.\n\n");
+  out.write("Planning does not execute work; /goal run starts one saved phase.\n\n");
 }
 
 function phaseAt(goal: Goal, ordinal: string) {
@@ -91,7 +101,7 @@ function modifyDraft(cwd: string, out: Writable, subcmd: string, rest: string): 
 /** Natural objective text is the default; only these explicit words are commands. */
 export async function handleGoalInput(ctx: AppContext, out: Writable, input: string): Promise<void> {
   const [first, ...remaining] = input.trim().split(/\s+/);
-  const commands = new Set(["draft", "edit", "phase", "criteria", "save", "discard", "start", "pause", "resume", "cancel", "complete", "note", "view"]);
+  const commands = new Set(["draft", "edit", "phase", "criteria", "save", "discard", "run", "start", "pause", "resume", "cancel", "complete", "note", "view"]);
   const command = first?.toLowerCase() ?? "";
   if (commands.has(command)) await handleGoal(ctx, out, command, remaining.join(" "));
   else await handleGoal(ctx, out, "", input);
@@ -149,6 +159,23 @@ export async function handleGoal(
       const ok = ctx.flags.yes || await ctx.confirm(`Save this ${draft.phases.length}-phase plan? [y/N] `);
       if (!ok) { out.write("draft kept; no saved plan changed.\n"); return; }
       const saved = acceptedGoal(draft);
+      const previous = getGoalForWorkspace(saved.id, ctx.flags.cwd);
+      if (previous?.phases.some(p => p.run?.state === "working")) {
+        out.write("a phase run is still working; pause or cancel it before changing the accepted plan.\n"); return;
+      }
+      let invalidated = false;
+      if (previous) for (const phase of saved.phases) {
+        const old = previous.phases.find(p => p.id === phase.id);
+        if (old && acceptedScopeDigest(previous, old) !== acceptedScopeDigest(saved, phase)) {
+          if (phase.run) phase.runHistory = [...(phase.runHistory ?? []), phase.run].slice(-8);
+          phase.run = undefined;
+          phase.completionMethod = undefined;
+          phase.status = "pending";
+          phase.completedAt = undefined;
+          invalidated = true;
+        }
+      }
+      if (invalidated) { saved.status = "idle"; saved.activePhaseId = undefined; saved.completedAt = undefined; }
       upsertGoal(saved);
       drafts.delete(draftKey(ctx.flags.cwd));
       out.write(`Plan accepted and saved: ${saved.id}. Reopen with /goal edit ${saved.id}.\n`);
@@ -160,14 +187,26 @@ export async function handleGoal(
       out.write("draft discarded; saved goals unchanged.\n");
       break;
 
+    case "run": {
+      const [action, id] = rest.trim().split(/\s+/);
+      const { runSavedGoalPhase, controlSavedGoalPhase } = await import("./goal_run.js");
+      if (action === "pause" || action === "cancel") controlSavedGoalPhase(ctx, out, action, id ?? "");
+      else if (action === "resume") await runSavedGoalPhase(ctx, out, id ?? "", true);
+      else if (action && !id) await runSavedGoalPhase(ctx, out, action);
+      else if (!action) await runSavedGoalPhase(ctx, out);
+      else out.write("usage: /goal run [goal-id] | /goal run <resume|pause|cancel> [goal-id]\n");
+      break;
+    }
+
     case "start": {
       const id = rest.trim();
       const goal = resolveGoal(ctx.flags.cwd, id);
       if (!goal) { out.write("no goals found. create one first: /goal <description>\n"); return; }
       if (goal.status === "running") { out.write(`already running: ${goal.id}\n`); return; }
+      if (goal.phases.every(p => p.status === "complete")) { out.write("all phases are already complete.\n"); return; }
       const started = startGoal(goal);
       upsertGoal(started);
-      out.write(`Goal started: ${started.id}\n`);
+      out.write(`Manual tracking started: ${started.id}. No coding run launched; use /goal run.\n`);
       for (const l of renderGoalChain(started, c)) out.write("  " + l + "\n");
       break;
     }
@@ -175,6 +214,11 @@ export async function handleGoal(
     case "pause": {
       const goal = getActiveGoal(ctx.flags.cwd);
       if (!goal) { out.write("no active goal to pause.\n"); return; }
+      if (goal.phases.find(p => p.id === goal.activePhaseId)?.run?.state === "working") {
+        const { controlSavedGoalPhase } = await import("./goal_run.js");
+        controlSavedGoalPhase(ctx, out, "pause", goal.id);
+        return;
+      }
       goal.status = "paused";
       upsertGoal(goal);
       out.write("Goal paused.\n");
@@ -184,15 +228,25 @@ export async function handleGoal(
     case "resume": {
       const goal = getActiveGoal(ctx.flags.cwd);
       if (!goal) { out.write("no paused goal to resume.\n"); return; }
-      goal.status = "running";
+      if (["paused", "interrupted", "cancelled", "blocked"].includes(goal.phases.find(p => p.id === goal.activePhaseId)?.run?.state ?? "")) {
+        const { runSavedGoalPhase } = await import("./goal_run.js");
+        await runSavedGoalPhase(ctx, out, goal.id, true);
+        return;
+      }
+      goal.status = "manual";
       upsertGoal(goal);
-      out.write("Goal resumed.\n");
+      out.write("Manual tracking resumed; no coding run launched.\n");
       break;
     }
 
     case "cancel": {
       const goal = getActiveGoal(ctx.flags.cwd);
       if (!goal) { out.write("no active goal to cancel.\n"); return; }
+      if (goal.phases.find(p => p.id === goal.activePhaseId)?.run?.state === "working") {
+        const { controlSavedGoalPhase } = await import("./goal_run.js");
+        controlSavedGoalPhase(ctx, out, "cancel", goal.id);
+        return;
+      }
       const ok = ctx.flags.yes || (await ctx.confirm("Cancel this goal? [y/N] "));
       if (!ok) { out.write("kept.\n"); return; }
       goal.status = "halted";
@@ -206,9 +260,13 @@ export async function handleGoal(
       if (!active) { out.write("no active goal.\n"); return; }
       const phaseId = rest.trim() || active.activePhaseId || "";
       if (!phaseId) { out.write("usage: /goal complete <phase-id>\n"); return; }
+      const phase = active.phases.find(p => p.id === phaseId);
+      if (!phase) { out.write("no such phase in the active goal.\n"); return; }
+      if (phase.status === "complete") { out.write("phase is already complete.\n"); return; }
+      if (phase.run?.state === "working") { out.write("a coding run is still working; pause or cancel it first.\n"); return; }
       const updated = completePhase(active, phaseId);
       upsertGoal(updated);
-      out.write("Phase complete!\n");
+      out.write("Phase marked complete manually; this does not certify tests. Next phase needs a separate /goal run.\n");
       for (const l of renderGoalChain(updated, c)) out.write("  " + l + "\n");
       break;
     }
@@ -289,11 +347,14 @@ export function goalHelp(): string {
     "/goal discard     discard the unsaved draft",
     "/goals            list saved goals",
     "/goal view [id]   show goal chain + phase detail",
-    "/goal start [id]  mark a saved goal running (does not execute work)",
+    "/goal run [id]    execute one accepted phase through the host coding loop",
+    "/goal run resume [id]  reconcile and continue a checkpointed phase",
+    "/goal run pause|cancel [id]  stop a live coding run safely",
+    "/goal start [id]  start manual tracking (does not execute work)",
     "/goal pause       pause the active goal",
     "/goal resume      resume a paused goal",
     "/goal cancel      cancel the active goal",
     "/goal note <phase-id> <text>   add a note to a saved goal when no draft is open",
-    "/goal complete <phase>      mark a phase as complete",
+    "/goal complete <phase>      mark a phase complete manually; tests are not certified",
   ].join("\n");
 }

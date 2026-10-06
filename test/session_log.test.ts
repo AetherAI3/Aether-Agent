@@ -22,7 +22,9 @@ test("SessionLog writes events.jsonl, monologue.txt, and a manifest", () => {
     log.toolResult("c1", { output: "[exit 0]\nok", exitCode: 0 }, TS);
     log.event({ type: "checkpoint", gitSha: "a1b2c3d4e5" }, TS);
     log.event({ type: "done", ok: true, result: "all green", remaining: 0, reason: "" }, TS);
-    log.close("ok", TS);
+    log.close("ok", TS, 0,
+      { state: "passed", exitCode: 0, failing: 0, reason: "node check.cjs exited 0" },
+      { version: 1, command: "node check.cjs", exitCode: 0, ranAt: TS, head: null, treeDigest: "a".repeat(64), remaining: 0 });
 
     // events.jsonl: one JSON object per line, ts stamped, tool_result recorded
     const lines = readFileSync(join(log.dir, "events.jsonl"), "utf8").trim().split("\n");
@@ -39,6 +41,8 @@ test("SessionLog writes events.jsonl, monologue.txt, and a manifest", () => {
     assert.equal(manifest.started, TS);
     assert.equal(manifest.ended, TS);
     assert.equal(manifest.cwd, normalizeWorkspace(root));
+    assert.equal(manifest.verificationRecord.command, "node check.cjs");
+    assert.equal(manifest.verificationRecord.treeDigest, "a".repeat(64));
 
     // monologue: human-readable, no status/telemetry noise
     const mono = readFileSync(join(log.dir, "monologue.txt"), "utf8");
