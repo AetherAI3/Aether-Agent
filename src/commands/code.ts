@@ -86,7 +86,8 @@ import { sanitizeServerText } from "../core/transport.js";
 import { redactInline } from "../core/redaction.js";
 import { isPublicationToolCall } from "../core/goal_run.js";
 import { turnOutcomeRecord } from "./chat.js";
-import { openRcCodingObserver } from "./rc_observation.js";
+import { openRcCodingObserver, type RcCodingObserver } from "./rc_observation.js";
+import { publishCodingVerification } from "./rc_verification.js";
 import {
   TRANSIENT_READ_AUTO_RETRIES,
   checkpointDoneEvent,
@@ -696,6 +697,53 @@ export async function verifyCodeTurn(
   return turn.settledRun!;
 }
 
+/** Where the host's check runs: the run's workspace runner and directory. */
+export interface CodeCheckout {
+  run: Runner;
+  cwd: string;
+}
+
+/**
+ * The post-loop path exactly as cmdCode runs it — verifyCodeTurn plus its two
+ * side channels, both fed by the one check reading the footer renders:
+ *
+ *  - in a git checkout the check runs through the review rail's single writer
+ *    (recordingRunner → verifyAndRecord), so `aether review` reads back the
+ *    result this run reports, bound to this tree and stale after the next edit;
+ *  - the settled reading is queued for an active RC session's Tests panel
+ *    (#219): that recorded reading when the check completed in a checkout,
+ *    otherwise what the CheckReading proves — never a pass it cannot attribute.
+ *
+ * The recorded reading and record are also returned as `recordedCheck`, the
+ * exact tree-bound receipt the session log and a saved-goal phase run keep
+ * (#299); null when no check was recorded.
+ *
+ * RC never decides, delays or changes the result: without an observer nothing
+ * extra happens, and every observer failure is contained.
+ */
+export async function verifyCodeTurnInCheckout(
+  turn: CodeTurnLifecycle,
+  exec: VerifyRunner,
+  checkout: CodeCheckout,
+  observer: RcCodingObserver | null,
+  opts: CodeVerificationOptions,
+): Promise<{ report: CodeRunReport; verification: VerifyOutcome | null; recordedCheck: CodeRunFinished["recordedCheck"] }> {
+  const prior = turn.settledRun;
+  if (prior) return { ...prior, recordedCheck: null };
+  const checkRoot = opts.testCmd ? repoRoot(checkout.run, checkout.cwd) : null;
+  // A holder rather than a `let`: it is assigned inside the runner's callback,
+  // where control-flow narrowing cannot see it.
+  const recorded: { check: Pick<VerifyRunResult, "reading" | "written"> | null } = { check: null };
+  const checkRunner = checkRoot
+    ? recordingRunner(exec, checkout.run, checkRoot, (result) => {
+        recorded.check = { reading: result.reading, written: result.written };
+      })
+    : exec;
+  const settled = await verifyCodeTurn(turn, checkRunner, opts);
+  publishCodingVerification(observer, settled.report.check, recorded.check?.reading ?? null);
+  return { ...settled, recordedCheck: recorded.check };
+}
+
 /**
  * The session record of a settled run. A stopped run is filed as stopped —
  * "cancelled" or "timed-out" — rather than as a red one, and `remaining` is
@@ -1260,13 +1308,10 @@ export async function cmdCode(
   // A cancelled, timed-out or capped turn never starts the check at all.
   // In a git checkout the check is recorded through the review rail's single
   // writer, so `aether review` reads back the same result this run reports —
-  // bound to this tree, and stale after the next edit.
-  const checkRoot = opts.testCmd ? repoRoot(workspaceRun, cwd) : null;
-  const checkCapture: { result: Pick<VerifyRunResult, "reading" | "written"> | null } = { result: null };
-  const checkRunner = checkRoot ? recordingRunner(exec, workspaceRun, checkRoot, (result) => {
-    checkCapture.result = { reading: result.reading, written: result.written };
-  }) : exec;
-  const { report, verification } = await verifyCodeTurn(turn, checkRunner, {
+  // bound to this tree, and stale after the next edit. The same reading is
+  // queued for an active RC session's viewer (#219); a no-op without one. The
+  // recorded receipt goes to the session log and the goal-phase observer (#299).
+  const { report, verification, recordedCheck } = await verifyCodeTurnInCheckout(turn, exec, { run: workspaceRun, cwd }, rcObserver, {
     testCmd: opts.testCmd,
     signal: commandAbort.signal,
     timeoutMs: progressTimeoutMs,
@@ -1280,8 +1325,8 @@ export async function cmdCode(
   emitCodeTurnOutcome(report, ctx.flags.json);
   const record = codeRunRecord(report, verification);
   const verifyExit = verification?.exitCode ?? 1;
-  log?.close(record.finalStatus, nowIso(), record.remaining, record.verification, checkCapture.result?.written ?? undefined, hostRefusals);
-  await opts.runObserver?.finished({ ...correlation, report, verification, recordedCheck: checkCapture.result, touchedFiles: [...touched], hostRefusals });
+  log?.close(record.finalStatus, nowIso(), record.remaining, record.verification, recordedCheck?.written ?? undefined, hostRefusals);
+  await opts.runObserver?.finished({ ...correlation, report, verification, recordedCheck, touchedFiles: [...touched], hostRefusals });
   // The verdict line — printed even with --no-log (which used to end with
   // NOTHING); suppressed under --json (the outcome record carries the same
   // reading). Rendered from the turn outcome plus what the check actually did,

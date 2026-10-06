@@ -41,7 +41,7 @@ import type { CountTotal } from "../diff_counts.js";
 import type { MediaEntry } from "../media_history.js";
 import type { TreeWorker } from "../orchestrator.js";
 import type { PreviewState } from "../preview_contract.js";
-import type { VerificationReading } from "../verification_record.js";
+import type { VerificationCause, VerificationReading, VerificationStatus } from "../verification_record.js";
 import { VIEWER_EVENT_TYPES, type ViewerEventType } from "./viewer_profile.js";
 
 /** One event ready for enqueueEvent. `payload` is pre-sanitizer. */
@@ -258,23 +258,66 @@ export function diffSummaryEvent(total: CountTotal, paths: readonly string[]): R
   });
 }
 
+const TESTS_STATUS_SUMMARY: Readonly<Record<VerificationStatus, string>> = {
+  verified: "Verification passed",
+  failed: "Verification failed",
+  stale: "Verification is stale",
+  unknown: "Verification unavailable",
+};
+
+/** Fixed detail per cause, keyed by the ONLY status that cause can explain. */
+const TESTS_CAUSE_DETAIL: Readonly<Partial<Record<VerificationStatus, Partial<Record<VerificationCause, string>>>>> = {
+  stale: {
+    head_moved: "HEAD moved since it ran",
+    tree_changed: "the working tree changed since it ran",
+  },
+  unknown: {
+    not_verified: "nothing has verified this working tree",
+    unsupported_record: "the stored record is from an unsupported version",
+    no_command: "no test runner is configured",
+    tree_moved_during_run: "the working tree changed while it ran",
+    unattributed: "the working tree could not be identified",
+    interrupted: "interrupted before it finished",
+    timed_out: "timed out before it finished",
+    launch_failed: "the check could not start",
+    skipped: "the run ended before verification",
+  },
+};
+
+/** The bounded "why" for a reading: fixed words plus, for a failure, its exit code. */
+function testsSummary(reading: VerificationReading): string {
+  const base = TESTS_STATUS_SUMMARY[reading.status] ?? TESTS_STATUS_SUMMARY.unknown;
+  if (reading.status === "failed" && reading.cause === "exit_nonzero" && reading.record) {
+    // The exit code is the process's own. The record's `remaining` is not
+    // quoted: it is the first "<n> failed" anywhere in raw output
+    // (verify_gate parseFailCount), a guess rather than a measured tally.
+    const { exitCode } = reading.record;
+    return typeof exitCode === "number" && Number.isSafeInteger(exitCode) ? `${base}: exit code ${exitCode}` : base;
+  }
+  const detail = reading.cause ? TESTS_CAUSE_DETAIL[reading.status]?.[reading.cause] : undefined;
+  return detail ? `${base}: ${detail}` : base;
+}
+
 /**
  * tests — from a verification reading, which is a real run's result.
  *
- * The four statuses are the verifier's own, including "stale" and "unknown".
- * Those two matter most: "unknown" means the tree moved while the command ran,
- * and collapsing it to pass or fail is precisely the claim RC must not make on
- * a viewer's behalf. Counts are omitted because the verifier records no parsed
- * tally. Its reason can contain the exact test command, so it stays local.
+ * The four statuses are the verifier's own, including "stale" and "unknown",
+ * and they travel under the verifier's own names: the shared display fixture
+ * (test/fixtures/rc-display-v1.json, mirrored by the Cloud broker and browser)
+ * pins "verified", so renaming it to the browser's "passed" is the separate
+ * viewer-alignment change, not something a producer does unilaterally.
+ * "unknown" and "stale" matter most: collapsing either to pass or fail is
+ * precisely the claim RC must not make on a viewer's behalf.
+ *
+ * The reading's `reason` and its record's `command` can contain the exact test
+ * command, so they stay local. The summary is built only from the closed
+ * `cause` vocabulary plus, for a failure, the integer exit code; a cause that
+ * does not belong to the status adds nothing, so a detail can never soften or
+ * contradict the status. No passed/failed/skipped counts are published, in
+ * any form: the verifier measures no tally.
  */
 export function testsEvent(reading: VerificationReading): RcProducedEvent {
-  const summary = {
-    verified: "Verification passed",
-    failed: "Verification failed",
-    stale: "Verification is stale",
-    unknown: "Verification unavailable",
-  }[reading.status];
-  return displayEvent("tests", { status: reading.status, summary });
+  return displayEvent("tests", { status: reading.status, summary: testsSummary(reading) });
 }
 
 /** Strict `owner/name`, so nothing else can be spliced into a URL. */

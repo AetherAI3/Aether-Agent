@@ -60,6 +60,13 @@ deployment; the live Cloud viewer journey still needs qualification.
   credentials, cookies, private memory, raw file contents, absolute paths,
   and unredacted shell history.
 - Your local session continues if the broker disconnects.
+- Test results come only from the host's own verification (`aether agent`'s
+  final gate, `aether review verify`, or a stored reading `aether review`
+  shows): the status (`verified`, `failed`, `stale`, `unknown`), a fixed
+  reason and, for a failure, the exit code. The test command, its output and
+  test counts stay local. A run that was interrupted, timed out or could not
+  start, or whose working tree changed or could not be identified, is
+  `unknown`, never a pass.
 
 These are release requirements. Local source tests do not establish a qualified
 Cloud viewer or publication.
