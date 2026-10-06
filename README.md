@@ -141,6 +141,10 @@ readiness for the signed-in account. `aether doctor --live` checks the same
 read-only Cloud contract; plain `aether doctor` leaves account readiness
 unverified. A saved DM is reported as admitted only when Cloud confirms
 message admission.
+In `aether agent chat`, `/help` lists commands for the selected agent and
+`/refresh` checks the shared conversation again. The header shows Cloud DM sync
+separately from ATS local setup. Transcript messages show their time and any
+reported admission state; a saved message is not an admitted run.
 
 ATS is the trading adapter for account agents. Create a workspace with `aether agent create ATS Atlas`; guided setup covers memory, strategies, and data settings.
 

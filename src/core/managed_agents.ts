@@ -111,6 +111,7 @@ export interface AgentMessage {
   sender_type?: string;
   sender_agent_id?: string | null;
   created_at?: string;
+  admission?: MessageAdmission;
   [key: string]: unknown;
 }
 
@@ -123,6 +124,16 @@ export interface MessageAdmission {
 export interface SentAgentMessage extends AgentMessage {
   admission?: MessageAdmission;
   [key: string]: unknown;
+}
+
+function readAdmission(value: unknown): MessageAdmission {
+  const admission = record(value);
+  if (!["saved", "blocked_budget", "blocked_policy", "needs_review", "admitted", "replied"].includes(String(admission["state"])) ||
+      (admission["reason"] != null && typeof admission["reason"] !== "string") ||
+      (admission["run_id"] != null && typeof admission["run_id"] !== "string")) {
+    throw new Error("Cloud returned an invalid message admission.");
+  }
+  return admission as unknown as MessageAdmission;
 }
 
 function agentPath(id: string): string {
@@ -229,6 +240,7 @@ export class ManagedAgentsClient {
     return e["messages"].map((value) => {
       const m = record(value);
       if (typeof m["id"] !== "string" || typeof m["body"] !== "string") throw new Error("Cloud returned an invalid message.");
+      if (m["admission"] !== undefined) readAdmission(m["admission"]);
       return value as AgentMessage;
     });
   }
@@ -239,10 +251,7 @@ export class ManagedAgentsClient {
       body, client_nonce: clientNonce,
     }, signal));
     if (typeof receipt["id"] !== "string" || typeof receipt["body"] !== "string") throw new Error("Cloud did not confirm a saved message.");
-    if (receipt["admission"] !== undefined) {
-      const admission = record(receipt["admission"]);
-      if (!["saved", "blocked_budget", "blocked_policy", "needs_review", "admitted", "replied"].includes(String(admission["state"]))) throw new Error("Cloud returned an invalid message admission.");
-    }
+    if (receipt["admission"] !== undefined) readAdmission(receipt["admission"]);
     return receipt as SentAgentMessage;
   }
 }

@@ -471,7 +471,7 @@ test("managed chat routes local slash hooks sequentially and never sends their c
     if (String(url).endsWith("/thread")) return new Response(JSON.stringify({ id: "thread-1" }));
     if (String(url).includes("/messages")) {
       if (init?.method === "POST") { sends++; throw new Error("must not send local commands"); }
-      if (!initialized) { initialized = true; setImmediate(() => input.end("/ats status\n/ats bad\n/ats scan\n/unknown\n/exit\n")); }
+      if (!initialized) { initialized = true; setImmediate(() => input.end("/help\n/ats status\n/ats bad\n/ats scan\n/unknown\n/exit\n")); }
       return new Response(JSON.stringify({ messages: [] }));
     }
     return new Response(JSON.stringify({ schema_version: "aether.managed-agents/1", availability: "ok", agent: agent() }));
@@ -486,7 +486,7 @@ test("managed chat routes local slash hooks sequentially and never sends their c
     assert.equal(sends, 0);
     assert.equal(closeSession, true);
     assert.match(output, /Shift-Tab mode/);
-    assert.match(output, /Use \/refresh or \/exit/);
+    assert.match(output, /Unknown command. Use \/help/);
     assert.match(output, /invalid ATS settings/);
     assert.equal(input.listenerCount("keypress"), 0);
   } finally { globalThis.fetch = prior; input.destroy(); }
