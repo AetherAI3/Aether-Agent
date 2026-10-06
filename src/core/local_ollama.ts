@@ -1,9 +1,11 @@
 import { DEFAULT_OLLAMA_MODEL } from "./ollama.js";
 
-export const LOCAL_MODEL_PREFIX = "ollama:";
+export const LOCAL_MODEL_PREFIX = "ollama/";
+const LEGACY_LOCAL_MODEL_PREFIX = "ollama:";
 
 export function isLocalModelId(value: string | null | undefined): boolean {
-  return (value ?? "").trim().startsWith(LOCAL_MODEL_PREFIX);
+  const id = (value ?? "").trim();
+  return id.startsWith(LOCAL_MODEL_PREFIX) || id.startsWith(LEGACY_LOCAL_MODEL_PREFIX);
 }
 
 /** A local model id is namespaced so it can never be mistaken for a hosted id. */
@@ -15,8 +17,10 @@ export function localModelId(tag: string): string {
 /** Return the Ollama tag carried by a namespaced id, or null for hosted ids. */
 export function ollamaTagFromId(id: string | null | undefined): string | null {
   const value = (id ?? "").trim();
-  if (!value.startsWith(LOCAL_MODEL_PREFIX)) return null;
-  const tag = value.slice(LOCAL_MODEL_PREFIX.length);
+  const prefix = value.startsWith(LOCAL_MODEL_PREFIX) ? LOCAL_MODEL_PREFIX
+    : value.startsWith(LEGACY_LOCAL_MODEL_PREFIX) ? LEGACY_LOCAL_MODEL_PREFIX : null;
+  if (!prefix) return null;
+  const tag = value.slice(prefix.length);
   try {
     return normalizeOllamaTag(tag);
   } catch {
@@ -27,7 +31,7 @@ export function ollamaTagFromId(id: string | null | undefined): string | null {
 /**
  * Resolve the tag for a local run. A bare explicit --model remains supported,
  * because --local makes that intent unambiguous. A saved default is used only
- * when it carries the ollama: namespace; hosted defaults never become tags.
+ * when it carries the ollama/ namespace; hosted defaults never become tags.
  */
 export function resolveLocalModel(
   explicit: string | undefined,
@@ -35,9 +39,9 @@ export function resolveLocalModel(
   options: { allowBareExplicit?: boolean } = {},
 ): string {
   if (explicit?.trim()) {
-    if (explicit.trim().startsWith(LOCAL_MODEL_PREFIX)) {
-      return normalizeOllamaTag(explicit.trim().slice(LOCAL_MODEL_PREFIX.length));
-    }
+    const local = ollamaTagFromId(explicit);
+    if (local) return local;
+    if (isLocalModelId(explicit)) throw new Error(`Invalid local model id ${JSON.stringify(explicit.trim())}`);
     if (options.allowBareExplicit) return normalizeOllamaTag(explicit);
     throw new Error(
       `Model ${JSON.stringify(explicit.trim())} is not a local model id. ` +

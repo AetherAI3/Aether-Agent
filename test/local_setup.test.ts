@@ -92,7 +92,8 @@ function processTreeScript(root: string): string {
 }
 
 test("local ids are namespaced and hosted defaults never become Ollama tags", () => {
-  assert.equal(localModelId("qwen2.5-coder:7b"), "ollama:qwen2.5-coder:7b");
+  assert.equal(localModelId("qwen2.5-coder:7b"), "ollama/qwen2.5-coder:7b");
+  assert.equal(ollamaTagFromId("ollama/gemma3:4b"), "gemma3:4b");
   assert.equal(ollamaTagFromId("ollama:gemma3:4b"), "gemma3:4b");
   assert.equal(ollamaTagFromId("gpt-5.6-sol"), null);
   assert.equal(resolveLocalModel(undefined, "gpt-5.6-sol"), "qwen2.5-coder:7b");
@@ -102,7 +103,7 @@ test("local ids are namespaced and hosted defaults never become Ollama tags", ()
   assert.throws(() => resolveLocalModel("ollama:", ""));
   assert.deepEqual(resolveLocalModelSelection(undefined, "ollama:gemma3:4b"), {
     tag: "gemma3:4b",
-    id: "ollama:gemma3:4b",
+    id: "ollama/gemma3:4b",
   });
   assert.throws(() => resolveHostedModel("ollama:gemma3:4b"), /local-only/);
   assert.throws(() => normalizeOllamaTag("--bad"));
@@ -314,7 +315,7 @@ test("local use shows a plan, requires approval, writes a namespaced id, and nev
   ctx.flags.yes = true;
   const accepted = await capture(() => cmdLocal(ctx, ["use", "gemma3:4b"], {}, deps({ save: () => { saves += 1; } })));
   assert.equal(accepted.code, LOCAL_EXIT.ok);
-  assert.equal(ctx.cfg.localModel, "ollama:gemma3:4b");
+  assert.equal(ctx.cfg.localModel, "ollama/gemma3:4b");
   assert.equal(ctx.cfg.defaultModel, "gpt-5.6-sol");
   assert.equal(ctx.cfg.backend, "cloud");
   assert.equal(saves, 1);

@@ -159,7 +159,7 @@ export type FinalStatus =
 
 export interface SessionMeta {
   task: string;
-  /** Resolved model provenance. Local runs store `ollama:<tag>`; cloud auto
+  /** Resolved model provenance. Local runs store `ollama/<tag>`; cloud auto
    * routing stores an empty string rather than guessing the server's choice. */
   model: string;
   poolGb: number;

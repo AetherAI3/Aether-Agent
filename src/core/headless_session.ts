@@ -12,6 +12,7 @@ import {
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { configDir } from "./config.js";
+import { isLocalModelId } from "./local_ollama.js";
 import { GIT_GLOBAL_ARGS } from "./git_commit_guard.js";
 import { redactHeadless } from "./headless_protocol.js";
 import { treeIdentity, type TreeIdentity } from "./verification_record.js";
@@ -323,7 +324,7 @@ function validateCheckpoint(value: unknown, expectedSession: string): HeadlessCh
       checkpoint.model_tag !== null
       || checkpoint.model === null
       || !checkpoint.model.trim()
-      || checkpoint.model.startsWith("ollama:")
+      || isLocalModelId(checkpoint.model)
       || checkpoint.model.startsWith("aether-")
       || Buffer.byteLength(checkpoint.model, "utf8") > 256
     ))

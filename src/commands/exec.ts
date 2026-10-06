@@ -25,7 +25,7 @@ import {
   type V2ControlOutcome,
 } from "../core/headless_protocol.js";
 import { LineBuffer } from "../core/brain_protocol.js";
-import { resolveLocalModelSelection } from "../core/local_ollama.js";
+import { isLocalModelId, resolveLocalModelSelection } from "../core/local_ollama.js";
 import {
   HeadlessCheckpointStore,
   captureHeadlessWorkspace,
@@ -199,8 +199,8 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
         if (!requestedModel) {
           throw new Error("--exec-driver cloud requires an explicit --model so checkpoints cannot drift with the server default");
         }
-        if (requestedModel.startsWith("ollama:")) {
-          throw new Error("an ollama: model cannot be sent to the Aether cloud driver");
+        if (isLocalModelId(requestedModel)) {
+          throw new Error("an Ollama model cannot be sent to the Aether cloud driver");
         }
         if (requestedModel.startsWith("aether-")) {
           throw new Error(
@@ -217,8 +217,8 @@ export async function runHeadlessExec(ctx: AppContext, task: string, opts: ExecO
     }
   } catch (error) {
     const explicit = ctx.flags.model?.trim();
-    const message = explicit && driver === "ollama" && !explicit.startsWith("ollama:")
-      ? `Model ${JSON.stringify(explicit)} is unavailable to aether exec. Use an explicit ollama:<tag>; bare and hosted model ids are rejected.`
+    const message = explicit && driver === "ollama" && !isLocalModelId(explicit)
+      ? `Model ${JSON.stringify(explicit)} is unavailable to aether exec. Use an explicit ollama/<tag>; bare and hosted model ids are rejected.`
       : error instanceof Error ? error.message : String(error);
     process.stderr.write(`aether exec: ${String(redactHeadless(message))}\n`);
     return EXEC_EXIT.usage;

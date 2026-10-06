@@ -51,7 +51,7 @@ import { loadHistory, appendHistory, historyPath, historyEnabled } from "../core
 import { VERSION } from "../version.js";
 import { chooseBackend, type BackendPath } from "../core/backend.js";
 import { OllamaBrain } from "../core/brain_ollama.js";
-import { localModelId, resolveHostedModel, resolveLocalModel } from "../core/local_ollama.js";
+import { isLocalModelId, localModelId, ollamaTagFromId, resolveHostedModel, resolveLocalModel } from "../core/local_ollama.js";
 import type { Brain } from "../core/brain.js";
 import type { RunOptions, ToolResult } from "../core/tool_executor.js";
 import { ToolExecutor } from "../core/tool_executor.js";
@@ -420,12 +420,12 @@ function noteWaitingForTool(lifecycle: TurnLifecycle): void {
 }
 
 /**
- * Resolve which brain runs this turn. AETHER_BACKEND (env) wins, then the saved
- * config, then 'auto'. 'auto' is local-first: cloud when signed in, else local
- * Ollama. Exported so the REPL banner can show the same answer the turn uses.
+ * Resolve which brain runs this turn. AETHER_BACKEND (env) wins, then an
+ * explicit --local, the saved config, and 'auto'. 'auto' is local-first: cloud
+ * when signed in, else local Ollama. The REPL banner uses the same route.
  */
 export async function resolveBackend(ctx: AppContext): Promise<BackendPath> {
-  const pref = (process.env["AETHER_BACKEND"] || ctx.cfg.backend || "auto").trim();
+  const pref = (process.env["AETHER_BACKEND"] || (ctx.flags.local ? "local" : ctx.cfg.backend) || "auto").trim();
   const authed = Boolean(await ctx.tokens.get());
   return chooseBackend(pref, authed);
 }
@@ -1078,7 +1078,10 @@ function applyModelTarget(ctx: AppContext, target: ModelTarget): void {
 }
 
 async function currentConsoleModel(ctx: AppContext): Promise<string> {
-  if (ctx.flags.model) return ctx.flags.model;
+  if (ctx.flags.model) {
+    const tag = ollamaTagFromId(ctx.flags.model);
+    return tag ? localModelId(tag) : ctx.flags.model;
+  }
   if ((await resolveBackend(ctx)) === "local") return localModelId(resolveLocalModel(undefined, ctx.cfg.localModel ?? ""));
   return ctx.cfg.defaultModel || "auto";
 }
@@ -1743,7 +1746,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
             process.stdout.write(theme.dim("session restarted — context cleared.\n"));
           }
           if (res.modelSwitch) {
-            const target: ModelTarget = { id: res.modelSwitch.model, label: res.modelSwitch.label, contextWindow: res.modelSwitch.contextWindow, destination: res.modelSwitch.model.startsWith("ollama:") ? "local" : "cloud" };
+            const target: ModelTarget = { id: res.modelSwitch.model, label: res.modelSwitch.label, contextWindow: res.modelSwitch.contextWindow, destination: isLocalModelId(res.modelSwitch.model) ? "local" : "cloud" };
             const choice = continuation.propose(target, await currentConsoleModel(ctx), await consoleContinuationState(ctx));
             if (choice.status === "same") process.stdout.write("Already using this model; session unchanged.\n");
             else {
@@ -2109,7 +2112,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
           process.stdout.write(theme.dim("session restarted — context cleared.\n\n"));
         }
         if (res.modelSwitch) {
-          const target: ModelTarget = { id: res.modelSwitch.model, label: res.modelSwitch.label, contextWindow: res.modelSwitch.contextWindow, destination: res.modelSwitch.model.startsWith("ollama:") ? "local" : "cloud" };
+          const target: ModelTarget = { id: res.modelSwitch.model, label: res.modelSwitch.label, contextWindow: res.modelSwitch.contextWindow, destination: isLocalModelId(res.modelSwitch.model) ? "local" : "cloud" };
           const choice = continuation.propose(target, await currentConsoleModel(ctx), await consoleContinuationState(ctx));
           if (choice.status === "same") process.stdout.write("Already using this model; session unchanged.\n");
           else {

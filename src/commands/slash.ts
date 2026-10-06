@@ -1,7 +1,7 @@
 // In-REPL slash commands (Claude-Code style). The interactive `aether` session
 // routes any line starting with "/" here. Models + orchestrators come from the
-// shared GET /models catalog, so the terminal switches models exactly like the
-// desktop picker and web do.
+// hosted GET /models catalog or the active Ollama installation. The route is
+// chosen from the session backend; discovery never changes that backend.
 //
 //   /help                 list commands
 //   /models               list chat models (numbered)
@@ -32,7 +32,10 @@ import { EFFORT_TIERS, normalizeEffort, renderEffortSlider, renderCodeProArt } f
 import { saveConfig } from "../core/config.js";
 import { handleGoalInput, handleGoals } from "./goals.js";
 import { pickModel } from "../ui/model_picker.js";
-import { isLocalModelId, ollamaTagFromId } from "../core/local_ollama.js";
+import { isLocalModelId, localModelId, normalizeOllamaTag, ollamaTagFromId, resolveLocalModel } from "../core/local_ollama.js";
+import { chooseBackend, type BackendPath } from "../core/backend.js";
+import { normalizeOllamaHost } from "../core/ollama.js";
+import { listInstalledOllamaModels, OllamaModelsError } from "../core/ollama_models.js";
 import { runLogsViewer } from "../ui/logs_viewer.js";
 
 import { pinSlash, dropSlash, snapshotSlash, limitSlash, auditReceiptSlash, purgeSlash } from "./slash_context.js";
@@ -98,6 +101,7 @@ async function getCatalog(
  * swallowed so the prompt is never blocked and the user sees no error. */
 export async function primeCatalog(ctx: AppContext): Promise<void> {
   try {
+    if (await activeBackend(ctx) === "local") return;
     await getCatalog(ctx, true);
   } catch {
     /* offline / token not ready — /models will retry lazily */
@@ -106,6 +110,54 @@ export async function primeCatalog(ctx: AppContext): Promise<void> {
 
 function byKind(cat: CatalogResponse, kind: Kind): CatalogItem[] {
   return cat.models.filter((m) => m.kind === kind);
+}
+
+async function activeBackend(ctx: AppContext): Promise<BackendPath> {
+  const pref = (process.env["AETHER_BACKEND"] || (ctx.flags.local ? "local" : ctx.cfg.backend) || "auto").trim();
+  return chooseBackend(pref, pref === "local" ? false : Boolean(await ctx.tokens.get()));
+}
+
+function localEndpoint(): string {
+  try { return normalizeOllamaHost(process.env["OLLAMA_HOST"]); }
+  catch { return "configured OLLAMA_HOST"; }
+}
+
+function localCatalogError(ctx: AppContext, out: Writable, error: unknown): void {
+  const endpoint = localEndpoint();
+  const reason = error instanceof OllamaModelsError ? error.reason : "configuration";
+  const nextStep = reason === "malformed" ? "Restart or update Ollama, then retry /models."
+    : reason === "timeout" ? "Check OLLAMA_HOST and the server, then retry /models."
+      : reason === "unreachable" ? "Start Ollama or check OLLAMA_HOST, then retry /models."
+        : "Set OLLAMA_HOST to a valid Ollama URL, then retry /models.";
+  const message = reason === "malformed" ? "Ollama returned invalid installed-model data"
+    : reason === "timeout" ? "Ollama installed-model request timed out"
+      : reason === "unreachable" ? "Cannot reach Ollama installed models"
+        : "Invalid Ollama endpoint";
+  if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-models/1", backend: "ollama", endpoint, ok: false, error: reason, nextStep }) + "\n");
+  else out.write(`${message} at ${endpoint}. ${nextStep}\n`);
+}
+
+function localSelectionError(ctx: AppContext, out: Writable, endpoint: string, id: string, error: "invalid" | "not-installed", message: string, nextStep: string): void {
+  if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-model-selection/1", backend: "ollama", endpoint, ok: false, id, error, nextStep }) + "\n");
+  else out.write(`${message} ${nextStep}\n`);
+}
+
+async function getLocalCatalog(ctx: AppContext, signal?: AbortSignal): Promise<{ catalog: CatalogResponse; endpoint: string }> {
+  const { endpoint, tags } = await listInstalledOllamaModels(process.env["OLLAMA_HOST"], signal);
+  const explicit = isLocalModelId(ctx.flags.model) || ctx.flags.local === true ? ctx.flags.model : undefined;
+  const selected = localModelId(resolveLocalModel(explicit, ctx.cfg.localModel ?? "", { allowBareExplicit: ctx.flags.local === true }));
+  return {
+    endpoint,
+    catalog: {
+      tier: "local-installed",
+      default: selected,
+      models: tags.map(tag => ({
+        id: localModelId(tag), label: tag, kind: "model", provider: "ollama",
+        context_window: null, tier_min: null, enabled: true, available: true,
+        monthly_uvt_cap: null, is_default: localModelId(tag) === selected,
+      })),
+    },
+  };
 }
 
 export function splitSlashCommand(line: string): { cmd: string; arg: string } {
@@ -443,12 +495,45 @@ async function showPicker(
   kind: Kind,
   signal?: AbortSignal,
 ): Promise<{ model?: string; agent?: string; label?: string; contextWindow?: number | null } | null> {
-  const cat = await getCatalog(ctx, false, signal, out);
+  const local = kind === "model" && await activeBackend(ctx) === "local";
+  let cat: CatalogResponse;
+  let endpoint: string | null = null;
+  if (local) {
+    try {
+      const result = await getLocalCatalog(ctx, signal);
+      cat = result.catalog;
+      endpoint = result.endpoint;
+    } catch (error) { localCatalogError(ctx, out, error); return null; }
+  } else cat = await getCatalog(ctx, false, signal, out);
   const items = byKind(cat, kind);
 
+  if (local && items.length === 0) {
+    const nextStep = "Run aether local pull <tag> --yes, then retry /models.";
+    if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-models/1", backend: "ollama", endpoint, ok: false, error: "empty", models: [], nextStep }) + "\n");
+    else out.write(`No Ollama models are installed at ${endpoint}. ${nextStep}\n`);
+    return null;
+  }
+
   const current = kind === "model"
-    ? ctx.flags.model ?? ctx.cfg.defaultModel ?? cat.default
+    ? (local ? cat.default : (ctx.flags.model ?? ctx.cfg.defaultModel ?? cat.default))
     : ctx.flags.agent;
+  if (!process.stdin.isTTY || (out as Writable & { isTTY?: boolean }).isTTY === false ||
+      (out === process.stdout && !process.stdout.isTTY) || ctx.flags.json) {
+    if (ctx.flags.json) {
+      out.write(JSON.stringify({ schema: "aether.console-models/1", backend: local ? "ollama" : "hosted", ...(endpoint ? { endpoint } : {}), ok: true, selected: current ?? null,
+        models: items.map((m, i) => ({ index: i + 1, id: m.id, label: m.label, available: m.available })) }) + "\n");
+    } else {
+      out.write(local ? `installed Ollama models at ${endpoint}:\n` : `tier: ${cat.tier}\n`);
+      items.forEach((m, i) => {
+        const mark = m.id === current ? ">" : m.available ? " " : "locked";
+        const cap = m.monthly_uvt_cap != null ? `  cap ${m.monthly_uvt_cap}` : "";
+        out.write(`${mark} ${String(i + 1).padStart(2)}. ${m.id}\t${m.label}${cap}\n`);
+      });
+      out.write(kind === "model" ? (local ? "switch: /model <tag|n|id>\n" : "switch: /model <n|id>\n") : "switch: /agent <n|id>\n");
+    }
+    return null;
+  }
+
   const picked = await pickModel(items, out, current);
   if (picked === undefined) {
     // pickModel hit an internal fault and already printed its own distinct
@@ -457,21 +542,18 @@ async function showPicker(
     return null;
   }
   if (!picked) {
-    // pickModel returned null — either cancelled (Esc) or non-TTY fallback.
-    // If non-TTY, render a flat numbered list so the user can still /model <n>.
-    if (!process.stdin.isTTY || (out as Writable & { isTTY?: boolean }).isTTY === false ||
-        (out === process.stdout && !process.stdout.isTTY)) {
-      out.write(`tier: ${cat.tier}\n`);
-      items.forEach((m, i) => {
-        const mark = m.id === current ? "›" : m.available ? " " : "🔒";
-        const cap = m.monthly_uvt_cap != null ? `  cap ${m.monthly_uvt_cap}` : "";
-        out.write(`${mark} ${String(i + 1).padStart(2)}. ${m.id}\t${m.label}${cap}\n`);
-      });
-      out.write(kind === "model" ? "switch: /model <n|id>\n" : "switch: /agent <n|id>\n");
-    } else {
-      out.write("kept current session.\n");
-    }
+    out.write("kept current session.\n");
     return null;
+  }
+
+  if (local) {
+    try {
+      const latest = await getLocalCatalog(ctx, signal);
+      if (!latest.catalog.models.some(item => item.id === picked.id)) {
+        out.write(`Ollama model ${picked.id} disappeared from ${latest.endpoint}. Run /models to refresh the installed list.\n`);
+        return null;
+      }
+    } catch (error) { localCatalogError(ctx, out, error); return null; }
   }
 
   return confirmSwitch(ctx, out, picked, kind, cat.tier);
@@ -488,9 +570,34 @@ async function select(
     out.write(`usage: /${kind === "model" ? "model" : "agent"} <n|id>\n`);
     return null;
   }
-  if (kind === "model" && isLocalModelId(arg)) {
-    if (!ollamaTagFromId(arg)) { out.write(`invalid local model id: ${arg}\n`); return null; }
-    return { model: arg, label: arg, contextWindow: null };
+  const local = kind === "model" && (await activeBackend(ctx) === "local" || isLocalModelId(arg));
+  if (local) {
+    let result: Awaited<ReturnType<typeof getLocalCatalog>>;
+    try { result = await getLocalCatalog(ctx, signal); }
+    catch (error) { localCatalogError(ctx, out, error); return null; }
+    const items = result.catalog.models;
+    if (items.length === 0) {
+      localSelectionError(ctx, out, result.endpoint, arg, "not-installed", `Ollama model ${JSON.stringify(arg)} is not installed at ${result.endpoint}; the installed list is empty.`, "Run aether local pull <tag> --yes, then retry /model.");
+      return null;
+    }
+    let id = arg;
+    if (!/^\d+$/.test(arg)) {
+      try {
+        const tag = isLocalModelId(arg) ? ollamaTagFromId(arg) : normalizeOllamaTag(arg);
+        if (!tag) throw new Error("invalid tag");
+        id = localModelId(tag);
+      } catch {
+        localSelectionError(ctx, out, result.endpoint, arg, "invalid", `Invalid Ollama model ${JSON.stringify(arg)}.`, "Run /models to see installed tags.");
+        return null;
+      }
+    }
+    const item = resolveSelection(items, id);
+    if (!item) {
+      localSelectionError(ctx, out, result.endpoint, arg, "not-installed", `Ollama model ${JSON.stringify(arg)} is not installed at ${result.endpoint}.`, "Run /models to refresh the installed list.");
+      return null;
+    }
+    if (ctx.flags.json) out.write(JSON.stringify({ schema: "aether.console-model-selection/1", backend: "ollama", endpoint: result.endpoint, id: item.id, tag: ollamaTagFromId(item.id), status: "pending-review" }) + "\n");
+    return confirmSwitch(ctx, out, item, kind, result.catalog.tier);
   }
   const cat = await getCatalog(ctx, false, signal, out);
   const item = resolveSelection(byKind(cat, kind), arg);
