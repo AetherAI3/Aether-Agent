@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:29ba25dcab1d6c8eedd419a77741bb9db048b0070d1151aa15544248db28e67f -->
+<!-- manifest-digest: sha256:468d917977ef1db81f80d9c4f088cf2aca0421fc80c4af7725f4cc6b298adae8 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -126,7 +126,7 @@ Command flags:
 - `--body <value>`
 - `--base <value>`
 
-#### `aether ship [--title t] [--base b]`
+#### `aether ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json]`
 
 publish the head branch and open a pull request
 
@@ -719,7 +719,7 @@ review changes, pick files or hunks, commit
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.review`
 
-#### `/ship [--title t] [--base b]`
+#### `/ship [--title text] [--body text] [--base branch] [--approve publish] [--yes] [--json] [--help]`
 
 publish the head branch and open a pull request
 
