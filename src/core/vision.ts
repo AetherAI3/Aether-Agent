@@ -306,7 +306,12 @@ function toOutputEntry(entry: MediaEntry): OutputEntry {
   };
 }
 
-export function recordOutput(result: GenResult): RecordedOutput {
+export interface RecordOptions {
+  /** Told about the committed history entry (the RC artifact producer). */
+  onCommitted?: (entry: MediaEntry) => void;
+}
+
+export function recordOutput(result: GenResult, options: RecordOptions = {}): RecordedOutput {
   // A missing file is not a reason to lose the record — the URL still
   // resolves the artifact, and 0 bytes reads as "size unknown".
   let size = 0;
@@ -323,7 +328,7 @@ export function recordOutput(result: GenResult): RecordedOutput {
     model: result.model,
     prompt: result.prompt,
     sizeBytes: size,
-  }, { now: result.timestamp });
+  }, { now: result.timestamp, onCommitted: options.onCommitted });
   const entry = toOutputEntry(appended.entry);
   return appended.warning ? { entry, warning: appended.warning } : { entry };
 }

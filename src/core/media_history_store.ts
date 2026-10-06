@@ -46,6 +46,32 @@ export interface StoreOptions {
   lockTimeoutMs?: number;
 }
 
+export interface AppendOptions extends StoreOptions {
+  /**
+   * Told about the entry once it is durably committed and the lock is released
+   * — never for an append that failed. This store knows nothing about who is
+   * listening (the RC viewer host, today); an observer is a notification, not a
+   * participant in the transaction.
+   */
+  onCommitted?: (entry: MediaEntry) => void;
+}
+
+/**
+ * The entry is already on disk and verified by readback when this runs. An
+ * observer that throws must not turn that into a reported failure: the caller
+ * would tell the user the artifact was not recorded, and a retry would record
+ * it twice. Observers own their own error reporting (RC records delivery state
+ * in its outbox), so the throw stops here.
+ */
+function notifyCommitted(observer: AppendOptions["onCommitted"], entry: MediaEntry): void {
+  if (!observer) return;
+  try {
+    observer(entry);
+  } catch {
+    // Deliberately contained — see above.
+  }
+}
+
 /**
  * A read that returned a document this build must not overwrite. Callers get a
  * thrown error rather than a silent no-op so the failure reaches the user.
@@ -78,14 +104,14 @@ function commit(paths: HistoryPaths, doc: MediaHistoryDoc): void {
 export function appendEntry(
   paths: HistoryPaths,
   input: AppendInput,
-  options: StoreOptions = {},
+  options: AppendOptions = {},
 ): AppendResult {
   const now = options.now ?? new Date().toISOString();
   const newId = options.newId ?? randomUUID;
-  return withFileLock(
+  const result = withFileLock(
     paths.lock,
     "media-history",
-    () => {
+    (): AppendResult => {
       const load = loadHistory(paths, now);
       assertWritable(load);
 
@@ -127,6 +153,10 @@ export function appendEntry(
     },
     { timeoutMs: options.lockTimeoutMs },
   );
+  // Outside the lock: an observer doing its own I/O must never extend the
+  // window in which a second Agent turn waits to record its artifact.
+  notifyCommitted(options.onCommitted, result.entry);
+  return result;
 }
 
 /**

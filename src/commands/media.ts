@@ -18,6 +18,7 @@ import {
 } from "../core/vision.js";
 import { theme } from "../ui/theme.js";
 import { sanitizeTerm } from "../ui/text.js";
+import { rcArtifactObserver } from "./rc_artifacts.js";
 import { basename } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 
@@ -197,7 +198,7 @@ async function mediaGenerate(ctx: AppContext, prompt: string, kind: MediaKind, f
           model: modelKey, prompt: vp, kind, filepath, filename: basename(filepath),
           url: resp.media_url, timestamp: new Date().toISOString(), flags,
         };
-        const { entry, warning } = recordOutput(result);
+        const { entry, warning } = recordOutput(result, { onCommitted: rcArtifactObserver(ctx) });
         if (warning) process.stderr.write(theme.dim(`  ⚠  ${warning.message}\n`));
         // resp.media_url and resp.text/response below are server-controlled
         // (an LLM generation response) — sanitized before hitting the
