@@ -23,6 +23,7 @@ import { TaskLedger } from "../ui/ledger.js";
 import { sanitizeServerText } from "../core/transport.js";
 import type { TurnOutcome, TurnTerminalState } from "../core/turn_lifecycle.js";
 import type { CheckReading } from "../core/verify_gate.js";
+import type { ToolFailureCheckpoint } from "../core/tool_failure_budget.js";
 
 // The engine's fixed reasoning pipeline - seeded into the task ledger so the run
 // shows broad multi-step progress (n/7) instead of one opaque task.
@@ -84,6 +85,10 @@ export interface CodeRunReport {
   /** Why the turn ended when the check did not decide it (a cancellation, a
    * model timeout, a refusal, a dropped stream); null when the check did. */
   cause: string | null;
+  /** Present when the host stopped a repeated tool failure (#285): the
+   * checkpoint naming the operation, reason, attempts, preserved work and the
+   * recovery choice. */
+  stopped?: ToolFailureCheckpoint;
 }
 
 /** The parts of a report the footer reads. */

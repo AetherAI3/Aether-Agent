@@ -80,6 +80,8 @@ export class OllamaBrain implements Brain {
   private readonly pauseWaiters = new Set<() => void>();
   private readonly steerQueue: string[] = [];
   private steerBytes = 0;
+  // Incremented per model reply: tool calls batched into one reply share it.
+  private round = 0;
 
   constructor(opts: OllamaBrainOptions = {}) {
     this.opts = opts;
@@ -129,6 +131,11 @@ export class OllamaBrain implements Brain {
     this.steerQueue.push(steer);
     this.steerBytes += bytes;
     return { accepted: true, state: this.paused ? "paused" : "running" };
+  }
+
+  /** The model reply the outstanding tool call belongs to (Brain.modelRound). */
+  modelRound(): number {
+    return this.round;
   }
 
   close(): void {
@@ -214,6 +221,7 @@ export class OllamaBrain implements Brain {
         }
 
         const calls = reply.tool_calls ?? [];
+        this.round += 1;
         // A pause received while the network request was in flight takes
         // effect before any resulting tool call or answer becomes observable.
         await this.waitWhilePaused();

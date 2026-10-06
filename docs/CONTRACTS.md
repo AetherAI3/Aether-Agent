@@ -155,6 +155,82 @@ supported, and a rename failure preserves the old file. The check and rename
 are separate filesystem operations, so non-cooperating external writers need
 workspace locking for strict serializability.
 
+### Repeated tool-failure budget (#285)
+
+Host-executed loops — `hostLoop` (`aether agent`) and `runLocalTurn` (local
+chat) — bound repeated failed tool calls in `src/core/tool_failure_budget.ts`.
+Hosted server-side tools, the headless `aether exec` loop and the smoke loop
+are out of scope here and need their own contract. Web tools report failures
+with exit 0, so they are never counted.
+
+- **Classified.** Every non-success result is one of `invalid_arguments`,
+  `permission_refused`, `unavailable`, `stale_precondition`, `transient`,
+  `unknown_outcome`, `execution_failure`. A cancellation (`[aborted…]`, 130) is
+  not counted; it ends the turn through its own path. Only the executor's own
+  `[timeout after …]` is an unknown outcome; a command's own `[exit 124]` is an
+  ordinary execution failure.
+- **Fingerprinted.** The canonical operation is a SHA-256 of the host's
+  approval binding (tool + validated arguments, key order irrelevant), of the
+  stable JSON of the raw arguments when validation failed, or of the tool name
+  alone for a skill-policy refusal. Call ids never make a repeat look new.
+- **Host decisions are not state-bound.** A policy refusal, an argument
+  rejection or an operator denial is bound to the operation alone: an unrelated
+  edit never puts a denied action in front of the operator again.
+- **Tool failures are state-bound.** A failure the tool produced counts only
+  against unchanged relevant state: the git working-tree revision (HEAD +
+  changed paths + their stat; probed with `--no-optional-locks`,
+  `core.fsmonitor=false`, one `status --porcelain=v2 --branch` process, a 3 s
+  bound) for shell/git tools, the target file's stat for path-bearing tools,
+  the shell context, the configured test command, and an epoch advanced by
+  every successful write/patch/git_commit and every successful `run_shell`
+  that is not a plain read-only command (`ls`, `cat`, `git diff`, … — no
+  chaining, pipes or redirection).
+  Each attempt's pre-execution state is compared with the previous attempt's
+  post-execution state, so a failing command that rewrites files itself is
+  still a repeat. A probe that errors or times out reads as changed (only "not
+  a git repository" reads as the constant `no-git`). Git is
+  probed only for a failed shell/git call or a repeat of one — never for a
+  success or a host decision.
+- **Budget, per class** (failed attempts allowed):
+  `permission_refused` 1 · `unavailable` 1 · `invalid_arguments` 2 ·
+  `stale_precondition` 2 · `unknown_outcome` 2 · `transient` 3 ·
+  `execution_failure` 3. Independently, 8 consecutive failed or refused calls
+  with no success stop the cycle; from the 6th the failure result carries a
+  `[host: N tool calls in a row have failed …]` warning.
+- **Refuse, then stop — before acting.** The first request after the budget is
+  spent is REFUSED: answered under its own call id with
+  `[host refused repeat: … To recover: …]`, never executed, never prompted.
+  This is the model's warning. A request after that refusal STOPS the cycle —
+  but only from a LATER model reply: brains that know their reply boundaries
+  (`Brain.modelRound()`, implemented by the Ollama brain) keep answering
+  identical calls batched into the same reply with the refusal, and the
+  streak bound likewise waits for the next reply, so a batch can never end a
+  run before the model has seen a single result. A brain without rounds treats
+  every call as its own reply. A decided refusal (policy/denial) is warned
+  again rather than stopped when real work (an edit or state-changing shell
+  run) happened since the last refusal. The stop is answered with
+  `[host stopped repeated failure: …]`, the brain is closed, and the host
+  emits `done{ok:false, reason:"no-progress"}` through the normal event path.
+  For the in-process Ollama brain the close lands before any further model
+  request; for remote and child-process brains, delivery of that last result is
+  best-effort because the same stop tears their session down.
+- **Settled outcome.** The coding turn settles `incomplete`. The preserved work
+  is still checked by the host, but a green check cannot turn a stop into a
+  success, and the session is filed as `no-progress`. `--json` adds a
+  `checkpoint` object. A local chat turn ends with the same message and hint.
+- **Checkpoint.** Operation, class + reason, attempt count, preserved work
+  (successful calls; edits and commits kept, with the files written; shell
+  commands run; nothing is rolled back), and one recovery choice. A permission
+  refusal's recovery is "approve when prompted, or work without it". The path
+  guard's is "stay inside the workspace". It never names a broader mode or a
+  substitute action.
+- **Never.** Successful calls are not deduplicated; a success clears the
+  fingerprint. A repeated failure carries a short `[host: …]` note; the first
+  is delivered byte-for-byte. The host retries only a transient failure of a
+  read-only tool, once, within the same approval and deadlines. A mutation
+  whose outcome is unknown is never replayed. Turn, time, output and progress
+  caps are unchanged.
+
 ---
 
 ## 2. ATS trading contracts (Spec 1, Gate 1.0)  ·  frozen
