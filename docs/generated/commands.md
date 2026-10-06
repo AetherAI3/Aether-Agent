@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:621c3b019db9775595864bc857d9639a2ee8e963aae18d2b3ec50ab0cd929482 -->
+<!-- manifest-digest: sha256:473c81160b9dc898982fd36f0375b098ddb176a1606f64e96523016b414f4cbb -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -483,9 +483,9 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 
 ### Steering
 
-#### `/shell-result [preview|edit <msg>|send|cancel]`
+#### `/shell-result`
 
-preview/edit a bounded shell attachment; send or cancel explicitly
+preview and edit a bounded local shell result before sharing it
 
 Permission: `network` · Availability: `runtime-dependent` · Telemetry: `slash.shell-result`
 

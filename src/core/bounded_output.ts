@@ -21,6 +21,8 @@ export class BoundedOutput {
   /** Fixed allocation, independent of the number/size of incoming chunks. */
   get capacityBytes(): number { return this.head.length + this.tail.length; }
   get retainedBytes(): number { return this.headLength + this.tailLength; }
+  get observedBytes(): number { return this.totalBytes; }
+  get truncated(): boolean { return this.totalBytes > this.capacityBytes; }
 
   append(text: string): void {
     const bytes = Buffer.from(text, "utf8");
@@ -46,15 +48,12 @@ export class BoundedOutput {
     }
   }
 
-  render(): string { return this.snapshot().text; }
-
-  /** Counts include complete UTF-8 code points removed at either cut. */
-  snapshot(): { text: string; totalBytes: number; omittedBytes: number } {
+  private parts(): { head: Buffer; tail: Buffer; omittedBytes: number } {
     const tail = this.tailLength < this.tail.length
       ? this.tail.subarray(0, this.tailLength)
       : Buffer.concat([this.tail.subarray(this.tailNext), this.tail.subarray(0, this.tailNext)]);
     const head = this.head.subarray(0, this.headLength);
-    if (this.totalBytes <= this.capacityBytes) return { text: Buffer.concat([head, tail]).toString("utf8"), totalBytes: this.totalBytes, omittedBytes: 0 };
+    if (!this.truncated) return { head, tail, omittedBytes: 0 };
 
     // Never manufacture replacement characters at either elision boundary.
     // Appended text contains complete code points; only our cuts can split one.
@@ -68,12 +67,23 @@ export class BoundedOutput {
     }
     let tailStart = 0;
     while (tailStart < tail.length && (tail[tailStart]! & 0xc0) === 0x80) tailStart++;
-    const omitted = this.totalBytes - headEnd - (tail.length - tailStart);
     return {
-      text: head.subarray(0, headEnd).toString("utf8")
-        + `\n…[${omitted} UTF-8 bytes elided]…\n`
-        + tail.subarray(tailStart).toString("utf8"),
-      totalBytes: this.totalBytes, omittedBytes: omitted,
+      head: head.subarray(0, headEnd), tail: tail.subarray(tailStart),
+      omittedBytes: this.totalBytes - headEnd - (tail.length - tailStart),
     };
+  }
+
+  get omittedBytes(): number { return this.parts().omittedBytes; }
+
+  snapshot(): { text: string; totalBytes: number; omittedBytes: number } {
+    return { text: this.render(), totalBytes: this.observedBytes, omittedBytes: this.omittedBytes };
+  }
+
+  render(): string {
+    const { head, tail, omittedBytes } = this.parts();
+    if (!omittedBytes) return Buffer.concat([head, tail]).toString("utf8");
+    return head.toString("utf8")
+      + `\n…[${omittedBytes} UTF-8 bytes elided]…\n`
+      + tail.toString("utf8");
   }
 }

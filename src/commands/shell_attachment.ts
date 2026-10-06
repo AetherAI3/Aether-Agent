@@ -12,7 +12,7 @@ export const SHELL_ATTACHMENT_BODY_BYTES = SHELL_ATTACHMENT_MAX_BYTES - 512;
 export function sanitizeShellAttachment(text: string): string {
   return fenceSafe(redactForBundle(stripVTControlCharacters(text)
     .replace(/\r\n?/g, "\n")
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\p{Cf}]/gu, "")));
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/gu, "")));
 }
 
 export interface ShellCapture {
@@ -52,6 +52,7 @@ export function shellAttachment(capture: ShellCapture, body = capture.body, edit
 /** Memory-only draft. Sending consumes it synchronously, before any await. */
 export class ShellAttachmentPreview {
   private pending: ShellAttachment | null = null;
+  get hasPending(): boolean { return this.pending !== null; }
   preview(capture: ShellCapture | null): ShellAttachment | null {
     if (!this.pending && capture) this.pending = shellAttachment(capture);
     return this.pending;
@@ -61,6 +62,27 @@ export class ShellAttachmentPreview {
     const body = sanitizeShellAttachment(text);
     if (Buffer.byteLength(body, "utf8") > SHELL_ATTACHMENT_BODY_BYTES) return `Edit refused: maximum ${SHELL_ATTACHMENT_BODY_BYTES} UTF-8 bytes; preview unchanged.`;
     return this.pending = shellAttachment(this.pending.capture, body, true);
+  }
+  /** Line controls transform only editable body, never trust/provenance framing. */
+  editLines(action: "drop" | "replace" | "mask" | "redact", first?: number, last?: number, value = ""): ShellAttachment | string {
+    if (!this.pending) return "No shell preview. Use /shell-result first.";
+    const lines = this.pending.body.split("\n");
+    if (action === "drop" || action === "replace") {
+      const start = first ?? 0, end = action === "replace" ? start : last ?? start;
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start || end > lines.length) return `Invalid line range; choose 1-${lines.length}. Preview unchanged.`;
+      if (action === "drop") lines.splice(start - 1, end - start + 1);
+      else {
+        if (/[\r\n]/.test(value)) return "Replace accepts one line; preview unchanged.";
+        lines.splice(start - 1, 1, value);
+      }
+      return this.edit(lines.join("\n"));
+    }
+    if (action === "mask") {
+      if (!value || value.length > 512 || /[\r\n\x00-\x1f\x7f]/.test(value)) return "Mask needs one literal of at most 512 characters without controls. Preview unchanged.";
+      if (!this.pending.body.includes(value)) return "Literal not present in the editable body; protected provenance is unchanged.";
+      return this.edit(this.pending.body.replaceAll(value, "[REDACTED]"));
+    }
+    return this.edit(this.pending.body);
   }
   cancel(): void { this.pending = null; }
   send(): ShellAttachment | string {

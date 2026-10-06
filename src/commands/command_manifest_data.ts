@@ -4053,12 +4053,11 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "key": "slash:shell-result",
     "surface": "slash",
     "name": "shell-result",
-    "args": "[preview|edit <msg>|send|cancel]",
     "aliases": [],
     "compatibilityAliases": [],
     "deprecatedAliases": [],
-    "summary": "preview/edit a bounded shell attachment; send or cancel explicitly",
-    "detailedHelp": "/shell-result [preview|edit <msg>|send|cancel]\nLocal exact-byte preview; edits replace the body, including metadata. Only send invokes the model. Empty edits/cancel stay local. Redaction is an aid, not a guarantee.",
+    "summary": "preview and edit a bounded local shell result before sharing it",
+    "detailedHelp": "/shell-result previews the exact bounded attachment without contacting a model. Use /shell-result lines to inspect numbered rows; drop <first>[-<last>], replace <line> <text>, mask <literal>, redact, or edit the whole body to update the staged snapshot. /shell-result send shares that snapshot; /shell-result cancel discards it. Pipes and JSON sessions allow explicit one-step send of a fresh capture; a staged preview takes precedence. Sent/cancelled/empty captures never silently restage on repeated send. The complete attachment stays within 8 KiB. A newer command never replaces a staged preview. Redaction is an aid, not a guarantee.",
     "section": "Steering",
     "hidden": false,
     "permissionClass": "network",
@@ -4080,13 +4079,13 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "module": "src/commands/command_manifest_data.ts",
       "symbol": "COMMAND_MANIFEST_SOURCE",
       "target": "shell-result",
-      "usage": "/shell-result [preview|edit <msg>|send|cancel]",
+      "usage": "/shell-result",
       "visible": true,
       "disposition": "generated"
     },
     "release": {
-      "disposition": "new",
-      "note": "Coding console only; explicit sharing of at most 8 KiB of untrusted local output."
+      "disposition": "changed",
+      "note": "Coding console now previews and edits the command-bound bounded capture before explicit sharing."
     }
   },
   {

@@ -4,8 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { visibleWidth } from "../src/ui/text.js";
-import { Writable } from "node:stream";
-import { ManagedAgentsClient, managedAgentError, type ManagedAgent } from "../src/core/managed_agents.js";
+import { Readable, Writable } from "node:stream";
+import { ManagedAgentsClient, managedAgentError, probeManagedReadiness, type ManagedAgent } from "../src/core/managed_agents.js";
 import { ApiClient } from "../src/core/transport.js";
 import { StaticTokenStore } from "../src/core/auth.js";
 import { HttpError } from "../src/core/errors.js";
@@ -22,9 +22,16 @@ const agent: ManagedAgent = {
   runtime: { observation: "unavailable", tile_state: "draft" },
 };
 const envelope = (payload: Record<string, unknown>): Record<string, unknown> => ({ schema_version: "aether.managed-agents/1", availability: "ok", ...payload });
+const readiness = (registry = "enabled", dm = registry === "enabled" ? "enabled" : "disabled", model = dm === "enabled" ? "enabled" : "disabled") => ({
+  schema_version: "aether.terminal-readiness/1", required_contract: "aether.managed-agents/1.1",
+  registry: { state: registry, code: registry === "enabled" ? "READY" : "ACCOUNT_DISABLED", reason: "Registry status.", remedy: "Check the account." },
+  dm: { state: dm, code: dm === "enabled" ? "READY" : "DM_DISABLED", reason: "DM status.", remedy: "Check Online." },
+  model_uvt: { state: model, code: model === "enabled" ? "ADMISSION_AVAILABLE" : "ADMISSION_DISABLED", reason: "Admission status.", remedy: "Check UVT." },
+});
 const api = (): ApiClient => new ApiClient("https://example.test/cloud", new StaticTokenStore("aek_test_cli"));
 function context(): AppContext {
-  return { cfg: { ...DEFAULT_CONFIG }, api: api(), tokens: new StaticTokenStore("aek_test_cli"), flags: { json: false, audit: false, yes: false, cwd: process.cwd() }, confirm: async () => false };
+  const tokens = new StaticTokenStore("aek_test_cli");
+  return { cfg: { ...DEFAULT_CONFIG }, api: new ApiClient("https://example.test/cloud", tokens), tokens, flags: { json: false, audit: false, yes: false, cwd: process.cwd() }, confirm: async () => false };
 }
 function capture(): { out: Writable; text: () => string } {
   let text = "";
@@ -104,6 +111,7 @@ test("DM send uses canonical conversation and nonce; no coding or chat runtime e
   const output = capture();
   await stubFetch((url, init) => {
     paths.push(url.pathname);
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
     if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
     if (url.pathname.endsWith("/messages")) {
       assert.equal(url.searchParams.get("conversation_id"), THREAD);
@@ -114,11 +122,11 @@ test("DM send uses canonical conversation and nonce; no coding or chat runtime e
     }
     return json(envelope({ agent }));
   }, async () => {
-    assert.equal(await cmdManagedAgentChat(context(), ID, "Review my strategy", { out: output.out, err: output.out, hooks: { beforeChat: async () => async () => { closed = true; } } }), 0);
+    assert.equal(await cmdManagedAgentChat(context(), ID, "Review my strategy", { out: output.out, err: output.out, hooks: { beforeChat: async () => async () => { closed = true; } } }), 1);
   });
   assert.equal(closed, true);
   assert.match(output.text(), /blocked_budget/);
-  assert.equal(paths.length, 3);
+  assert.equal(paths.length, 4);
   assert.ok(paths.every((path) => path.includes("/agent/managed/")));
 });
 
@@ -126,6 +134,7 @@ test("one-shot managed chat closes its attached session before aborting the life
   let abortedDuringClose: boolean | undefined;
   const output = capture();
   await stubFetch((url) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
     if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
     if (url.pathname.endsWith("/messages")) return json({ id: "message-1", body: "canary", sender_type: "user", admission: { state: "admitted" } });
     return json(envelope({ agent }));
@@ -142,6 +151,7 @@ test("failed DM delivery is reported as uncertain and never automatically resent
   let sends = 0;
   const output = capture();
   await stubFetch((url) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
     if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
     if (url.pathname.endsWith("/messages")) { sends++; throw new Error("network unavailable"); }
     return json(envelope({ agent }));
@@ -188,8 +198,11 @@ test("untrusted labels are sanitized and runtime unavailable stays visible", () 
   const rows = renderManagedAgents([{ ...agent, config: { identity: { display_name: "bad\x1b]52;c;secret\x07name" } } }]);
   assert.equal(rows.includes("\x1b]52"), false);
   assert.match(rows, /unavailable/);
-  assert.match(managedAgentError(new HttpError(403, "aek_secret", { token: "aek_secret" })), /not enabled/);
+  assert.match(managedAgentError(new HttpError(403, "aek_secret", { token: "aek_secret" })), /Cloud refused/);
   assert.equal(managedAgentError(new HttpError(403, "aek_secret")).includes("aek_secret"), false);
+  assert.match(managedAgentError(new HttpError(403, "ignored", { detail: { code: "WRONG_CREDENTIAL_CLASS" } })), /credential cannot access/);
+  assert.match(managedAgentError(new HttpError(403, "ignored", { detail: { code: "FEATURE_DISABLED" } })), /not enabled for this account/);
+  assert.match(managedAgentError(new HttpError(404, "ignored")), /not found in this account/);
 });
 
 for (const columns of [40, 60, 80, 120]) {
@@ -230,4 +243,103 @@ test("inventory accepts both additive contracts and rejects unknown typed profil
   for (const invalid of [{ ...profile, kind: "root" }, { ...profile, permission: "trade" }, { ...profile, schema_version: "unknown" }]) {
     await stubFetch(() => json(envelope({ agents: [{ ...agent, config: { ...agent.config, profile: invalid } }] })), async () => { await assert.rejects(new ManagedAgentsClient(api()).list(), /unsupported managed-agent profile/); });
   }
+});
+
+test("readiness classifies entitlement, credential, contract and outage without leaking response details", async () => {
+  const cases: Array<[Response, string]> = [
+    [json(readiness("disabled")), "ACCOUNT_DISABLED"],
+    [json(readiness("enabled", "disabled")), "DM_DISABLED"],
+    [json({ detail: { code: "WRONG_CREDENTIAL_CLASS", secret: "aek_private" } }, 403), "WRONG_CREDENTIAL_CLASS"],
+    [json({ detail: "aek_private" }, 403), "READINESS_REFUSED"],
+    [json({ detail: "not deployed" }, 404), "INCOMPATIBLE_CONTRACT"],
+    [json({ ...readiness(), required_contract: "aether.managed-agents/9" }), "INCOMPATIBLE_CONTRACT"],
+    [json({ detail: "aek_private" }, 503), "TEMPORARILY_UNAVAILABLE"],
+  ];
+  for (const [response, expected] of cases) {
+    await stubFetch(() => response.clone(), async () => {
+      const result = await probeManagedReadiness(api());
+      assert.ok(JSON.stringify(result).includes(expected));
+      assert.equal(JSON.stringify(result).includes("aek_private"), false);
+    });
+  }
+});
+
+test("a cancelled readiness probe stays cancelled", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(probeManagedReadiness(api(), controller.signal));
+});
+
+test("list and chat use fresh readiness after account switch and avoid unavailable operations", async () => {
+  let owner = "first";
+  const calls: string[] = [];
+  await stubFetch((url, init) => {
+    calls.push(`${owner}:${url.pathname}`);
+    assert.equal(new Headers(init.headers).get("Authorization"), `Bearer aek_${owner === "first" ? "test" : "second"}_cli`);
+    if (url.pathname.endsWith("/readiness")) return json(readiness(owner === "first" ? "enabled" : "disabled"));
+    return json(envelope({ agents: [agent], next_cursor: null }));
+  }, async () => {
+    const ctx = context();
+    const first = capture();
+    assert.equal(await cmdManagedAgents(ctx, ["list"], { out: first.out, err: first.out }), 0);
+    assert.match(first.text(), /registry: enabled/);
+    owner = "second";
+    await ctx.tokens.set("aek_second_cli");
+    const second = capture();
+    ctx.flags.json = true;
+    assert.equal(await cmdManagedAgents(ctx, ["list"], { out: second.out, err: second.out }), 1);
+    assert.equal(JSON.parse(second.text()).error.code, "ACCOUNT_DISABLED");
+    assert.equal(await cmdManagedAgentChat(ctx, ID, "hello", { out: second.out, err: second.out }), 1);
+  });
+  assert.equal(calls.filter(path => path.endsWith("/readiness")).length, 3);
+  assert.equal(calls.filter(path => path.endsWith("/agent/managed")).length, 1);
+});
+
+test("blocked list, show and chat report the same safe codes in human and JSON output", async () => {
+  const cases: Array<[string, Response, string]> = [
+    ["list", json(readiness("disabled")), "ACCOUNT_DISABLED"],
+    ["show", json({ ...readiness(), required_contract: "aether.managed-agents/9", private: "aek_private" }), "INCOMPATIBLE_CONTRACT"],
+    ["chat", json(readiness("enabled", "disabled")), "DM_DISABLED"],
+    ["list", json({ detail: { code: "WRONG_CREDENTIAL_CLASS", private: "aek_private" } }, 403), "WRONG_CREDENTIAL_CLASS"],
+    ["chat", json({ detail: "aek_private" }, 503), "TEMPORARILY_UNAVAILABLE"],
+  ];
+  for (const [verb, response, code] of cases) {
+    for (const jsonMode of [false, true]) {
+      const output = capture();
+      const ctx = context();
+      ctx.flags.json = jsonMode;
+      await stubFetch((url) => {
+        assert.ok(url.pathname.endsWith("/readiness"), "a blocked command must stop before agent access");
+        return response.clone();
+      }, async () => {
+        const result = verb === "chat"
+          ? await cmdManagedAgentChat(ctx, ID, "private message", { out: output.out, err: output.out })
+          : await cmdManagedAgents(ctx, verb === "list" ? [verb] : [verb, ID], { out: output.out, err: output.out });
+        assert.equal(result, 1);
+      });
+      if (jsonMode) assert.equal(JSON.parse(output.text()).error.code, code);
+      else assert.match(output.text(), new RegExp(code));
+      assert.equal(output.text().includes("aek_private"), false);
+      assert.equal(output.text().includes("private message"), false);
+    }
+  }
+});
+
+test("chat stays paused when conversation read fails after an enabled readiness probe", async () => {
+  const output = capture();
+  let state: string | undefined;
+  await stubFetch((url) => {
+    if (url.pathname.endsWith("/readiness")) return json(readiness());
+    if (url.pathname.endsWith("/thread")) return json({ id: THREAD });
+    if (url.pathname.endsWith("/messages")) return json({ detail: "private message" }, 503);
+    return json(envelope({ agent }));
+  }, async () => {
+    assert.equal(await cmdManagedAgentChat(context(), ID, "", {
+      out: output.out, err: output.out, input: Readable.from(["/state\n", "/exit\n"]),
+      hooks: { onChatCommand: async (_ctx, _agent, _input, surface) => { state = surface?.connection?.().chat; return true; } },
+    }), 0);
+  });
+  assert.equal(state, "paused");
+  assert.match(output.text(), /Conversation sync paused/);
+  assert.doesNotMatch(output.text(), /synced|private message/);
 });

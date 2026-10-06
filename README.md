@@ -94,11 +94,12 @@ A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-c
 Explain the failing test
 !npm test
 /shell-result
+/shell-result lines
+/shell-result drop 8-10
 /shell-result send
-Help me fix it
 ```
 
-`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` opens a local preview of the exact bounded attachment. Review all text and metadata; `/shell-result edit <replacement text>` replaces the body, `/shell-result send` sends that reviewed snapshot once, and `/shell-result cancel` discards it. Redaction helps but cannot guarantee secrets are absent. The same explicit commands work in pipes without interactive prompts.
+`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` stages and previews the exact bounded attachment, including the command, captured directory, exit status, and any omitted bytes. Edit it with `drop`, `replace`, `mask`, or `redact`, then choose `/shell-result send` or `/shell-result cancel`. Redaction helps identify common secrets but does not guarantee their removal. A later shell command cannot change the staged attachment. In pipes and JSON sessions, `/shell-result send` can explicitly send one fresh capture without an interactive prompt. A staged preview takes precedence. Sending, cancelling or emptying a selection consumes that eligibility; another send cannot silently restage it. The complete attachment, including metadata and framing, is capped at 8 KiB.
 
 | Platform | Local shell | Interactive programs |
 |---|---|---|
@@ -134,6 +135,12 @@ Use the same managed agents and Online conversations from your terminal:
 aether agent list
 aether agent chat
 ```
+
+`aether agent list` and `show` report fresh registry, DM, and model/UVT
+readiness for the signed-in account. `aether doctor --live` checks the same
+read-only Cloud contract; plain `aether doctor` leaves account readiness
+unverified. A saved DM is reported as admitted only when Cloud confirms
+message admission.
 
 ATS is the trading adapter for account agents. Create a workspace with `aether agent create ATS Atlas`; guided setup covers memory, strategies, and data settings.
 

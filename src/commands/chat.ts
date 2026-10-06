@@ -1358,7 +1358,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     const runQueuedTurn = async (input: ConsoleInput, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
       const sharedShellResult = input.kind === "attachment";
       if (input.kind === "share") return "completed"; // Preview controls are resolved at submission, never at execution.
-      if (input.kind === "error") { process.stdout.write(input.message + "\n"); return "completed"; }
+      if (input.kind === "error") { process.stdout.write((ctx.flags.json ? JSON.stringify({ type: "console_error", message: input.message }) : input.message) + "\n"); return "completed"; }
       if (input.kind === "empty") return "completed";
       if (input.kind !== "chat" && input.kind !== "attachment") {
         turnAbort = new AbortController();
@@ -1574,10 +1574,10 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       let input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
       if (input.kind === "share") {
         buf.clear();
-        input = consoleShell.share(input); // Snapshot/consume before any await or queueing.
+        input = consoleShell.share(input, ctx.flags.json); // Snapshot/consume before any await or queueing.
         if (input.kind === "empty") { repaint(); return; }
       }
-      if (input.kind === "error") { buf.clear(); process.stdout.write(input.message + "\n"); repaint(); return; }
+      if (input.kind === "error") { buf.clear(); process.stdout.write((ctx.flags.json ? JSON.stringify({ type: "console_error", message: input.message }) : input.message) + "\n"); repaint(); return; }
       const commit = (): void => {
         if (input.kind === "chat") { remember(buf.value); buf.commit(buf.value); }
         else buf.clear();
@@ -2045,9 +2045,9 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     }
     if (ConsoleShell.isTerminalCommand(line)) { await consoleShell.terminalCommand(line); continue; }
     let input = classifyConsoleInput(line);
-    if (input.kind === "share") input = consoleShell.share(input);
+    if (input.kind === "share") input = consoleShell.share(input, true);
     const sharedShellResult = input.kind === "attachment";
-    if (input.kind === "error") { process.stdout.write(input.message + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
+    if (input.kind === "error") { process.stdout.write((ctx.flags.json ? JSON.stringify({ type: "console_error", message: input.message }) : input.message) + "\n"); if (p) process.stdout.write(p + consoleShell.prompt()); continue; }
     let t = input.kind === "chat" || input.kind === "attachment" ? input.text : "";
     let authReplay = false;
     if (continuation.pending && !t.startsWith("/switch")) {

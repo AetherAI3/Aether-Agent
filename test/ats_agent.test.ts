@@ -22,6 +22,12 @@ const ID = "mag_0123456789abcdef";
 const SUBJECT = "11111111-1111-4111-8111-111111111111";
 const ACCOUNT = { cloudOrigin: "https://example.test", accountSubject: SUBJECT };
 const identity = (): Response => new Response(JSON.stringify({ schema_version: "aether.terminal-account/1", account_subject: SUBJECT }));
+const readiness = (): Response => new Response(JSON.stringify({
+  schema_version: "aether.terminal-readiness/1", required_contract: "aether.managed-agents/1.1",
+  registry: { state: "enabled", code: "READY", reason: "Ready", remedy: "None" },
+  dm: { state: "enabled", code: "READY", reason: "Ready", remedy: "None" },
+  model_uvt: { state: "enabled", code: "ADMISSION_AVAILABLE", reason: "Ready", remedy: "None" },
+}));
 function context(): AppContext {
   const tokens = new StaticTokenStore("aek_test_cli");
   return { cfg: { ...DEFAULT_CONFIG, baseUrl: "https://example.test/cloud" }, api: new ApiClient("https://example.test/cloud", tokens), tokens,
@@ -461,6 +467,7 @@ test("managed chat routes local slash hooks sequentially and never sends their c
   let initialized = false;
   let closeSession = false;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/readiness")) return readiness();
     if (String(url).endsWith("/thread")) return new Response(JSON.stringify({ id: "thread-1" }));
     if (String(url).includes("/messages")) {
       if (init?.method === "POST") { sends++; throw new Error("must not send local commands"); }
@@ -494,6 +501,7 @@ test("managed TTY queues Shift-Tab after the active command and removes its list
   const order: string[] = [];
   let started = false;
   globalThis.fetch = (async (url: string | URL | Request) => {
+    if (String(url).endsWith("/readiness")) return readiness();
     if (String(url).endsWith("/thread")) return new Response(JSON.stringify({ id: "thread-1" }));
     if (String(url).includes("/messages")) {
       if (!started) { started = true; setImmediate(() => input.write("/ats wait\n")); }
@@ -555,6 +563,7 @@ test("background visual status preserves an edited TTY draft through the real re
   const timeout = new AbortController();
   const deadline = setTimeout(() => timeout.abort(), 2000);
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/readiness")) return readiness();
     if (String(url).endsWith("/thread")) return new Response(JSON.stringify({ id: "thread-1" }));
     if (String(url).includes("/messages")) {
       if (init?.method === "POST") {

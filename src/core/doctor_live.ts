@@ -31,6 +31,7 @@ import { buildDevSessionRequest } from "./envelope.js";
 import { decodeSse, type StreamFrame } from "./stream.js";
 import { TOOLS } from "./brain_protocol.js";
 import { DEV_PROTOCOL_VERSION } from "./brain_cloud.js";
+import { probeManagedReadiness, type ReadinessGate } from "./managed_agents.js";
 import { appendCustody, readCustodyLog } from "./custody.js";
 import { McpClient } from "./mcp.js";
 import { diagnosePredatorDrive } from "./predator_drive_readiness.js";
@@ -56,6 +57,25 @@ import {
 
 const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 const DEFAULT_OPENER_TIMEOUT_MS = 15_000;
+
+function onlineChecks(ctx: AppContext, authed: boolean): Promise<HealthCheck[]> {
+  const gates = ["registry", "dm", "model_uvt"] as const;
+  if (!authed) return Promise.resolve(gates.map(name => check({ id: `online.terminal.${name}`, category: "online", title: `Terminal ${name}` }, {
+    configured: axis("no", { evidence: "AUTH_REQUIRED" }),
+    reachable: notChecked("signed out"), verified: notChecked("signed out"),
+    severity: "warning", remediation: "run: aether auth login",
+  })));
+  return probeManagedReadiness(ctx.api).then(readiness => gates.map(name => {
+    const gate: ReadinessGate = readiness[name];
+    const enabled = gate.state === "enabled";
+    return check({ id: `online.terminal.${name}`, category: "online", title: `Terminal ${name}` }, {
+      configured: axis(enabled ? "yes" : gate.state === "disabled" ? "no" : "unknown", { evidence: gate.code }),
+      reachable: axis(gate.code === "TEMPORARILY_UNAVAILABLE" ? "no" : "yes", { evidence: gate.code }),
+      verified: axis(enabled ? "yes" : "no", { evidence: gate.code }),
+      severity: enabled ? "info" : "warning", remediation: enabled ? undefined : gate.remedy,
+    });
+  }));
+}
 
 export interface LiveOptions {
   now?: () => string;
@@ -1004,10 +1024,11 @@ export async function liveReport(ctx: AppContext, options: LiveOptions = {}): Pr
     const agent = authed
       ? await agentProbes(ctx, ledger, { ...options, runId, timeoutMs }, sandbox)
       : agentUnproven("signed out; the agent loop cannot be exercised");
+    const online = await onlineChecks(ctx, authed);
 
     return buildReport(
       "live",
-      [authCheck, ...agent, ...independent, ...automationChecks(), spendCheck(ledger)],
+      [authCheck, ...agent, ...online, ...independent, ...automationChecks(), spendCheck(ledger)],
       now(),
     );
   } finally {

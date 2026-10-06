@@ -54,6 +54,9 @@ tools. Online account-agent and ATS chats remain separate surfaces.
   captured cwd, exit status, and UTF-8 omission information. The displayed
   attachment is exactly the attachment submitted on `/shell-result send`;
   ordinary project instructions may surround it in the model request.
+  `/shell-result lines` shows numbered body rows; `drop <first>[-<last>]`,
+  `replace <line> <text>`, `mask <literal>` and `redact` update only that body.
+  These transformations cannot remove protected trust/omission framing.
   `/shell-result edit <replacement text>` replaces the entire editable body,
   allowing command/cwd/secret-bearing lines to be removed. The preview updates
   after sanitation/redaction; edits retain an explicit edited-selection notice
@@ -64,7 +67,10 @@ tools. Online account-agent and ATS chats remain separate surfaces.
   cancel the existing draft first. Send consumes the draft before queueing, so a
   repeated send cannot submit it twice. Reset/exit clear unsent previews.
   TTY and pipe mode use the same explicit commands; pipes never wait for a
-  confirmation prompt. In scripts, preview then use `/shell-result send`.
+  confirmation prompt. Scripts/JSON sessions may explicitly send one fresh
+  capture with `/shell-result send` without preview. An existing preview wins;
+  sending/cancelling/emptying consumes one-step eligibility until a new command
+  completes. Previewing again explicitly still permits a deliberate re-send.
   Neither previews, shell commands, nor edited attachment bodies enter ordinary
   chat history or durable custody receipts/support exports. A failed send is not
   copied into the chat composer or saved for authentication replay; stage and
