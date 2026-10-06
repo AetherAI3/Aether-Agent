@@ -4,8 +4,13 @@
 
 **0.4.0 source candidate.** `aether rc` is the observer-only bridge between a
 terminal run and a browser. Its host foundation and local status/exposure
-controls are on `main`, outside the published 0.3.x line. A complete live Cloud
-viewer journey still needs qualification. The old draft
+controls are on `main`. A live Cloud viewer journey was recorded on
+2026-10-06 on a Windows and a Linux host with a phone viewer —
+[evidence](reviews/2026-10-06-rc-live-journey.md). Two limits remain:
+`aether rc start` needs a device enrolled with `aether device enroll`, which
+the Cloud currently allows only for operator accounts
+([#300](https://github.com/AetherAI3/aether-agent/issues/300)), and a broker
+outage during a run was exercised in tests only. The old draft
 [PR #108](https://github.com/AetherAI3/aether-agent/pull/108) is not release
 evidence for current `main`.
 
@@ -51,7 +56,8 @@ gates, and `aether rc` never links to it: its links carry only an observe
 grant and a viewer device id.
 
 These checks bound what a viewer build can do. They do not qualify a
-deployment; the live Cloud viewer journey still needs qualification.
+deployment on their own; the deployed journey is recorded separately in the
+[2026-10-06 evidence](reviews/2026-10-06-rc-live-journey.md).
 
 ## Connection and privacy
 
