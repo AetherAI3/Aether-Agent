@@ -213,23 +213,23 @@ function assertCandidatePacket(packet: string): void {
   assert.equal(onlyPacketRow(rows, "Proposed tag"), `\`v${VERSION}\``);
   assert.equal(
     onlyPacketRow(rows, "Source identity"),
-    `Canonical ATS adapter commit \`${(JSON.parse(read("packages", "ats-skills-source.json")) as {revision: string}).revision}\`; per-file SHA-256 custody is recorded in \`packages/ats-skills-source.json\`. The Agent PR records its final candidate commit.`,
+    "The final release commit must be on `main`; its exact SHA must match the tag and the npm and PyPI workflow checkouts. ATS source custody remains pinned in `packages/ats-skills-source.json`.",
   );
   assert.equal(
     onlyPacketRow(rows, "Archive evidence"),
-    "The production-package verifier passed on audited `main`; the immutable `v0.4.0` tag archive, checksum and publishing provenance remain pending and must be produced from the final verified tag commit.",
+    "The final tag archive, package digest, SBOM, provenance, and installed tarball smoke remain pending until protected workflows complete.",
   );
   assert.equal(
     onlyPacketRow(rows, "Hosted checks"),
-    "Audited `main` is green in [CI 35358929047](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929047), [CodeQL 35358929027](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929027) and its later [scheduled run 35601932145](https://github.com/AetherAI3/Aether-Agent/actions/runs/35601932145), plus [release truth 35358929055](https://github.com/AetherAI3/Aether-Agent/actions/runs/35358929055) and its later [scheduled run 35629835836](https://github.com/AetherAI3/Aether-Agent/actions/runs/35629835836). CI includes supply-chain, generated-documentation, production-package, clean-install and PyPI-launcher coverage. The final tag commit must rerun these gates.",
+    "At candidate preparation, the latest `main` checks were failing or queued: release truth found a stale README slash-command example and the prior published version's candidate packet; CI and CodeQL could not upload required evidence because GitHub artifact storage quota was full; the Windows self-hosted runner was offline. Rerun on the exact final commit after these conditions clear.",
   );
   assert.equal(
     onlyPacketRow(rows, "Live service evidence"),
-    "Deployment of the Cloud adapter, actual web/terminal DM sync, model/UVT execution and broker connectivity are not established by local tests.",
+    "Remote viewing, Cloud/Online admission, ATS entitlement, native headed browser, and broker connectivity need separate live verification before claiming them operational.",
   );
   assert.equal(
     onlyPacketRow(rows, "Publication evidence"),
-    "No `v0.4.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance or registry dist-tag update is established by this packet. Published `latest` remains a separate registry fact until protected workflows complete.",
+    "No `v4.20.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance, or registry dist-tag update is established by this packet.",
   );
 }
 

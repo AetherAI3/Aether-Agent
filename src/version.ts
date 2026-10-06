@@ -1,2 +1,2 @@
 // Single source of the CLI version (kept in lockstep with package.json).
-export const VERSION = "0.4.0";
+export const VERSION = "4.20.0";
