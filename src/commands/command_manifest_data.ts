@@ -3032,6 +3032,27 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:auth",
+    "surface": "slash",
+    "name": "auth",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "[status|login|continue|new|draft]",
+    "summary": "repair hosted login and explicitly continue a rejected task",
+    "detailedHelp": "/auth [status|login|continue|new|draft]\nCheck credential source, sign in with browser or --no-browser, explicitly continue a safely rejected task, or restore a type-ahead draft. Account changes require /auth new.",
+    "section": "Session",
+    "hidden": false,
+    "permissionClass": "account",
+    "availability": { "state": "runtime-dependent", "capabilityRequirements": ["aether.hosted"] },
+    "telemetryName": "slash.auth",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": { "id": "handler:slash:auth", "kind": "host", "module": "src/commands/slash.ts", "symbol": "handleSlash" },
+    "docs": { "kind": "manifest", "module": "src/commands/command_manifest_data.ts", "symbol": "COMMAND_MANIFEST_SOURCE", "target": "auth", "usage": "/auth [status|login|continue|new|draft]", "visible": true, "disposition": "generated" },
+    "release": { "disposition": "new", "note": "In-console hosted authentication repair with explicit safe continuation." }
+  },
+  {
     "key": "slash:models",
     "surface": "slash",
     "name": "models",

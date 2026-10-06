@@ -65,6 +65,8 @@ type Kind = "model" | "orchestrator";
 // Catalog is cached per REPL session; a fresh session re-fetches.
 let _catalog: CatalogResponse | null = null;
 
+export function invalidateCatalog(): void { _catalog = null; }
+
 /** Resolve a selection arg (1-based index OR id) against a list. Pure. */
 export function resolveSelection(items: CatalogItem[], arg: string): CatalogItem | null {
   const a = arg.trim();
@@ -137,6 +139,9 @@ export async function handleSlash(
     case "help":
     case "":
       printSlashHelp(out, arg);
+      break;
+    case "auth":
+      out.write("/auth status|login|continue|new|draft is available in the interactive coding console.\n");
       break;
     case "browser":
     case "ats":

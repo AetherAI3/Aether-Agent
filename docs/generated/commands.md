@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:468d917977ef1db81f80d9c4f088cf2aca0421fc80c4af7725f4cc6b298adae8 -->
+<!-- manifest-digest: sha256:8ad72a114a3f04b88102c875517265f08255bf702665cc91753515bd92023b57 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -314,6 +314,12 @@ Permission: `network` · Availability: `runtime-dependent` · Telemetry: `shell.
 this help, or detail for one command
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.help`
+
+#### `/auth [status|login|continue|new|draft]`
+
+repair hosted login and explicitly continue a rejected task
+
+Permission: `account` · Availability: `runtime-dependent` · Telemetry: `slash.auth` · Requires: `aether.hosted`
 
 #### `/models`
 
