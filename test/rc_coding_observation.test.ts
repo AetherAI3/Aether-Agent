@@ -49,9 +49,11 @@ test("a real coding event stream reaches ordered browser events with private fie
   const received: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
   let sequence = 0;
   const api = {
-    async postJson(_path: string, body: { events: Array<{
+    async postJson(path: string, body: { events: Array<{
       host_event_id: string; event_type: string; payload: Record<string, unknown>;
     }> }) {
+      // A live host heartbeats too (#223); only appends carry events.
+      if (path.endsWith("/host/heartbeat")) return { session_id: SESSION, state: "live" };
       received.push(...body.events);
       return {
         session_id: SESSION,
@@ -148,10 +150,21 @@ test("an in-flight receipt cannot turn a locally revoked session back on", async
   seeded(root, path);
   let accept!: (value: unknown) => void;
   const response = new Promise((resolve) => { accept = resolve; });
-  const api = { postJson: () => response } as unknown as ApiClient;
+  let appends = 0;
+  const api = {
+    postJson: (path: string) => {
+      if (path.endsWith("/host/heartbeat")) return Promise.resolve({ session_id: SESSION, state: "live" });
+      appends += 1;
+      return response;
+    },
+  } as unknown as ApiClient;
   const observer = openRcCodingObserver(root, api, path);
   assert.ok(observer);
   observer.feed({ type: "stage", name: "execute", face: "" });
+  // Let the heartbeat answer and the append go out, so the receipt below is
+  // genuinely in flight when the local revoke lands.
+  for (let i = 0; i < 5 && appends === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(appends, 1, "the append is in flight");
   const old = loadOutbox(path, root);
   const receipts = old.events.map((event, index) => ({
     host_event_id: event.host_event_id,
@@ -167,4 +180,74 @@ test("an in-flight receipt cannot turn a locally revoked session back on", async
   const current = loadOutbox(path, root);
   assert.equal(current.revoke_pending, true);
   assert.deepEqual(current.events, []);
+});
+
+// The run-end diff (#218) is measured while the run finishes; the run never
+// awaits it. close() (#223) waits for it only inside its ONE deadline.
+const RUN_END_DIFF = {
+  event_type: "diff_summary",
+  payload: { projection_version: "1", files_changed: 1, insertions: 2, deletions: 0, files: ["a.txt"] },
+} as const;
+
+function receiptingApi(appended: string[]): ApiClient {
+  let seq = 0;
+  return {
+    postJson: async (route: string, body: { events?: Array<{
+      host_event_id: string; event_type: string; payload: Record<string, unknown>;
+    }> }) => {
+      if (route.endsWith("/host/heartbeat")) return { session_id: SESSION, state: "live" };
+      const events = body.events ?? [];
+      appended.push(...events.map((event) => event.event_type));
+      return {
+        session_id: SESSION,
+        receipts: events.map((event) => ({
+          host_event_id: event.host_event_id,
+          seq: ++seq,
+          payload_digest: payloadDigest(event.payload),
+        })),
+      };
+    },
+  } as unknown as ApiClient;
+}
+
+test("close waits for a run-end diff inside its deadline, and delivers it before returning", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rc-code-"));
+  const path = join(root, "outbox.json");
+  seeded(root, path);
+  const appended: string[] = [];
+  const observer = openRcCodingObserver(root, receiptingApi(appended), path, {
+    measureDiff: () => new Promise((resolve) => setTimeout(() => resolve({ ...RUN_END_DIFF }), 50)),
+  });
+  assert.ok(observer);
+  void observer.publishDiff(root); // exactly as code.ts calls it: not awaited
+  const started = Date.now();
+  await observer.close(1_500);
+  assert.ok(Date.now() - started < 1_500, "close kept its deadline");
+  assert.ok(appended.includes("diff_summary"), "the measured diff was delivered before close returned");
+  assert.equal(
+    loadOutbox(path, root).events.some((event) => event.event_type === "diff_summary"),
+    false,
+    "and its receipt was committed",
+  );
+});
+
+test("a run-end diff that never finishes measuring cannot hold close past its deadline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rc-code-"));
+  const path = join(root, "outbox.json");
+  seeded(root, path);
+  const appended: string[] = [];
+  const observer = openRcCodingObserver(root, receiptingApi(appended), path, {
+    measureDiff: () => new Promise(() => {}),
+  });
+  assert.ok(observer);
+  void observer.publishDiff(root);
+  const started = Date.now();
+  await observer.close(300);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 1_200, `close returned after ${elapsed} ms`);
+  // Once closed, nothing more is queued: not a late diff, not a late event.
+  observer.publish({ ...RUN_END_DIFF });
+  observer.feed({ type: "stage", name: "execute", face: "" });
+  assert.equal(loadOutbox(path, root).events.some((event) => event.event_type === "diff_summary"), false);
+  assert.equal(appended.includes("diff_summary"), false);
 });
