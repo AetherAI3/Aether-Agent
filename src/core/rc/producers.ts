@@ -385,21 +385,129 @@ export function prStatusEvent(receipt: ActionReceipt, repo?: RailRepo | null): R
   });
 }
 
+const ARTIFACT_KIND_LABEL: Readonly<Record<MediaEntry["kind"], string>> = {
+  image: "Image",
+  video: "Video",
+  "3d": "3D model",
+};
+
+/** Well under the Cloud's 512-char display bound; a name, not a description. */
+const MAX_ARTIFACT_TITLE = 128;
+
+/**
+ * Words a file name can share with almost any prompt without being a slug of
+ * it. Everything else a name shares with the prompt is treated as the prompt.
+ */
+const PROMPT_FILLER: ReadonlySet<string> = new Set([
+  "the", "and", "for", "with", "from", "into", "onto", "over", "that", "this", "its", "are", "was",
+  "you", "your", "our", "all", "any", "one", "make", "create", "generate", "render", "please",
+  "image", "photo", "picture", "video", "style",
+]);
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const UUID_SHAPE = /[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i;
+
+/** Lower-cased letters and digits only, in any script. */
+function folded(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** The prompt's meaningful words: 3+ characters, not filler, not a bare number. */
+function promptWords(prompt: string): string[] {
+  return prompt.toLowerCase().split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length >= 3 && !PROMPT_FILLER.has(word) && !/^\p{N}+$/u.test(word));
+}
+
+/**
+ * An object key rather than a name: a UUID, a long letter-and-digit run, or a
+ * mixed-case base64url run. With no server filename the label is the media
+ * URL's last path segment, and for an unguessable-link CDN that IS the link.
+ */
+function capabilityShaped(stem: string): boolean {
+  if (UUID_SHAPE.test(stem)) return true;
+  if ((stem.match(/[A-Za-z0-9]{16,}/g) ?? []).some((run) => /[A-Za-z]/.test(run) && /\d/.test(run))) return true;
+  return (stem.match(/[A-Za-z0-9_-]{20,}/g) ?? [])
+    .some((run) => /[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run));
+}
+
+/** At most `max` UTF-16 units, cut on a code-point boundary. */
+function boundedLabel(value: string, max: number): string {
+  let out = "";
+  for (const char of value) {
+    if (out.length + char.length > max) break;
+    out += char;
+  }
+  return out;
+}
+
+/**
+ * What the artifact is called, without echoing how it was made.
+ *
+ * The label is the file's own name, reduced to a bounded leaf: a stored
+ * `displayName` with a directory, a query (`?` cannot appear in a Windows file
+ * name, so one here means a URL slipped in), control characters or a broken
+ * surrogate is cut down rather than trusted. It falls back to a generic
+ * `Image #12` when nothing safe is left, and also when the name could carry
+ * what this producer drops on purpose: the model (an unlabelled download is
+ * named `<model>_<timestamp>.png`), the prompt (a server-chosen name can be a
+ * slug of it — so ANY meaningful prompt word in the name, in any order or
+ * concatenated, counts), or a capability-shaped object key. False positives
+ * only cost a less specific label. The fallback also means `title` is never
+ * empty: an empty required string is a Cloud 400, and a 400 wedges every
+ * later event in the outbox.
+ */
+function artifactTitle(entry: MediaEntry): string {
+  const generic = `${ARTIFACT_KIND_LABEL[entry.kind] ?? "Artifact"} #${entry.sequence}`;
+  const leaf = entry.displayName.split(/[\\/]/).pop() ?? "";
+  const label = boundedLabel(
+    (leaf.split("?")[0] ?? "")
+      .replace(LONE_SURROGATE, "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+    MAX_ARTIFACT_TITLE,
+  ).trim();
+  if (!label || label === "." || label === "..") return generic;
+
+  const stem = label.replace(/\.[A-Za-z0-9]{1,8}$/, "");
+  const name = folded(stem);
+  const model = folded(entry.model.replace(/^vision_/i, ""));
+  const promptPrefix = folded(entry.prompt).slice(0, 16);
+  if (
+    (model.length >= 4 && name.includes(model))
+    || (promptPrefix.length >= 8 && name.includes(promptPrefix))
+    || promptWords(entry.prompt).some((word) => name.includes(word))
+    || capabilityShaped(stem)
+  ) {
+    return generic;
+  }
+  return label;
+}
+
 /**
  * artifact — from the media history, the durable owner of generated results.
  *
  * Four of the entry's fields are deliberately dropped. `filePath` is an
  * absolute path carrying a username and the machine's layout; `url` can be a
  * signed, credential-bearing link; `prompt` is the operator's own words; and
- * `model` is model identity again. What a viewer needs is that an artifact of
- * some kind exists and what it is called.
+ * `model` is model identity again. `metadata` is private bookkeeping. What a
+ * viewer needs is that an artifact of some kind exists and what it is called.
+ *
+ * `artifact_id` here is the history entry's own id. The publisher
+ * (rc/artifacts.ts) replaces it with a session-scoped handle derived from that
+ * id, so a replayed or resent event updates one artifact in the viewer while
+ * the local id stays local. The size is reported only when it is a real byte
+ * count: the history stores 0 for "could not stat", and "0 bytes" would be a
+ * claim the host never measured.
  */
 export function artifactEvent(entry: MediaEntry): RcProducedEvent {
+  const size = entry.sizeBytes;
+  const measured = Number.isSafeInteger(size) && size > 0;
   return displayEvent("artifact", {
       artifact_id: entry.artifactId,
       kind: entry.kind,
-      title: entry.displayName,
-      summary: `${entry.kind} · ${entry.sizeBytes} bytes`,
+      title: artifactTitle(entry),
+      ...(measured ? { summary: `${entry.kind} · ${size} bytes` } : {}),
   });
 }
 
