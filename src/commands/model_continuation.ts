@@ -52,31 +52,38 @@ export function accountFingerprint(token: string | null): string {
 }
 
 export function consoleWorkspaceState(cwd: string, account: string, rulesDigest = ""): ContinuationState {
-  const changes = observedWorkspaceChanges(cwd);
+  const rawStatus = gitStatus(cwd);
   return {
     workspace: resolve(cwd), account, rulesDigest, repo: readRepoIdentity(cwd, defaultRunner()),
-    workspaceStatus: createHash("sha256").update(changes.join("\0")).digest("hex"),
+    workspaceStatus: rawStatus === null ? "unavailable" : createHash("sha256").update(rawStatus).digest("hex"),
   };
 }
 
 /** Only paths and Git status codes are read. No diff, file contents, or shell
  * output enters the continuation record. */
-export function observedWorkspaceChanges(cwd: string): string[] {
+function gitStatus(cwd: string): string | null {
   const result = spawnSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], {
-    cwd, encoding: "utf8", timeout: 5_000, maxBuffer: 256 * 1024, shell: false,
+    cwd, encoding: "utf8", timeout: 5_000, maxBuffer: 1024 * 1024, shell: false,
   });
-  if (result.status !== 0 || !result.stdout) return [];
-  const entries = result.stdout.split("\0");
+  return result.status === 0 ? result.stdout : null;
+}
+
+export function observedWorkspaceChanges(cwd: string): string[] {
+  const rawStatus = gitStatus(cwd);
+  if (rawStatus === null || !rawStatus) return [];
+  const entries = rawStatus.split("\0");
   const paths: string[] = [];
+  let omitted = 0;
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     if (!entry || entry.length < 4) continue;
     const status = entry.slice(0, 2);
     const path = entry.slice(3);
     if (status.includes("R") || status.includes("C")) i++; // skip rename source
-    paths.push(`${status.includes("D") ? "deleted" : "changed"}: ${safe(path, 220)}`);
-    if (paths.length >= 40) break;
+    if (paths.length < 40) paths.push(`${status.includes("D") ? "deleted" : "changed"}: ${safe(path, 220)}`);
+    else omitted++;
   }
+  if (omitted) paths.push(`[${omitted} additional workspace paths omitted]`);
   return paths;
 }
 
@@ -215,6 +222,7 @@ export class ConsoleTaskContinuation {
 
   private drift(now: ContinuationState): string | null {
     if (resolve(now.workspace) !== resolve(this.source.workspace)) return "workspace changed; cancel and start a fresh console session";
+    if (this.source.repo && (this.source.workspaceStatus === "unavailable" || now.workspaceStatus === "unavailable")) return "workspace status could not be verified; choose a fresh start";
     if (this.source.account !== "signed-out" && now.account !== this.source.account) return "account changed; prior context cannot be carried automatically";
     if (now.rulesDigest !== this.source.rulesDigest) return "project rules changed; review them and start a fresh session";
     if (this.source.repo?.remote !== now.repo?.remote || this.source.repo?.branch !== now.repo?.branch) return "repository or branch changed; prior context cannot be carried automatically";
