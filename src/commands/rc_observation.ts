@@ -5,12 +5,14 @@ import type { BrainEvent } from "../core/brain_protocol.js";
 import { resolve } from "node:path";
 import type { ApiClient } from "../core/transport.js";
 import { flushOutbox, type RcHostDeps } from "../core/rc/host.js";
+import { checkoutDiffSummary } from "../core/rc/diff_summary.js";
 import { enqueueEvent, loadOutbox, saveOutbox } from "../core/rc/outbox.js";
 import { mapBrainEventToRc } from "../core/rc/producers.js";
 import { projectRefFor, rcOutboxPath } from "./rc.js";
 
 export interface RcCodingObserver {
   feed(event: BrainEvent): void;
+  publishDiff(checkoutRoot: string): Promise<void>;
   /** Lets integration tests wait for a started upload; the coding run never does. */
   drain(): Promise<void>;
 }
@@ -68,6 +70,23 @@ export function openRcCodingObserver(
           flush(); // deliberately never awaited by the coding run
         } catch {
           // A broken or unwritable outbox is an RC failure, not a coding failure.
+        }
+      },
+      async publishDiff(checkoutRoot): Promise<void> {
+        if (stopped) return;
+        try {
+          const event = await checkoutDiffSummary(checkoutRoot);
+          if (!event) return;
+          const current = loadOutbox(path, root);
+          if (current.session_id !== record.session_id || current.revoke_pending) {
+            stopped = true;
+            return;
+          }
+          if (!enqueueEvent(record, event.event_type, event.payload)) return;
+          saveOutbox(path, record);
+          flush();
+        } catch {
+          // A diff observation cannot change the local coding result.
         }
       },
       drain: () => pending,
