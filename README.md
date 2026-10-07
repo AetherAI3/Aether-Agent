@@ -34,7 +34,7 @@ Choose hosted models or local Ollama. Keep working in the same terminal.
 | **Choose your model** | Hosted account models or local Ollama with no account required. [Model setup ↓](#choose-your-model) |
 | **Continue your work** | Resume project sessions, review changes, and export redacted handoffs. [Commands ↓](#everyday-commands) |
 | **Connect tools** | MCP servers, agent skills, and local development previews. [Command reference](docs/generated/commands.md) |
-| **Use account agents** | Shared Online conversations and guided ATS workspace setup in the 0.4.0 source candidate. [Account agents ↓](#account-agents-and-ats--040-source-candidate) |
+| **Use account agents** | Shared Online conversations and guided ATS workspace setup. [Account agents ↓](#account-agents-and-ats) |
 
 ## Quickstart
 
@@ -54,7 +54,7 @@ aether agent --test-cmd "npm test" "fix the failing test"
 
 A completed check records its exit code. Changing the repository makes that verification stale until you run it again.
 
-> **Requires 0.3.2 or newer** for the core coding workflows. This README also covers the **0.4.0 source candidate** on `main`, including the newer shell, Linux terminal, and account-agent workflows. Check `aether --version`; see [versions](#versions) or [build from source](#build-and-contribute) for candidate features. Publication and live-service qualification are recorded separately.
+> **Requires 0.3.2 or newer** for the core coding workflows. This README covers the **v4.20.0 source** on `main`, including the newer console, remote viewing, and account-agent workflows. Check `aether --version`; see [versions](#versions) or [build from source](#build-and-contribute) for available features. Registry publication is recorded separately.
 
 Prefer Python? `pipx install aether-agent` installs a launcher for the same CLI. [Python setup](packages/pypi-cli/README.md).
 
@@ -129,7 +129,7 @@ Shell and terminal output stays out of saved chat history and automatic hosted p
 
 Use `aether help <command>` or the [complete command reference](docs/generated/commands.md) for flags and slash commands. PC diagnostics and approved browser helpers have platform-specific limits; see the [PC guide](docs/pc-capability-plane.md).
 
-## Account agents and ATS — 0.4.0 source candidate
+## Account agents and ATS
 
 Use the same managed agents and Online conversations from your terminal:
 
@@ -143,8 +143,8 @@ readiness for the signed-in account. `aether doctor --live` checks the same
 read-only Cloud contract; plain `aether doctor` leaves account readiness
 unverified. A saved DM is reported as admitted only when Cloud confirms
 message admission.
-In `aether agent chat`, `/help` lists commands for the selected agent and
-`/refresh` checks the shared conversation again. The header shows Cloud DM sync
+In `aether agent chat`, in-chat help lists controls for the selected agent and
+can refresh the shared conversation. The header shows Cloud DM sync
 separately from ATS local setup. Transcript messages show their time and any
 reported admission state; a saved message is not an admitted run.
 
@@ -152,14 +152,14 @@ ATS is the trading adapter for account agents. Create a workspace with `aether a
 
 | Capability | Current status |
 |---|---|
-| Shared account agents and Online chats | Source candidate; requires the matching Cloud adapter. |
+| Shared account agents and Online chats | Requires the matching Cloud adapter and account admission. |
 | ATS workspace and strategy preparation | Local memory setup, native Nano compiler checks, and data-provider configuration. |
 | Browser observation | Read-only view; requires a separately running Agent Browser runtime. |
 | Market-data execution and orders | Production runtime wiring and managed-agent order execution are unavailable. |
 
 ATS requires the separate Python engine and policy consent. This build does not yet provide model-controlled broker actions or automatic live orders. Setup and observation do not grant trading authority.
 
-[Account agents and ATS guide](docs/ACCOUNT_AGENTS_AND_ATS.md) · [ATS policy](ATS_ACCEPTABLE_USE_POLICY.md) · [Candidate qualification](docs/releases/OPERATOR-PACKET-v0.4.0.md)
+[Account agents and ATS guide](docs/ACCOUNT_AGENTS_AND_ATS.md) · [ATS policy](ATS_ACCEPTABLE_USE_POLICY.md) · [Release qualification](docs/releases/OPERATOR-PACKET-v4.20.0.md)
 
 <!-- SOURCE-0.3-WORKFLOWS:END -->
 
@@ -227,7 +227,7 @@ The runtime bundles reviewed ATS adapter code and pinned browser/context depende
 |---|---:|---|
 | npm `latest` | [![npm latest](https://img.shields.io/npm/v/aether-agents?label=&color=14b8a6)](https://www.npmjs.com/package/aether-agents) | Published CLI; the badge resolves the live dist-tag. |
 | PyPI `aether-agent` | [![PyPI latest](https://img.shields.io/pypi/v/aether-agent?label=&color=3775a9)](https://pypi.org/project/aether-agent/) | Python launcher for npm `latest`, unless pinned. |
-| `main` source build | **0.4.0** | Source candidate; see the [operator packet](docs/releases/OPERATOR-PACKET-v0.4.0.md) for qualification evidence. |
+| `main` source build | **4.20.0** | See the [operator packet](docs/releases/OPERATOR-PACKET-v4.20.0.md) for qualification evidence. |
 
 [Release notes](RELEASE_NOTES.md) · [Release log](docs/releases/README.md) · [Releases and tags](https://github.com/AetherAI3/aether-agent/releases)
 
