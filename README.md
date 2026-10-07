@@ -15,7 +15,7 @@ Choose hosted models or local Ollama. Keep working in the same terminal.
 [![Node 24+](https://img.shields.io/badge/node-24%2B-14b8a6)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-06b6d4)](LICENSE)
 
-[Quickstart](#quickstart) · [Features](#what-you-can-do) · [Models](#choose-your-model) · [Terminal](#chat-and-terminal) · [Docs](#documentation) · [Contribute](#build-and-contribute)
+[Quickstart](#quickstart) · [v4.20.0 update](#whats-new-in-v4200) · [Features](#what-you-can-do) · [Models](#choose-your-model) · [Terminal](#chat-and-terminal) · [Docs](#documentation) · [Contribute](#build-and-contribute)
 
 <img width="820" alt="Aether Agent startup, command help, and model picker" src="assets/aether-agent-demo.gif" />
 
@@ -54,9 +54,27 @@ aether agent --test-cmd "npm test" "fix the failing test"
 
 A completed check records its exit code. Changing the repository makes that verification stale until you run it again.
 
-> **Requires 0.3.2 or newer** for the core coding workflows. This README covers the **v4.20.0 source** on `main`, including the newer console, remote viewing, and account-agent workflows. Check `aether --version`; see [versions](#versions) or [build from source](#build-and-contribute) for available features. Registry publication is recorded separately.
+The npm CLI is published as **v4.20.0**. Run `aether --version` to check the
+version you have installed. For a fixed install, use
+`npm install -g aether-agents@4.20.0 --ignore-scripts`.
 
 Prefer Python? `pipx install aether-agent` installs a launcher for the same CLI. [Python setup](packages/pypi-cli/README.md).
+
+## What's new in v4.20.0
+
+- **Stay in control of a task.** `/steer` updates the active run; switching
+  models continues it. Saved goals can execute a phase with host verification.
+- **Review before sharing.** Inspect, edit, or cancel queued input, and preview
+  shell output before attaching it to a model turn. Repeated tool failures pause
+  at a recovery checkpoint.
+- **Work comfortably across terminals.** Search installed Ollama models in the
+  picker, opt into a persistent PowerShell session on Windows, and draft PR
+  descriptions from final branch evidence.
+- **See more honest status.** Remote viewing reports measured host and run state;
+  account-agent chat distinguishes saved messages from admitted runs.
+
+See the [full v4.20.0 release notes](RELEASE_NOTES.md)
+for fixes, install options, and qualification limits.
 
 ## Choose your model
 
@@ -88,7 +106,7 @@ A dated, sanitized offline fallback snapshot is available as [HTML](docs/model-c
 
 ## Chat and terminal
 
-**Source candidate.** In the local coding console, switch between conversation and your own commands:
+In the local coding console, switch between conversation and your own commands:
 
 ```text
 Explain the failing test
@@ -167,7 +185,7 @@ ATS requires the separate Python engine and policy consent. This build does not 
 
 [**Aether Code**](https://app.aethersystems.net/) is the browser coding app alongside Web Chat and Design Lab. It uses the same Aether account; the CLI also works independently with local Ollama. Coding sessions stay on their host, while managed agents share their Online conversations.
 
-**Remote viewing (`aether rc`) is a source candidate.** The observer bridge is on `main`; a live Cloud viewer journey (Windows and Linux hosts, phone viewer) was recorded on 2026-10-06. `aether rc start` now requests a separate owner-scoped RC identity and does not require operator device enrollment; an ordinary-account deployed journey still needs qualification. It is designed to let a browser or phone watch a redacted terminal run through a link or QR code. The viewer has observation access only. [Remote viewing status and controls](docs/REMOTE_VIEWING.md).
+**Remote viewing (`aether rc`) is included in v4.20.0.** A live Cloud viewer journey (Windows and Linux hosts, phone viewer) was recorded on 2026-10-06. `aether rc start` requests a separate owner-scoped RC identity and does not require operator device enrollment; an ordinary-account deployed journey still needs qualification. It is designed to let a browser or phone watch a redacted terminal run through a link or QR code. The viewer has observation access only. [Remote viewing status and controls](docs/REMOTE_VIEWING.md).
 
 ## Privacy and control
 
@@ -192,7 +210,7 @@ ATS requires the separate Python engine and policy consent. This build does not 
 
 ## Build and contribute
 
-Build the source candidate with Node.js 24+:
+Build from source with Node.js 24+:
 
 ```bash
 git clone https://github.com/AetherAI3/aether-agent.git
@@ -227,7 +245,7 @@ The runtime bundles reviewed ATS adapter code and pinned browser/context depende
 |---|---:|---|
 | npm `latest` | [![npm latest](https://img.shields.io/npm/v/aether-agents?label=&color=14b8a6)](https://www.npmjs.com/package/aether-agents) | Published CLI; the badge resolves the live dist-tag. |
 | PyPI `aether-agent` | [![PyPI latest](https://img.shields.io/pypi/v/aether-agent?label=&color=3775a9)](https://pypi.org/project/aether-agent/) | Python launcher for npm `latest`, unless pinned. |
-| `main` source build | **4.20.0** | See the [operator packet](docs/releases/OPERATOR-PACKET-v4.20.0.md) for qualification evidence. |
+| `main` source build | **4.20.0** | See the [v4.20.0 notes](RELEASE_NOTES.md) and [operator packet](docs/releases/OPERATOR-PACKET-v4.20.0.md). |
 
 [Release notes](RELEASE_NOTES.md) · [Release log](docs/releases/README.md) · [Releases and tags](https://github.com/AetherAI3/aether-agent/releases)
 
