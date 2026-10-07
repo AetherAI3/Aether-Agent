@@ -126,7 +126,9 @@ test("TTY: list, edit and remove mixed queued entries while a turn streams; remo
     submit("third question");
     await until(() => output().includes("Queued q5 (chat"), "four entries queued");
     assert.match(output(), /⏳ Queued q2 \(chat, 1 pending\): "second question"/);
-    assert.match(output(), /⏳ Queued q3 \(user shell, 2 pending\): !.*removed\.txt.*\(local only; never sent to the model\)/);
+    // The preview is capped; a long runner path may hide the filename.
+    // Execution and non-disclosure of the full command are checked below.
+    assert.match(output(), /⏳ Queued q3 \(user shell, 2 pending\): !.*\(local only; never sent to the model\)/);
 
     // A send cannot queue without a reviewed preview to bind to.
     submit("/shell-result send");

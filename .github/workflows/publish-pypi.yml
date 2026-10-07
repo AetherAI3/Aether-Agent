@@ -31,6 +31,11 @@ on:
         required: false
         default: true
         type: boolean
+      manual_self_hosted:
+        description: One-time v4.20.0 recovery on the reviewed self-hosted pool
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -41,7 +46,7 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.manual_self_hosted && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     environment: pypi-production
     permissions:
@@ -50,6 +55,16 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.ref }}
     steps:
+      - name: Limit the recovery route to v4.20.0 from main
+        if: ${{ inputs.manual_self_hosted }}
+        shell: bash
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$RELEASE_TAG" = v4.20.0
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+
       - name: Checkout the release tag, or main for a first publish
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -140,17 +155,41 @@ jobs:
 
       - name: Upload release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: ${{ inputs.manual_self_hosted == true }}
         with:
           name: pypi-release-${{ env.RELEASE_TAG }}
           path: packages/pypi-cli/dist/*
           if-no-files-found: error
           retention-days: 90
 
+      - name: Record recovery evidence in logs
+        if: ${{ inputs.manual_self_hosted }}
+        working-directory: packages/pypi-cli
+        shell: bash
+        run: |
+          echo "Source commit: $(git rev-parse HEAD)"
+          sha256sum dist/*
+
       - name: Publish to PyPI
-        if: ${{ github.event_name == 'release' || !inputs.dry_run }}
+        if: ${{ !inputs.manual_self_hosted && (github.event_name == 'release' || !inputs.dry_run) }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: packages/pypi-cli/dist
+
+      # The reviewed self-hosted runner has no Docker, so the container action above
+      # cannot start there. Twine 6.2 obtains the same short-lived PyPI credential
+      # directly from this job's OIDC identity; no stored API token is needed.
+      - name: Publish to PyPI from the recovery runner
+        if: ${{ inputs.manual_self_hosted && !inputs.dry_run }}
+        shell: bash
+        working-directory: packages/pypi-cli
+        run: |
+          set -Eeuo pipefail
+          unset TWINE_USERNAME TWINE_PASSWORD
+          mkdir -p "$RUNNER_TEMP/twine-home"
+          HOME="$RUNNER_TEMP/twine-home" \
+            PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring \
+            python -m twine upload --non-interactive dist/*
 
       - name: Dry run summary
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

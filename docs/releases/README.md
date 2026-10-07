@@ -13,6 +13,9 @@ as prerelease evidence while the registry and tag remain authoritative.
 
 ## Index
 
+- [2026-10-06](2026-10-06.md) — **v4.20.0 release candidate** for coding
+  console control, Remote Control status, and managed-agent readiness. Packet:
+  [OPERATOR-PACKET-v4.20.0.md](OPERATOR-PACKET-v4.20.0.md).
 - [2026-09-30](2026-09-30.md) — **v0.4.0 response incident qualification
   update**: Windows CLI trust and installed-command diagnosis, one completed
   hosted source chat turn, and remaining packaged and release gates. This is

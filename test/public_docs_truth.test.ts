@@ -40,9 +40,9 @@ test("ATS is documented as the current account-agent trading adapter with explic
     version: string;
     dependencies?: Record<string, string>;
   };
-  const heading = `## Account agents and ATS — ${manifest.version} source candidate`;
+  const heading = "## Account agents and ATS";
   const start = readme.indexOf(heading);
-  assert.ok(start >= 0, "README must label the ATS workflow with its source-candidate version");
+  assert.ok(start >= 0, "README must document the ATS workflow");
   const end = readme.indexOf("\n## ", start + heading.length);
   const ats = readme.slice(start, end < 0 ? undefined : end).replace(/\s+/gu, " ");
   assert.match(ats, /ATS is the trading adapter for account agents\./u);
@@ -147,10 +147,10 @@ test("README states npm and source versions in a way publishing cannot falsify",
   const sourceEnd = readme.indexOf("<!-- SOURCE-0.3-WORKFLOWS:END -->");
   assert.ok(sourceStart >= 0 && sourceEnd > sourceStart, "README source-only scope markers are missing");
   const sourceScope = readme.slice(sourceStart, sourceEnd);
-  // The existing coding workflows retain their released minimum. The new ATS
-  // workflow declares the current source-candidate requirement separately.
+  // The existing coding workflows retain their released minimum. The ATS
+  // workflow remains documented without a stale candidate-only version claim.
   assert.match(sourceScope, /Requires 0\.3\.2 or newer/u);
-  assert.ok(sourceScope.includes(`Account agents and ATS — ${sourceVersion} source candidate`));
+  assert.ok(sourceScope.includes("## Account agents and ATS"));
 });
 
 test("README fenced shell examples use registered commands and flags", () => {

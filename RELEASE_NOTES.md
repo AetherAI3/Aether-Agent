@@ -1,3 +1,41 @@
+# Aether Agent v4.20.0 — a more capable coding console
+
+**Release candidate — October 6, 2026.** These notes describe source changes since
+v0.4.0. npm and PyPI publication require the exact release checks and protected
+publishing workflows to complete.
+
+- **Control a running task.** `/steer` reaches the active turn and confirms when
+  the direction was accepted. Switching models continues the current task.
+  Saved goals can run one phase at a time with host verification.
+- **Review work before it leaves your machine.** Shell results can be previewed
+  and edited before they are shared with a model. The console lets you inspect,
+  edit, or cancel queued chat and shell commands. Repeated failing tool calls
+  now pause at a recovery checkpoint, and complete-read proof guards whole-file
+  replacements.
+- **A stronger terminal workflow.** The model picker can search installed
+  Ollama models. PowerShell users can opt into a persistent console session.
+  PR descriptions can be drafted from final branch evidence, and `ship`
+  handles quoted slash arguments while rejecting invalid flags.
+- **Remote viewing with clearer state.** A cancelled preview ends cleanly;
+  host heartbeat and outbox delivery continue during a run. The viewer reports
+  exposure, connected viewers, session health, measured checkout diffs, test
+  results, CI and PR status, and generated artifact metadata from receipts.
+  Home-relative tool targets are refused before durable enqueue. Remote
+  viewing still requires its separately configured service and permission.
+- **Account agents report what is ready.** Terminal account readiness includes
+  model and UVT availability. Managed-agent chat distinguishes saved messages
+  from admitted runs and reports the actual Online status.
+
+The PyPI `aether-agent` package remains a launcher for the npm CLI. A PyPI
+version update does not bundle a second agent implementation. ATS runtime
+installation remains gated by its separate signed manifest and entitlement;
+this release does not claim live trading or autonomous broker execution.
+
+See the [v4.20.0 operator packet](docs/releases/OPERATOR-PACKET-v4.20.0.md)
+for exact-source qualification and publication status.
+
+---
+
 # Aether Agent v0.4.0 — shared agents and ATS setup
 
 **Release candidate — September 17, 2026. No tag or registry publication is established by these notes.**
