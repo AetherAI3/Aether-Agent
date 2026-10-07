@@ -62,7 +62,8 @@ jobs:
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REF" = refs/heads/main
           test "$RELEASE_TAG" = v4.20.0
-          docker info --format '{{.ServerVersion}}'
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
 
       - name: Checkout the release tag, or main for a first publish
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -170,10 +171,25 @@ jobs:
           sha256sum dist/*
 
       - name: Publish to PyPI
-        if: ${{ github.event_name == 'release' || !inputs.dry_run }}
+        if: ${{ !inputs.manual_self_hosted && (github.event_name == 'release' || !inputs.dry_run) }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: packages/pypi-cli/dist
+
+      # The reviewed self-hosted runner has no Docker, so the container action above
+      # cannot start there. Twine 6.2 obtains the same short-lived PyPI credential
+      # directly from this job's OIDC identity; no stored API token is needed.
+      - name: Publish to PyPI from the recovery runner
+        if: ${{ inputs.manual_self_hosted && !inputs.dry_run }}
+        shell: bash
+        working-directory: packages/pypi-cli
+        run: |
+          set -Eeuo pipefail
+          unset TWINE_USERNAME TWINE_PASSWORD
+          mkdir -p "$RUNNER_TEMP/twine-home"
+          HOME="$RUNNER_TEMP/twine-home" \
+            PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring \
+            python -m twine upload --non-interactive dist/*
 
       - name: Dry run summary
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
