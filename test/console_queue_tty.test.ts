@@ -104,6 +104,27 @@ async function withConsole(run: (h: Harness) => Promise<void>): Promise<void> {
 
 const shellResults = (output: string): number => (output.match(/"type":"shell_result"/g) ?? []).length;
 
+test("Ctrl+R does not take input ownership during a streaming turn; typeahead remains a draft", async () => {
+  await withConsole(async ({ bodies, output, submit, type, until, answer, waitForCall }) => {
+    submit("stored prompt");
+    await answer(1);
+    await until(() => (output().match(/"type":"turn_outcome"/g) ?? []).length >= 1, "first turn completed");
+    submit("active prompt");
+    await waitForCall(2);
+    const before = output().length;
+    type("\x12queued draft");
+    assert.doesNotMatch(output().slice(before), /Ctrl\+R/);
+    assert.equal(bodies.length, 2);
+    await answer(2);
+    await until(() => (output().match(/"type":"turn_outcome"/g) ?? []).length >= 2, "second turn completed");
+    type("\r");
+    await waitForCall(3);
+    assert.match(bodies[2]!, /queued draft/);
+    await answer(3);
+    await until(() => (output().match(/"type":"turn_outcome"/g) ?? []).length >= 3, "typeahead turn completed");
+  });
+});
+
 test("TTY: list, edit and remove mixed queued entries while a turn streams; removed entries make zero calls", async () => {
   await withConsole(async ({ root, bodies, output, submit, type, until, answer, waitForCall }) => {
     submit("first question");

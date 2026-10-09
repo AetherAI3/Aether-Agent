@@ -75,8 +75,8 @@ These apply to any command (parsed anywhere on the line).
 
 ### `aether` — interactive REPL
 Opens a session. Type a prompt to chat; type `/` commands to control it (see
-[Slash commands](#slash-commands)). Up-arrow recalls prompts across sessions
-(history lives at `~/.aether-agent/history`).
+[Slash commands](#slash-commands)). Up-arrow recalls submitted prompts from
+this workspace (stored under `~/.aether-agent/history.d/`).
 `Ctrl-C` mid-answer cancels the turn and keeps the session; `Ctrl-C` at an
 empty prompt (or `/exit`) leaves.
 
@@ -86,6 +86,19 @@ shows the line count. Ctrl+_ undoes recent edits (adjacent typing groups into
 one step; a bracketed paste is one step). Ctrl+Y restores the last text killed
 with Ctrl+K, Ctrl+U, or Ctrl+W. Submitting or clearing a draft ends its undo
 and yank history. Non-TTY input stays line-oriented.
+
+Ctrl+R searches this workspace's loaded prompt history. An empty query selects
+the newest entry; type to narrow the matches and press Ctrl+R again to move
+older without wrapping. The panel shows the query, selected prompt, and a
+no-match state. Enter inserts the complete stored prompt for editing without
+sending it; Escape restores the exact prior draft and cursor. Search examines
+at most 1,000 loaded entries, 16 KiB per entry and 1 MiB total per query update.
+Oversized or over-budget entries are skipped and counted; displayed matches
+are clipped to 512 characters and terminal width without clipping the prompt
+inserted on Enter. `AETHER_NO_HISTORY=1` disables loading and saving history.
+Stored prompts are not automatically filtered for secrets. Shell commands,
+tool output, and approval feedback are not added to prompt history. Search
+is available only when the idle raw composer owns input.
 
 Some terminals send LF for Enter as well as Ctrl+J, so those two keys cannot
 be distinguished there. Use `aether config set lfSubmits true` to make LF
@@ -731,6 +744,7 @@ Requires an active orchestrator — switch with `/agent neo` or `/agent kronus` 
 | `OLLAMA_HOST` | `http://localhost:11434` | Where the offline brain looks for Ollama. Accepts Ollama's own scheme-less form (`127.0.0.1:11434`) as well as a full URL — see below. |
 | `AETHER_STREAM_TIMEOUT_MS` | `120000` | Stream open/idle timeout (ms). `0` disables it. |
 | `AETHER_NO_ANIM` | *(unset)* | `1` disables all animated status lines and the thinking pulse. |
+| `AETHER_NO_HISTORY` | *(unset)* | `1` disables workspace prompt-history loading and saving, including Ctrl+R search. |
 | `NO_COLOR` | *(unset)* | Any value disables ANSI colors (https://no-color.org). |
 
 See [`.env.example`](.env.example).

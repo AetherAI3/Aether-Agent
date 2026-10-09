@@ -1,11 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { InputBuffer } from "../src/ui/input_line.js";
+import { HISTORY_CAP } from "../src/core/history_store.js";
 
 test("typed characters accumulate", () => {
   const b = new InputBuffer();
   for (const c of "hello") b.insert(c);
   assert.equal(b.value, "hello");
+});
+test("in-memory prompt history stays under the existing workspace entry cap", () => {
+  const b = new InputBuffer();
+  for (let i = 0; i < HISTORY_CAP + 2; i++) b.commit(`prompt ${i}`);
+  assert.equal(b.historyEntries().length, HISTORY_CAP);
+  assert.equal(b.historyEntries()[0], "prompt 2");
 });
 test("bracketed paste inserts the whole block at the cursor", () => {
   const b = new InputBuffer();

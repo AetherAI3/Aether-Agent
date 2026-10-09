@@ -4,6 +4,7 @@
 // History semantics: consecutive duplicates collapse, recalling history
 // stashes the in-progress draft (restored when you arrow back down), and the
 // REPL persists entries across sessions via core/history_store.
+import { HISTORY_CAP } from "../core/history_store.js";
 
 interface EditSnapshot {
   value: string;
@@ -199,15 +200,18 @@ export class InputBuffer {
   commit(line: string): void {
     if (line.trim() && this.history[this.history.length - 1] !== line) {
       this.history.push(line);
+      if (this.history.length > HISTORY_CAP) this.history.shift();
     }
     this.clear();
   }
   /** Seed history from a persisted store (oldest first). */
   loadHistory(lines: readonly string[]): void {
-    this.history = [...lines];
+    this.history = lines.slice(-HISTORY_CAP);
     this.histIdx = -1;
     this.endRecoveryScope();
   }
+  /** Search reads only the bounded, already loaded workspace prompt entries. */
+  historyEntries(): readonly string[] { return this.history.slice(); }
   historyUp(): void {
     if (this.history.length === 0) return;
     if (this.histIdx === 0) return;
