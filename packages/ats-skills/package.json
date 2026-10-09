@@ -11,7 +11,7 @@
   "files": ["src", "python/bridge.py", "python/memory_lease.py", "strategies", "bin", "README.md", "SETTINGS.md", "LICENSE"],
   "engines": { "node": ">=20" },
   "scripts": { "test": "node --test test/*.test.mjs", "check": "node --check src/index.js && node --check bin/aether-ats-skills.js" },
-  "dependencies": { "aether-browser": "0.2.2", "aether-context": "0.3.1" },
+  "dependencies": { "aether-browser": "0.2.2", "aether-context": "0.5.0" },
   "license": "Apache-2.0",
   "author": "Aether AI LLC"
 }
