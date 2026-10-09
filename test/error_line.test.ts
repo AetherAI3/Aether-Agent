@@ -108,7 +108,10 @@ test("cmdChat/printError: a 401 (aek_ key, no refresh) renders the exact shared 
     assert.equal(code, 1);
     const expectedMsg = "HTTP 401: token revoked"; // HttpError surfaces the server's detail text
     const expectedHint = errorHint(new HttpError(401, expectedMsg), ctx.cfg.baseUrl);
-    assert.equal(stripAnsi(stderrBytes), stripAnsi(formatErrorLine(expectedMsg, { hint: expectedHint })));
+    assert.ok(
+      stripAnsi(stderrBytes).endsWith(stripAnsi(formatErrorLine(expectedMsg, { hint: expectedHint }))),
+      "the final error block uses the shared formatter after any context header",
+    );
     assert.match(stripAnsi(stderrBytes), /aether auth login/, "the same session-expired hint chat.ts has always shown");
   } finally {
     globalThis.fetch = real;

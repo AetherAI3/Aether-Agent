@@ -31,10 +31,12 @@ test("/recon without topic returns usage error", () => {
   assert.equal(r.error, "usage: /recon <topic>");
 });
 
-test("/plan slugs the topic into the save path", () => {
+test("/plan carries planning capability and returns the plan without a write", () => {
   const r = applyPromptMode("/plan Add OAuth2 Support!");
   assert.equal(r.handled, true);
-  assert.ok(r.prompt!.includes(".hermes/plans/add-oauth2-support.md"));
+  assert.equal(r.capability, "planning");
+  assert.match(r.prompt!, /Return the plan in your response without writing files/);
+  assert.doesNotMatch(r.prompt!, /Save to/);
 });
 
 test("/self-review and /code-review need no arg", () => {

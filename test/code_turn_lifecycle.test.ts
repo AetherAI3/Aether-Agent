@@ -23,6 +23,19 @@ const task: TaskCommand = {
   poolGb: 5,
 };
 
+test("planning settles a completed answer without verification, while a normal turn still needs it", () => {
+  const plan = new CodeTurnLifecycle("outline", {}, "planning");
+  plan.observe({ type: "done", ok: true, result: "steps", remaining: 0, reason: "" });
+  assert.equal(plan.settle(null).state, "succeeded");
+  assert.match(plan.report?.check.reason ?? "", /planning does not run host verification/);
+  const coding = new CodeTurnLifecycle("implement");
+  coding.observe({ type: "done", ok: true, result: "done", remaining: 0, reason: "" });
+  assert.equal(coding.settle(null).state, "failed");
+  const denied = new CodeTurnLifecycle("outline", {}, "planning");
+  denied.observe({ type: "done", ok: false, result: "refused", remaining: 0, reason: "" });
+  assert.equal(denied.settle(null).state, "failed");
+});
+
 const GREEN_CHECK: VerifyOutcome = {
   status: "ok",
   remaining: 0,

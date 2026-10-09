@@ -10,7 +10,7 @@
 import type { AppContext } from "../core/context.js";
 import { completeMemory, pinMemory } from "../core/project_memory/run.js";
 import type { Brain, TaskCommand } from "../core/brain.js";
-import type { BrainEvent } from "../core/brain_protocol.js";
+import type { BrainEvent, ToolName } from "../core/brain_protocol.js";
 import type { RunOptions, ToolResult } from "../core/tool_executor.js";
 import { LocalBrain } from "../core/brain_local.js";
 import { OllamaBrain } from "../core/brain_ollama.js";
@@ -57,7 +57,7 @@ import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js"
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
 import { ModelOutputBudget } from "../core/model_output_budget.js";
-import { prepareToolApproval, requestToolApproval, terminalSafeReview } from "../core/tool_approval.js";
+import { bindToolApprovalVerdict, deniedToolResult, prepareToolApproval, requestToolApproval, terminalSafeReview, type ToolApprovalVerdict } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SessionContext } from "../core/session_resume.js";
 import type { SkillSessionProvenance } from "../core/skills/skill_session.js";
@@ -88,6 +88,9 @@ import { isPublicationToolCall } from "../core/goal_run.js";
 import { turnOutcomeRecord } from "./chat.js";
 import { openRcCodingObserver, type RcCodingObserver } from "./rc_observation.js";
 import { publishCodingVerification } from "./rc_verification.js";
+import { promptInputLabel, type PromptInput } from "./prompt_file.js";
+import { getRegistry } from "../core/context_registry.js";
+import { refuseRunCapability, type RunCapability } from "../core/run_capability.js";
 import {
   TRANSIENT_READ_AUTO_RETRIES,
   checkpointDoneEvent,
@@ -156,7 +159,7 @@ export function codeMeaningfulProgressTimeoutMs(
 }
 
 /** Approve (or refuse) one brain-emitted tool call before the host executes it. */
-export type ToolGate = (call: { name: string; args: Record<string, unknown> }) => Promise<boolean>;
+export type ToolGate = (call: { id: string; name: string; args: Record<string, unknown> }) => Promise<ToolApprovalVerdict | boolean>;
 
 /** Read-only correlation hooks for an explicit saved-goal phase run. */
 export interface CodeRunStarted {
@@ -177,6 +180,8 @@ export interface CodeRunFinished extends CodeRunStarted {
 }
 
 export interface CodeOpts {
+  /** Authority for this one invocation. */
+  capability?: RunCapability;
   /** Use the local Python/Ollama brain instead of the cloud API. */
   local: boolean;
   /** Pool size in GB (sets the status-bar denominator: pool x 233M). */
@@ -205,6 +210,8 @@ export interface CodeOpts {
   skill?: string;
   /** `--no-skills`: load no skill. The project's own AGENTS.md still applies. */
   noSkills?: boolean;
+  /** Explicit task intake provenance. The task text itself stays in TaskCommand. */
+  promptInput?: PromptInput;
   /** An explicit goal run is already bound to this checkout. */
   workspaceMode?: "current";
   /** Cancel the brain, tools, and final check from an external controller. */
@@ -338,8 +345,10 @@ export class CodeTurnLifecycle {
   private fatal: Extract<BrainEvent, { type: "routing_drift" }> | null = null;
   private final: { report: CodeRunReport; verification: VerifyOutcome | null } | null = null;
   private checkpoint: ToolFailureCheckpoint | null = null;
+  private readonly capability: RunCapability;
 
-  constructor(prompt: string, opts: TurnLifecycleOptions = {}) {
+  constructor(prompt: string, opts: TurnLifecycleOptions = {}, capability: RunCapability = "coding") {
+    this.capability = capability;
     this.lifecycle = new TurnLifecycle(prompt, opts);
     this.lifecycle.transition("submitted");
     this.lifecycle.transition("connecting");
@@ -551,6 +560,11 @@ export class CodeTurnLifecycle {
       const described = describeStreamFailure({ message: this.brainError });
       return byTurn("failed", { message: this.brainError, hint: described.hint, retryable: described.retryable });
     }
+    if (this.capability === "planning" && !verification) {
+      return this.done?.ok
+        ? byTurn("succeeded", { message: "plan returned; verification intentionally skipped" })
+        : byTurn("failed", { message: "planning brain did not complete the plan" });
+    }
     if (!verification) return byTurn("failed", { message: "host final verification did not complete" });
     if (verification.check.state === "launch_failed") {
       return byCheck("failed", {
@@ -576,6 +590,7 @@ export class CodeTurnLifecycle {
 
   /** Why no check ran, for a run that settled without one. */
   private notRunReason(): string {
+    if (this.capability === "planning") return "planning does not run host verification";
     if (this.fatal) return "the coding transport was refused before local execution";
     if (isAbortError(this.thrown)) return "the coding turn was cancelled before host verification";
     if (this.thrown instanceof StreamTimeoutError) return "the model stream timed out before host verification";
@@ -773,6 +788,10 @@ export async function cmdCode(
   opts: CodeOpts,
   workspaceRun: Runner = defaultRunner(),
 ): Promise<number> {
+  if (opts.capability === "planning" && (opts.repo || opts.worktree || opts.resume)) {
+    process.stderr.write("✗ planning uses the current workspace; --repo, --worktree, and --resume are incompatible\n");
+    return 2;
+  }
   // --resume carries the prior session's context forward, so it is also a task
   // of its own: with no new instruction the run continues the ORIGINAL task.
   // Resolved ONCE — the handoff the brain reads and the lines the human sees
@@ -798,7 +817,7 @@ export async function cmdCode(
   }
   // What the run is CALLED (worktree branch, session manifest, summary) stays
   // the human-sized instruction; the brief below is what the brain reads.
-  const label = task.trim() || handoff!.task;
+  const label = opts.promptInput ? promptInputLabel(opts.promptInput) : task.trim() || handoff!.task;
   // Swarm is GATED on purpose: never swarm an unproven loop — N agents multiply
   // the #1 failure (tool-call emission fraying). It is also LOCAL-ONLY (the cloud
   // path has its own orchestration). Stays gated until the single-agent loop is
@@ -881,7 +900,7 @@ export async function cmdCode(
       return 1;
     }
     cwd = worktree.dir;
-  } else if (opts.workspaceMode === "current") {
+  } else if (opts.workspaceMode === "current" || opts.capability === "planning") {
     cwd = ctx.flags.cwd;
   } else {
     const ws = await prepareWorkspace(ctx, label, io, workspaceRun);
@@ -903,6 +922,8 @@ export async function cmdCode(
   const opened = openRunSession({
     projectRoot: cwd,
     prompt: task || label,
+    selectedPins: getRegistry().selectedPins(),
+    ...(opts.capability ? { capability: opts.capability } : {}),
     ...(opts.skill ? { explicitSkill: opts.skill } : {}),
     ...(opts.noSkills ? { noSkills: true } : {}),
   });
@@ -969,14 +990,14 @@ export async function cmdCode(
   const brain: Brain = goLocal
     ? chooseLocalBrain(process.env["AETHER_LOCAL_BRAIN"]) === "python"
       ? new LocalBrain()
-      : new OllamaBrain()
+      : new OllamaBrain({ tools: run.effectiveTools as readonly ToolName[] })
     : // `aether agent` is a coding session over THIS checkout, so it may not
       // silently accept the one-way chat transport, whose tools run
       // server-side against the cloud vault (brain_cloud CloudBrainOptions).
-      new CloudBrain(ctx.api, undefined, { requireLocalAuthority: true });
+      new CloudBrain(ctx.api, undefined, { requireLocalAuthority: true, localToolCapabilities: run.effectiveTools });
   // A worktree gets its own fresh shell; launch-project state never follows it.
   const shellSession = process.platform === "linux" || process.platform === "darwin" ? new ShellSession(cwd) : undefined;
-  const exec = new ToolExecutor(cwd, opts.testCmd, { mode: "coding", ...(shellSession ? { shellSession } : {}) });
+  const exec = new ToolExecutor(cwd, opts.capability === "planning" ? undefined : opts.testCmd, { mode: "coding", ...(shellSession ? { shellSession } : {}) });
   // Scope the session manifest to the ORIGINAL launch directory (ctx.flags.cwd),
   // not the possibly-substituted `cwd` (an auto-created worktree, or a manually
   // redirected directory from the repo gate) — resume always compares against
@@ -987,6 +1008,8 @@ export async function cmdCode(
     : new SessionLog(
         {
           task: label,
+          capability: opts.capability ?? "coding",
+          ...(opts.promptInput ? { promptInput: opts.promptInput } : {}),
           model: resolvedModel,
           poolGb,
           brain: brainKind,
@@ -997,7 +1020,7 @@ export async function cmdCode(
           // is in, and so the branch it reports is the branch the commits
           // landed on rather than the launch directory's. (Lane AA-CONT-04.)
           ...(cwd && ctx.flags.cwd && !isCurrentWorkspace(cwd, ctx.flags.cwd) ? { worktree: cwd } : {}),
-          ...(opts.testCmd ? { testCmd: opts.testCmd } : {}),
+          ...(opts.testCmd && opts.capability !== "planning" ? { testCmd: opts.testCmd } : {}),
           // Digests and paths, never content: enough for the next run (or the
           // next machine) to tell that the rules moved, and nothing more.
           context: {
@@ -1057,6 +1080,7 @@ export async function cmdCode(
     // task unchanged, so an unskilled run is byte-identical to one without this
     // seam at all.
     text: run.brief(handoff ? continuationTask(handoff, task) : task),
+    capability: opts.capability ?? "coding",
     // The typed channel, for a brain that reads the NDJSON command frame.
     // Additive and optional (brain_protocol.AgentContextPacket): a brain that
     // predates it sees no key. The brief above is what reaches the Ollama and
@@ -1068,18 +1092,19 @@ export async function cmdCode(
     // (same backend: TaskCommand.effort reaches the cloud brain unchanged).
     effort: opts.effort ?? (ctx.cfg.defaultEffort || undefined),
     model: localSelection?.tag ?? (resolvedHostedModel || undefined),
-    testCmd: opts.testCmd,
+    testCmd: opts.capability === "planning" ? undefined : opts.testCmd,
   };
+  getRegistry().lastAdmitted = run.admittedContext();
 
   // One correlation identity owns the production run. A brain `done` event is
   // advisory; the lifecycle remains completing until host verification below.
-  const turn = new CodeTurnLifecycle(task || label);
+  const turn = new CodeTurnLifecycle(task || label, {}, opts.capability ?? "coding");
   const correlation: CodeRunStarted = {
     sessionId: log?.sessionId ?? "",
     turnId: turn.turnId,
     workspace: cwd,
     model: resolvedModel,
-    checkCommand: opts.testCmd ?? null,
+    checkCommand: opts.capability === "planning" ? null : opts.testCmd ?? null,
   };
   await opts.runObserver?.started(correlation);
   const progressTimeoutMs = codeMeaningfulProgressTimeoutMs();
@@ -1091,33 +1116,36 @@ export async function cmdCode(
     if (result.exitCode !== 0 && hostRefusals.length < 16
       && (/^\[(?:denied:|refused by host policy:|tool .* rejected:|unknown tool:)/i.test(result.output)
         || result.exitCode === 127)) {
-      hostRefusals.push(redactInline(sanitizeServerText(result.output)).slice(0, 240));
+      hostRefusals.push(redactInline(sanitizeServerText(result.output.split("\n", 1)[0]!)).slice(0, 240));
     }
   };
   let confirmToolReview = ctx.confirm;
+  let confirmToolFeedback = ctx.approvalFeedback;
 
   // Permission gate: every brain-emitted mutating/shell tool call is approved
   // here before the host runs it. Honors the configured permission mode + auto-
   // apply; in `ask` (the default) on a TTY the user gets a y/N prompt, and on a
   // non-TTY (CI/pipe) an un-pre-approved call FAILS CLOSED rather than running
   // unattended. `--yes` or `permissionMode: skip` opt out.
-  const gate: ToolGate = async ({ name, args }) => {
+  const gate: ToolGate = async ({ id, name, args }) => {
     if (opts.forbidPublication && isPublicationToolCall(name, args)) {
       process.stderr.write("✗ publishing is a separate ship action; this goal phase tool call was refused.\n");
-      return false;
+      return { callId: id, approved: false };
     }
     let patchPreview: string | undefined;
     if (name === "patch_file") {
       const preview = exec.previewPatch(args);
       process.stderr.write(terminalSafeReview(preview.output) + "\n");
-      if (preview.exitCode !== 0) return true; // executor returns the same conflict to the brain
+      if (preview.exitCode !== 0) return { callId: id, approved: true }; // executor returns the same conflict to the brain
       patchPreview = preview.output;
     }
     return requestToolApproval({
+      callId: id,
       name, args: args as Record<string, string | number>,
       permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
       yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
       shellCwd: exec.shellCwd, fileRoot: cwd, confirm: confirmToolReview,
+      ...(confirmToolFeedback ? { feedback: () => confirmToolFeedback!(commandAbort.signal) } : {}),
       patchPreview,
       onDeny: () => process.stderr.write(
         `✗ blocked ${name} — permission mode "${ctx.cfg.permissionMode}" needs confirmation but there is no TTY.\n` +
@@ -1166,6 +1194,14 @@ export async function cmdCode(
       try { return await ctx.confirm(review); }
       finally { resume(); }
     };
+    if (confirmToolFeedback) {
+      const requestFeedback = confirmToolFeedback;
+      confirmToolFeedback = async (signal) => {
+        const resume = sr.pauseForPrompt();
+        try { return await requestFeedback(signal); }
+        finally { resume(); }
+      };
+    }
     replay((line) => sr.log(line));
     const anim = new AnimationController({
       onFrame: (_stage, art) => sr.setAnim(art),
@@ -1216,7 +1252,7 @@ export async function cmdCode(
       // "  : write_file …" line; the animated kaomoji status line keeps pulsing
       // below, so the diff and the live state stay in sync.
       const diff =
-        ev.type === "tool_call" && ev.name === "write_file" ? writeDiffLines(exec, ev.args, true) : null;
+        opts.capability !== "planning" && ev.type === "tool_call" && ev.name === "write_file" ? writeDiffLines(exec, ev.args, true) : null;
       if (diff && diff.length) {
         for (const line of diff) sr.log(line);
       } else {
@@ -1255,7 +1291,7 @@ export async function cmdCode(
       // --quiet). Suppressed under --json so machine consumers still receive the
       // raw tool_call event, never the rendered diff.
       const diff =
-        !ctx.flags.json && ev.type === "tool_call" && ev.name === "write_file"
+        !ctx.flags.json && opts.capability !== "planning" && ev.type === "tool_call" && ev.name === "write_file"
           ? writeDiffLines(exec, ev.args, false)
           : null;
       if (diff && diff.length) renderer.writeLines(diff);
@@ -1302,6 +1338,17 @@ export async function cmdCode(
     emitCodeTurnOutcome(refused, ctx.flags.json);
     if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
     return EXIT_ROUTING_REFUSED;
+  }
+
+  if (opts.capability === "planning") {
+    turn.settle(null);
+    const report = turn.report!;
+    log?.close(report.outcome.state === "succeeded" ? "ok" : "error", nowIso(), 0, report.check, undefined, hostRefusals);
+    await opts.runObserver?.finished({ ...correlation, report, verification: null, recordedCheck: null, touchedFiles: [...touched], hostRefusals });
+    emitCodeTurnOutcome(report, ctx.flags.json);
+    if (!ctx.flags.json) process.stderr.write(`\n  planning · ${report.outcome.state} · verification not run\n`);
+    if (log) process.stderr.write(`  ⤷ log: ${log.dir}\n`);
+    return report.outcome.exitCode;
   }
 
   // ── Final verification gate: ground truth, never the brain's self-report ──
@@ -1487,6 +1534,7 @@ export async function hostLoop(
   const timeoutMs = options.meaningfulProgressTimeoutMs ?? DEFAULT_CODE_MEANINGFUL_PROGRESS_TIMEOUT_MS;
   const segmentTimeoutMs = options.modelSegmentTimeoutMs ?? codeModelSegmentTimeoutMs();
   const signal = options.signal;
+  const seenCallIds = new Set<string>();
   const failures =
     options.failureBudget === false ? null : (options.failureBudget ?? defaultToolFailureBudget(task.cwd, exec));
   let lastMeaningfulAt = Date.now();
@@ -1519,6 +1567,8 @@ export async function hostLoop(
       let terminal = false;
       switch (ev.type) {
         case "tool_call": {
+          if (seenCallIds.has(ev.id)) break; // never re-execute or re-deliver one call ID
+          seenCallIds.add(ev.id);
           // The host owns execution + the path-guard. A tool call is gated FIRST
           // (permission mode); a denied call is never executed — the brain gets a
           // synthetic refusal result so the loop continues without running it.
@@ -1531,7 +1581,7 @@ export async function hostLoop(
           // before a byte of it runs. The brain gets a structured refusal as a
           // normal failed tool result, so the loop continues and the model
           // learns why instead of silently retrying.
-          const refusal = skillGuard ? skillGuard(ev.name) : null;
+          const refusal = refuseRunCapability(ev.name, task.capability ?? "coding") ?? (skillGuard ? skillGuard(ev.name) : null);
           const prepared = refusal ? null : prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
           const call = { name: ev.name, args: ev.args };
           const key = operationKey(call, { policy: Boolean(refusal), ...(prepared?.ok ? { binding: prepared.binding } : {}) });
@@ -1592,9 +1642,9 @@ export async function hostLoop(
             break;
           }
           const approvalContext = exec.shellContext;
-          const approved = gate
+          const gateDecision = gate
             ? await boundedCodeOperation(
-                () => gate({ name: ev.name, args: prepared.args }),
+                () => gate({ id: ev.id, name: ev.name, args: prepared.args }),
                 timeoutMs,
                 lastMeaningfulAt,
                 signal,
@@ -1602,8 +1652,9 @@ export async function hostLoop(
                 modelSegmentStartedAt,
               )
             : true;
-          if (!approved) {
-            deliver({ output: `[denied: ${ev.name} not approved by user]`, exitCode: 1 }, "approval");
+          const approval = bindToolApprovalVerdict(ev.id, gateDecision);
+          if (!approval.approved) {
+            deliver(deniedToolResult(ev.name, approval), "approval");
             break;
           }
           const execute = (): Promise<ToolResult> => {

@@ -54,7 +54,7 @@ export interface ReleaseTruthResult {
   humanSummary: string[];
 }
 
-const EXCLUDED_DIRECTORIES = new Set([".git", ".aether-output", "coverage", "dist", "node_modules"]);
+const EXCLUDED_DIRECTORIES = new Set([".git", ".aether-output", "_tmp", "coverage", "dist", "node_modules"]);
 const CLI_MARKERS = ["<!-- CLI-COMMANDS:START -->", "<!-- CLI-COMMANDS:END -->"] as const;
 const SLASH_MARKERS = ["<!-- SLASH-COMMANDS:START -->", "<!-- SLASH-COMMANDS:END -->"] as const;
 const FORBIDDEN_URL = ["aethersystems", "net/terminal"].join(".");

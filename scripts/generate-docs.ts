@@ -79,7 +79,7 @@ const COMMAND_PLACEHOLDERS = new Set([
   "command", "connect|status|disconnect", "connect|status|disconnect|pr|checks|ci|workflow|action", "desc|view|start|pause|resume|cancel|complete|note",
   "element", "file", "guidance", "id", "id|all", "id|section", "lang", "login|status|token|refresh|logout",
   "model", "msg", "n", "name", "neo|kronus", "note", "n|id", "order-id", "path", "prompt",
-  "q", "section", "subcommand", "tag", "tag|n|id", "target", "task", "title", "topic", "type", "uvt", "value",
+  "q", "qualified-id", "section", "subcommand", "tag", "tag|n|id", "target", "task", "title", "topic", "type", "uvt", "value",
 ]);
 
 export function normalizeEol(value: string): string { return value.replace(/\r\n?/g, "\n"); }

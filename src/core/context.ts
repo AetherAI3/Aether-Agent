@@ -51,4 +51,6 @@ export interface AppContext {
   /** Ask the user a yes/no question (readline y/N; `--yes` short-circuits).
    * Injected so slash-command confirmations are testable. */
   confirm: (q: string) => Promise<boolean>;
+  /** One declined tool call's optional instruction; a separate input lease. */
+  approvalFeedback?: (signal?: AbortSignal) => Promise<string | null>;
 }

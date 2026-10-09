@@ -1,0 +1,85 @@
+name: v4.21.0 self-hosted qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact release tag to qualify
+        required: true
+        default: v4.21.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-421-self-hosted-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Qualify on ${{ matrix.pool }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pool: linux-vps3
+            labels: '["self-hosted","Linux","X64","vps3-repair"]'
+          - pool: linux-vps6
+            labels: '["self-hosted","Linux","X64","vps6-release"]'
+          - pool: windows-agent
+            labels: '["self-hosted","Windows","X64","aether-aws-windows"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '>=24.6.0 <25'
+          package-manager-cache: false
+
+      - name: Set up Python for ATS runtime checks
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Verify one-time source and runner identity
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          QUALIFICATION_POOL: ${{ matrix.pool }}
+        run: >-
+          node -e "const cp=require('node:child_process');const fs=require('node:fs');const git=(...args)=>cp.execFileSync('git',args,{encoding:'utf8'}).trim();const tag=process.env.RELEASE_TAG;if(tag!=='v4.21.0'||process.env.GITHUB_REF!=='refs/heads/main')throw new Error('one-time qualification only accepts v4.21.0 from main');const head=git('rev-parse','HEAD');if(head!==process.env.EXPECTED_SOURCE_SHA||head!==git('rev-parse','refs/tags/v4.21.0^{commit}'))throw new Error('release source does not match main and tag');if(JSON.parse(fs.readFileSync('package.json','utf8')).version!=='4.21.0')throw new Error('package version mismatch');console.log(JSON.stringify({pool:process.env.QUALIFICATION_POOL,runner:process.env.RUNNER_NAME,source_sha:head,tag,node:process.version}))"
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Verify tarball integrity boundaries
+        run: node --test scripts/npm-release-packet.test.mjs scripts/npm-pack-reproducible.test.mjs
+
+      - name: Run full suite
+        run: npm test
+
+      - name: Verify production package policy
+        run: npm run verify:production -- --tag v4.21.0
+
+      - name: Verify generated docs
+        run: npm run docs:check
+
+      - name: Record evidence location
+        if: always()
+        env:
+          QUALIFICATION_POOL: ${{ matrix.pool }}
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+        run: >-
+          node -e "console.log(JSON.stringify({schema:'aether.release-421-self-hosted/v1',pool:process.env.QUALIFICATION_POOL,runner:process.env.RUNNER_NAME,source_sha:process.env.EXPECTED_SOURCE_SHA,evidence:'job log',artifact_upload:'omitted because repository artifact storage is at quota'}))"

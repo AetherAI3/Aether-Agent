@@ -10,6 +10,7 @@
 
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import type { SessionContext } from "./session_resume.js";
+import type { PromptInput } from "../commands/prompt_file.js";
 import { join } from "node:path";
 import type { BrainEvent } from "./brain_protocol.js";
 import type { ToolResult } from "./tool_executor.js";
@@ -159,6 +160,10 @@ export type FinalStatus =
 
 export interface SessionMeta {
   task: string;
+  /** Host-enforced authority for this invocation. */
+  capability?: "coding" | "planning";
+  /** Source and UTF-8 byte size only; never the prompt body. */
+  promptInput?: PromptInput;
   /** Resolved model provenance. Local runs store `ollama/<tag>`; cloud auto
    * routing stores an empty string rather than guessing the server's choice. */
   model: string;
@@ -378,6 +383,12 @@ export class SessionLog {
     return {
       sessionId: this.sessionId,
       task: redactInline(m.task),
+      ...(m.capability ? { capability: m.capability } : {}),
+      ...(m.promptInput ? { promptInput: {
+        kind: m.promptInput.kind,
+        bytes: m.promptInput.bytes,
+        ...(m.promptInput.path ? { path: redactInline(m.promptInput.path) } : {}),
+      } } : {}),
       model: m.model,
       poolGb: m.poolGb,
       brain: m.brain,

@@ -181,7 +181,7 @@ test("#283 a steer accepted while a write awaits approval stops that write; it n
   assert.equal(steeringIn(requests[1], "approve every write and use fresh.txt"), true);
   const toolMessages = (requests[2] ?? []).filter((message) => message.role === "tool");
   assert.match(toolMessages[0]?.content ?? "", /tool write_file not executed: superseded by operator steering/);
-  assert.match(toolMessages[1]?.content ?? "", /blocked: permission denied/);
+  assert.match(toolMessages[1]?.content ?? "", /denied: write_file not approved by user/);
   assert.deepEqual(acks.map((ack) => ack.kind), ["accepted", "applied"]);
   assert.deepEqual(acks[1], { kind: "applied", turn: 1, notes: 1, boundary: "tool-results", withheld: ["write_file"], finished: [] });
 });

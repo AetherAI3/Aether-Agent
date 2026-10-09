@@ -1,11 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { InputBuffer } from "../src/ui/input_line.js";
+import { HISTORY_CAP } from "../src/core/history_store.js";
 
 test("typed characters accumulate", () => {
   const b = new InputBuffer();
   for (const c of "hello") b.insert(c);
   assert.equal(b.value, "hello");
+});
+test("in-memory prompt history stays under the existing workspace entry cap", () => {
+  const b = new InputBuffer();
+  for (let i = 0; i < HISTORY_CAP + 2; i++) b.commit(`prompt ${i}`);
+  assert.equal(b.historyEntries().length, HISTORY_CAP);
+  assert.equal(b.historyEntries()[0], "prompt 2");
 });
 test("bracketed paste inserts the whole block at the cursor", () => {
   const b = new InputBuffer();
@@ -120,4 +127,99 @@ test("insert is bulk — a large paste lands intact with the cursor at the end",
   b.paste(big);
   assert.equal(b.value, big);
   assert.equal(b.pos, 50_001); // 50k ascii + one astral code point
+});
+
+test("adjacent Unicode typing coalesces; newline is its own undo step", () => {
+  const b = new InputBuffer();
+  b.insert("é");
+  b.insert("🙂");
+  b.insertNewline();
+  b.insert("漢");
+  b.undo();
+  assert.equal(b.value, "é🙂\n");
+  assert.equal(b.pos, 3);
+  b.undo();
+  assert.equal(b.value, "é🙂");
+  assert.equal(b.pos, 2);
+  b.undo();
+  assert.equal(b.value, "");
+  assert.equal(b.pos, 0);
+});
+
+test("bracketed paste is one transaction and restores the prior cursor", () => {
+  const b = new InputBuffer();
+  b.insert("ab");
+  b.left();
+  b.paste("👩‍💻\nnext");
+  assert.equal(b.value, "a👩‍💻\nnextb");
+  b.undo();
+  assert.equal(b.value, "ab");
+  assert.equal(b.pos, 1);
+});
+
+test("kill, yank, and undo recover text without crossing a clear or submit", () => {
+  const b = new InputBuffer();
+  b.insert("alpha beta");
+  b.deleteWord();
+  assert.equal(b.value, "alpha ");
+  b.yank();
+  assert.equal(b.value, "alpha beta");
+  b.undo();
+  assert.equal(b.value, "alpha ");
+  b.undo();
+  assert.equal(b.value, "alpha beta");
+  b.commit(b.value);
+  b.undo();
+  b.yank();
+  assert.equal(b.value, "", "sent text and its kill register are outside the recovery scope");
+  b.insert("new draft");
+  b.killToStart();
+  b.clear();
+  b.yank();
+  b.undo();
+  assert.equal(b.value, "");
+});
+
+test("input-owner changes end recovery but keep the live draft", () => {
+  const b = new InputBuffer();
+  b.insert("draft");
+  b.left();
+  b.left();
+  b.killToEnd();
+  b.endRecoveryScope();
+  b.undo();
+  b.yank();
+  assert.equal(b.value, "dra");
+});
+
+test("history recall and slash completion are undoable within one draft", () => {
+  const b = new InputBuffer();
+  b.loadHistory(["older", "latest"]);
+  b.insert("draft");
+  b.historyUp();
+  assert.equal(b.value, "latest");
+  b.undo();
+  assert.equal(b.value, "draft");
+  b.replace("/models");
+  b.undo();
+  assert.equal(b.value, "draft");
+});
+
+test("picker dismissal restores a prior draft and Unicode cursor exactly", () => {
+  const b = new InputBuffer();
+  b.insert("α🙂 tail");
+  b.restoreDraft("α🙂 tail", 2);
+  b.replace("/help tail", 5);
+  b.restoreDraft("α🙂 tail", 2);
+  assert.equal(b.value, "α🙂 tail");
+  assert.equal(b.pos, 2);
+  b.undo();
+  assert.equal(b.value, "α🙂 tail", "dismissal ends the temporary edit scope");
+});
+
+test("undo retains at most 64 edit snapshots", () => {
+  const b = new InputBuffer();
+  for (let i = 0; i < 100; i++) { b.insert("x"); b.left(); b.right(); }
+  for (let i = 0; i < 100; i++) b.undo();
+  assert.equal(b.value.length, 36);
 });

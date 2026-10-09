@@ -25,12 +25,13 @@ aether                                  # no args = interactive REPL
 
 <!-- SLASH-COMMANDS:START -->
 `help`, `auth`, `models`, `model`, `switch`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`,
-`voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`,
-`code-review`, `writing-skills`, `writing-plans`, `shell-profile`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`,
-`btw`, `pin`, `drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`, `workflow`,
-`workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`, `broadcast`,
-`gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`, `frame`,
-`re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`, `ats`
+`voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `skill`, `plan`, `research`,
+`project-review`, `code-review`, `writing-skills`, `writing-plans`, `shell-profile`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`,
+`steer`, `btw`, `pin`, `drop`, `context`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`,
+`memory`, `workflow`, `workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`,
+`tree`, `broadcast`, `gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`,
+`photogen`, `frame`, `re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`,
+`browser`, `ats`
 <!-- SLASH-COMMANDS:END -->
 
 ## Runtime capability requirements
@@ -74,10 +75,45 @@ These apply to any command (parsed anywhere on the line).
 
 ### `aether` — interactive REPL
 Opens a session. Type a prompt to chat; type `/` commands to control it (see
-[Slash commands](#slash-commands)). Up-arrow recalls prompts across sessions
-(history lives at `~/.aether-agent/history`); Tab completes slash commands.
+[Slash commands](#slash-commands)). Up-arrow recalls submitted prompts from
+this workspace (stored under `~/.aether-agent/history.d/`).
 `Ctrl-C` mid-answer cancels the turn and keeps the session; `Ctrl-C` at an
 empty prompt (or `/exit`) leaves.
+
+In a raw TTY, Enter (CR) submits and Ctrl+J (LF) inserts a newline into the
+same draft. The composer stays on one row: `⏎` marks each newline and `[nL]`
+shows the line count. Ctrl+_ undoes recent edits (adjacent typing groups into
+one step; a bracketed paste is one step). Ctrl+Y restores the last text killed
+with Ctrl+K, Ctrl+U, or Ctrl+W. Submitting or clearing a draft ends its undo
+and yank history. Non-TTY input stays line-oriented.
+
+Ctrl+R searches this workspace's loaded prompt history. An empty query selects
+the newest entry; type to narrow the matches and press Ctrl+R again to move
+older without wrapping. The panel shows the query, selected prompt, and a
+no-match state. Enter inserts the complete stored prompt for editing without
+sending it; Escape restores the exact prior draft and cursor. Search examines
+at most 1,000 loaded entries, 16 KiB per entry and 1 MiB total per query update.
+Oversized or over-budget entries are skipped and counted; displayed matches
+are clipped to 512 characters and terminal width without clipping the prompt
+inserted on Enter. `AETHER_NO_HISTORY=1` disables loading and saving history.
+Stored prompts are not automatically filtered for secrets. Shell commands,
+tool output, and approval feedback are not added to prompt history. Search
+is available only when the idle raw composer owns input.
+
+Some terminals send LF for Enter as well as Ctrl+J, so those two keys cannot
+be distinguished there. Use `aether config set lfSubmits true` to make LF
+submit for compatibility; `aether config set lfSubmits false` restores Ctrl+J
+newline entry. This setting affects only the raw TTY composer.
+
+Typing `/` at the start of an idle raw TTY draft opens a bounded command
+picker. Rows show canonical names, argument hints, and descriptions from the
+command manifest; commands owned by managed agent chat are omitted. Up/Down or
+Tab changes the selection. Enter inserts the selected command into the editable
+draft; press Enter again to run it. Escape restores the draft and cursor from
+before the picker opened. With no match, Enter dismisses the picker and keeps
+the literal slash text for a later explicit submission. Pasted text, ongoing
+turns, and non-TTY input do not open the picker. Tab can also open it for an
+existing leading slash draft with arguments, preserving the suffix and caret.
 
 ### `aether "<prompt>"` — one-shot
 Runs a single turn against your default (or `--model`) and streams the answer.
@@ -115,12 +151,36 @@ session manifest. In a git checkout, a completed check is also recorded for
 | `--pool <gb>` | Context pool size in GB (status-bar reach = pool × 233M tokens). |
 | `--effort <t>` | Effort tier: `LOW` \| `MED` \| `HIGH` \| `MAX` \| `ULTRA` \| `CODEPRO` (overrides the saved `/effort` dial). |
 | `--test-cmd <c>` | Command the verification gate runs (unverified without it). |
+| `--prompt-file <path\|->` | Read one UTF-8 coding task from a file or stdin through EOF (maximum 256 KiB). |
 | `--quiet` | Plain output (strip the personality frames). |
 | `--interactive` | Pause at each stage boundary to type a steer (TTY only). |
 | `--no-log` | Disable the local session log (`~/.aether-agent/logs`). |
 | `--swarm <N>` | N-agent swarm (gated; local-only; refuses at runtime — see `commands/code.ts`). |
 | `--skill <id>` | Load this skill for the run (id, short name, or command alias) and **apply its tool policy** — the host refuses any tool the skill does not declare. |
 | `--no-skills` | Load no skill. The project's own `AGENTS.md` still applies — it is not a skill. |
+
+For a multiline specification, put the complete task in `task.md` and run:
+
+```bash
+aether agent --prompt-file task.md --test-cmd "npm test"
+cat task.md | aether agent --prompt-file - --test-cmd "npm test"
+```
+
+PowerShell: `Get-Content -Raw task.md | aether agent --prompt-file -`.
+Input is read once, kept literal (including newlines, `/`, `!`, backticks, and
+`$()`), and sent as one coding task. The 256 KiB cap is measured in UTF-8 bytes;
+oversized, invalid UTF-8, missing, unreadable, or blank input exits before a
+model or session starts. A failed read never opens the line REPL. The session
+manifest and JSON `prompt_input` event record source and byte size, not the task
+body. Explicit session sharing continues to use its existing controls.
+
+| Combination with `--prompt-file` | Result |
+|---|---|
+| Positional task or managed-agent verb | Refused: one explicit source only. |
+| `--resume` | Refused: continuation and a new file task have different ownership. |
+| `--interactive` | Refused: stage steering may need stdin. |
+| `--with-token` | Refused: it also consumes stdin. |
+| `--test-cmd`, `--local`, `--skill`, `--no-skills`, `--worktree`, `--repo`, `--yes` | Supported; normal coding routing, permissions, and verification apply. |
 
 Before the run starts, the agent prints what it loaded and what it will enforce:
 
@@ -454,6 +514,23 @@ skill's content digest, so editing a trusted skill revokes that trust until you
 approve the new digest. A skill declaration narrows what the agent may do — it
 never grants a tool the host would otherwise refuse.
 
+In an idle interactive console using a local model, `/skill <qualified-id>
+<task>` loads an installed, enabled skill for just that task. For example,
+`/skill user/fix-ci Investigate the failing unit test`. The task suffix is
+sent literally, including extra spaces, newlines, quotes, `/`, and `!`; it is
+never dispatched as another console command. The run header shows the resolved
+skill ID, content digest, context size, and effective host tool limits.
+`/context` identifies the last admitted turn; `/context next <task>` previews
+normal next-turn defaults, or the current `/skill` command if one is supplied.
+History and the slash picker restore editable text,
+so submitting an old `/skill` line resolves its current digest and trust again.
+
+`/skill` refuses busy, queued, line-input, `--no-skills`, and server-executed
+cloud chat use. Use `aether agent --skill <id> <task>` for a hosted host-executed
+run. A malformed or future-version local skill settings or trust store is
+never treated as an empty store; incompatible data is reported and left
+untouched until repaired. Normal skill defaults resume after this turn.
+
 ### `aether capabilities [--available]` — what this build can actually do
 
 Prints the capability contract: tools, their side-effect class, and the
@@ -514,6 +591,15 @@ aether config set autoApply true
 | `autoApply` | bool | Apply streamed edits without a per-edit prompt. |
 | `telemetry` | bool | Anonymous usage telemetry opt-in. |
 
+When an interactive coding run asks to execute a tool, answering no opens a
+separate optional instruction field for that one declined call. Type a note
+such as `Use the offline unit suite.`, then press Enter; an empty Enter skips
+it, and Escape or Ctrl+C cancels the note. The note is limited to 512 UTF-8
+bytes and reaches the model once inside that call's failed tool result. It
+never approves or runs the tool. The main draft, prompt history, queued tasks,
+and reviewed shell attachment are untouched. Non-TTY decisions and `--yes`
+retain their existing behavior and do not produce an instruction.
+
 ---
 
 ## Slash commands (inside the REPL)
@@ -540,8 +626,8 @@ mirrors the live registry in `src/commands/slash_registry.ts`.
 | `/mcp [list|doctor|repair]` | Diagnose or confirmation-gated repair for MCP servers. |
 | `/exit`, `/quit` | Leave the REPL. |
 
-Typos get a nudge: `/modle` answers `did you mean /model?`. Tab completes any
-of the above.
+Typos get a nudge: `/modle` answers `did you mean /model?`. The raw TTY picker
+shows descriptions while typing a leading slash command.
 
 ### Agent modes
 
@@ -554,6 +640,7 @@ Each starts an agent loop in the REPL.
 | `/self-review` | Review your own recent work. |
 | `/recon <topic>` | Deep reconnaissance pass over the codebase. |
 | `/plan <topic>` | Write an implementation plan. |
+| `/skill <qualified-id> <task>` | Use a trusted skill for one idle local task. |
 | `/writing-plans <topic>` | Write a plan to `.hermes/plans/`. |
 | `/research <topic>` | Research → gather → summarize. |
 | `/project-review` | Full project review + summary. (Was `/review`; that name is now the change-review rail below.) |
@@ -572,9 +659,12 @@ Each starts an agent loop in the REPL.
 
 | Command | Action |
 |---|---|
-| `/pin <path> [reason]` | Force a file into persistent context across loops. |
+| `/pin <path> [reason]` | Select a file for bounded, fresh inclusion at coding-turn admission. |
 | `/pin list` | List pinned files. |
-| `/drop <path>` | Evict a file from context. |
+| `/drop <path>` | Stop automatic inclusion on future turns; explicit file-reading tools remain available. |
+| `/context` | Inspect the last admitted turn's rules, skills, file digests, bytes, bindings, and omissions without showing file bodies. |
+| `/context next <task>` | Preview the context for a draft task in the current workspace without sending it. |
+| `/context content <path>` | Explicitly preview up to 4096 bytes of a file included in the last admitted local turn. |
 | `/snapshot` | Save session state to disk. |
 | `/snapshot resume [id]` | Reload a snapshot (cloud first, else local; lists with no id). |
 | `/snapshot list` | List saved snapshots. |
@@ -582,6 +672,15 @@ Each starts an agent loop in the REPL.
 | `/audit-receipt [n]` | Verified log of tool calls + UVT (local custody + server). |
 | `/rollback` | Discard uncommitted changes to tracked files (git-backed). Restores from the index, so files with staged changes come back to their staged state, not to the last commit. Untracked files are never touched. |
 | `/logs-view`, `/logs` | Interactive session log browser. |
+
+Pins are bound by project-relative path to the checkout where the task runs. The
+host reads each file once at admission and includes complete UTF-8 files only,
+up to 64 KiB per file, 32 pins, and the 512 KiB aggregate composed-context
+ceiling shared with rules and skills. Missing, binary, unsafe, and over-budget
+files are reported as omissions. `/context next` is a new preview; `/context`
+shows the frozen last admission, so a later file edit does not rewrite its
+digest. Server-executed cloud chat reports selected-file admission as
+unsupported because the local host cannot inspect its server-side context.
 
 ### Goals & workflows
 
@@ -672,6 +771,7 @@ Requires an active orchestrator — switch with `/agent neo` or `/agent kronus` 
 | `OLLAMA_HOST` | `http://localhost:11434` | Where the offline brain looks for Ollama. Accepts Ollama's own scheme-less form (`127.0.0.1:11434`) as well as a full URL — see below. |
 | `AETHER_STREAM_TIMEOUT_MS` | `120000` | Stream open/idle timeout (ms). `0` disables it. |
 | `AETHER_NO_ANIM` | *(unset)* | `1` disables all animated status lines and the thinking pulse. |
+| `AETHER_NO_HISTORY` | *(unset)* | `1` disables workspace prompt-history loading and saving, including Ctrl+R search. |
 | `NO_COLOR` | *(unset)* | Any value disables ANSI colors (https://no-color.org). |
 
 See [`.env.example`](.env.example).

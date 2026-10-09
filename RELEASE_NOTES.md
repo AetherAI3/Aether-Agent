@@ -1,38 +1,97 @@
+# Aether Agent v4.21.0 — clearer coding workflow
+
+**October 9, 2026.** This is the v4.21.0 release source. Check the
+[npm package](https://www.npmjs.com/package/aether-agents) for current
+availability and the operator packet for its qualification record.
+
+## Coding console
+
+- Browse described slash commands from the idle composer. Ctrl+R searches
+  saved prompt history; multiline editing has bounded undo and yank controls.
+  (#329, #330, #333)
+- Pin bounded workspace files for a coding turn, inspect the context actually
+  admitted, and invoke a trusted skill for one local turn. (#332, #335)
+- Feed a task from a file or standard input as one literal specification, and
+  use read-only host planning before deciding whether to edit. (#328, #331)
+- When a tool approval is denied, the failed tool result carries the
+  operator's short feedback without granting that action. (#334)
+
+## Install and qualification
+
+`npm install -g aether-agents@latest --ignore-scripts` installs the current
+published CLI. This source declares v4.21.0; the registry and immutable tag
+determine whether its archive is available. The PyPI launcher remains a
+separate release step.
+
+The release qualification uses the self-hosted runner pool. GitHub artifact
+storage limits require a documented log-evidence exception; the v4.21.0
+operator packet records what was actually verified.
+This release does not extend ATS trading or Cloud service claims.
+
+---
+
 # Aether Agent v4.20.0 — a more capable coding console
 
-**Release candidate — October 6, 2026.** These notes describe source changes since
-v0.4.0. npm and PyPI publication require the exact release checks and protected
-publishing workflows to complete.
+**October 6, 2026.** A substantial update to task control, the coding console,
+remote viewing, and account-agent status since v0.4.0. The npm CLI is published
+as v4.20.0. The matching PyPI launcher upload is pending its protected publish
+run; check the [PyPI project](https://pypi.org/project/aether-agent/) for its
+live version.
 
-- **Control a running task.** `/steer` reaches the active turn and confirms when
-  the direction was accepted. Switching models continues the current task.
-  Saved goals can run one phase at a time with host verification.
-- **Review work before it leaves your machine.** Shell results can be previewed
-  and edited before they are shared with a model. The console lets you inspect,
-  edit, or cancel queued chat and shell commands. Repeated failing tool calls
-  now pause at a recovery checkpoint, and complete-read proof guards whole-file
-  replacements.
-- **A stronger terminal workflow.** The model picker can search installed
-  Ollama models. PowerShell users can opt into a persistent console session.
-  PR descriptions can be drafted from final branch evidence, and `ship`
-  handles quoted slash arguments while rejecting invalid flags.
-- **Remote viewing with clearer state.** A cancelled preview ends cleanly;
-  host heartbeat and outbox delivery continue during a run. The viewer reports
-  exposure, connected viewers, session health, measured checkout diffs, test
-  results, CI and PR status, and generated artifact metadata from receipts.
-  Home-relative tool targets are refused before durable enqueue. Remote
-  viewing still requires its separately configured service and permission.
-- **Account agents report what is ready.** Terminal account readiness includes
-  model and UVT availability. Managed-agent chat distinguishes saved messages
-  from admitted runs and reports the actual Online status.
+## Task control and review
 
-The PyPI `aether-agent` package remains a launcher for the npm CLI. A PyPI
-version update does not bundle a second agent implementation. ATS runtime
-installation remains gated by its separate signed manifest and entitlement;
-this release does not claim live trading or autonomous broker execution.
+- `/steer` delivers direction to the active turn and confirms acceptance.
+  Switching models continues the same task instead of starting over. Saved
+  goals can run one phase at a time with host verification. (#283, #297, #299)
+- Inspect, edit, or cancel queued chat and shell commands before they run.
+  Preview a shell result, remove or redact parts of it, and explicitly send or
+  cancel the bounded attachment. (#281, #284)
+- Repeated failing tool calls pause at a recovery checkpoint. Whole-file
+  replacement requires complete-read proof, so a partial read cannot silently
+  overwrite unseen content. Hosted authentication can recover without losing
+  the task. (#285, #294, #296)
 
-See the [v4.20.0 operator packet](docs/releases/OPERATOR-PACKET-v4.20.0.md)
-for exact-source qualification and publication status.
+## Terminal and Git workflow
+
+- Search and scroll the model picker, including installed Ollama tags. (#304,
+  #305)
+- Opt into a persistent PowerShell console session on Windows; switching
+  profiles discards the old shell state without replaying commands. (#312)
+- Draft PR descriptions from final branch evidence. `aether ship` preserves
+  quoted slash arguments and rejects invalid flags. (#293, #306)
+
+## Remote viewing and account agents
+
+- Remote viewing reports exposure, connected viewers, session health, measured
+  checkout changes, test outcomes, CI and PR state, and generated artifact
+  metadata from receipts. Its heartbeat and outbox continue during a run;
+  cancelling a preview ends cleanly. (#227, #229)
+- `aether rc start` uses a separate owner-scoped RC identity without operator
+  device enrollment. Home-relative tool targets are refused before durable
+  enqueue. Remote viewing still requires its separately configured service and
+  permission; an ordinary-account deployed journey needs qualification. (#313)
+- Account-agent readiness now reports model and UVT availability. Managed-agent
+  chat distinguishes a saved message from an admitted run and reports the
+  actual Online status. (#243, #310)
+
+## Install and release limits
+
+```bash
+npm install -g aether-agents@4.20.0 --ignore-scripts
+```
+
+The PyPI `aether-agent` package is a launcher for this npm CLI, with no second
+agent implementation. Check its live version before pinning it. ATS runtime
+installation remains gated by a separate signed manifest and entitlement;
+v4.20.0 does not claim live trading or autonomous broker execution.
+
+The release tag points to main commit `020c0cba876ae0dc02f6686de6a2d98e95f398fb`.
+The self-hosted Linux package preparation and local launcher checks passed;
+artifact storage, private ATSv2 access, and hosted billing prevented the usual
+complete release gate. Publication uses the owner's approved manual exception,
+so the npm package has no GitHub-hosted provenance attestation. See the
+[v4.20.0 operator packet](docs/releases/OPERATOR-PACKET-v4.20.0.md) for the
+exact qualification and remaining limits.
 
 ---
 

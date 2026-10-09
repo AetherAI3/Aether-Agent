@@ -38,6 +38,7 @@ export interface AgentContextPacket {
 // which imports TOOLS from here).
 import type { SkillContextPacket } from "./skills/context_packet.js";
 import type { InstructionContextPacket } from "./instructions/instruction_resolver.js";
+import type { RunCapability } from "./run_capability.js";
 
 // --- workflow swarm frame interfaces ---------------------------------------
 export interface WorkflowStartFrame {
@@ -207,6 +208,8 @@ export type HostCommand =
       effort?: string;
       model?: string;
       testCmd?: string;
+      /** Host-only invocation authority; never inferred from task text. */
+      capability?: RunCapability;
       /** Skill + instruction context for this turn (see AgentContextPacket). */
       context?: AgentContextPacket;
     }

@@ -7,7 +7,7 @@ import type { AetherConfig, BackendPref, PermissionMode } from "../types.js";
 import { saveConfig } from "../core/config.js";
 import { EFFORT_TIERS, normalizeEffort } from "../ui/effort.js";
 
-const BOOL_KEYS = new Set<keyof AetherConfig>(["autoApply", "telemetry"]);
+const BOOL_KEYS = new Set<keyof AetherConfig>(["autoApply", "telemetry", "lfSubmits"]);
 const PERMISSION_MODES: PermissionMode[] = ["ask", "auto", "skip"];
 const BACKEND_PREFS: BackendPref[] = ["auto", "local", "cloud"];
 
@@ -56,6 +56,10 @@ export async function cmdConfig(ctx: AppContext, argv: string[]): Promise<number
       }
       ctx.cfg.backend = value as BackendPref;
     } else if (BOOL_KEYS.has(key)) {
+      if (key === "lfSubmits" && !["true", "false", "1", "0"].includes(value)) {
+        process.stderr.write("lfSubmits must be true or false\n");
+        return 2;
+      }
       (ctx.cfg[key] as boolean) = value === "true" || value === "1";
     } else {
       (ctx.cfg[key] as string) = value;

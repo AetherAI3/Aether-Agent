@@ -92,7 +92,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "deprecatedAliases": [],
     "args": "[task | list | create | show | configure | chat | activate | pause | resume]",
     "summary": "run the coding agent or manage account agents and shared conversations",
-    "detailedHelp": "aether agent list | create [ATS] <name> | show <id> | configure <id> <key> <value> | chat [id] | activate|pause|resume <id>\nManaged agents sync with your account and use the shared Online DM. Legacy coding tasks remain supported with aether agent <task> or aether code <task>.",
+    "detailedHelp": "aether agent list | create [ATS] <name> | show <id> | configure <id> <key> <value> | chat [id] | activate|pause|resume <id>\nCoding tasks: aether agent <task> | aether agent --prompt-file task.md | cat task.md | aether agent --prompt-file -\nPlanning: aether agent --planning \"outline the migration\" (or /plan <topic> in a local REPL). The host permits read_file, list_directory, and repo_search only; it skips workspace preparation and verification. --planning conflicts with --repo, --worktree, and --resume. Cloud chat /plan is refused because tools run server-side. Saving and executing a plan are later explicit actions.\n--prompt-file reads one literal UTF-8 task (maximum 256 KiB); it conflicts with positional tasks, --resume, --interactive, and --with-token. Managed agents sync with your account and use the shared Online DM. aether code accepts the same coding flags.",
     "section": "Start",
     "hidden": false,
     "permissionClass": "local-write",
@@ -125,6 +125,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "out",
       "password",
       "pool",
+      "prompt-file",
       "quiet",
       "repo",
       "resume",
@@ -139,7 +140,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "worktree",
       "yes"
     ],
-    "ownedFlags": {},
+    "ownedFlags": { "planning": { "type": "boolean", "default": false } },
     "handler": {
       "id": "handler:shell:agent",
       "kind": "host",
@@ -3813,6 +3814,46 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:skill",
+    "surface": "slash",
+    "name": "skill",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "<qualified-id> <task>",
+    "summary": "use a trusted skill for one idle local task",
+    "detailedHelp": "/skill <qualified-id> <task>\nUse an installed, enabled and trusted skill for this one task. Requires an idle interactive composer and a local host-executed turn; --no-skills refuses it. The following task text is literal. The next turn resumes normal skill defaults.",
+    "section": "Agent Modes",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.skill",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:skill",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "skill",
+      "usage": "/skill <qualified-id> <task>",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "One-turn trusted skill invocation in the idle local composer"
+    }
+  },
+  {
     "key": "slash:plan",
     "surface": "slash",
     "name": "plan",
@@ -4521,6 +4562,46 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "release": {
       "disposition": "existing",
       "note": null
+    }
+  },
+  {
+    "key": "slash:context",
+    "surface": "slash",
+    "name": "context",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "[next <task> | content <path>]",
+    "summary": "inspect admitted and next-task selected context",
+    "detailedHelp": "/context [next <task> | content <project-relative path>]\nShows the last admitted run's rules, skills, pinned files, digests, bytes and omissions. /context next <task> previews the next task without sending it. /context content <path> explicitly previews admitted local file content (up to 4096 bytes).",
+    "section": "Context & Limits",
+    "hidden": false,
+    "permissionClass": "read-only",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.context",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:context",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "context",
+      "usage": "/context [next <task> | content <path>]",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "changed",
+      "note": "Adds an admitted-context inspector and an unsent next-task preview."
     }
   },
   {

@@ -13,8 +13,8 @@ import { configDir } from "../config.js";
 import { SKILL_BOUNDS } from "./skill_bounds.js";
 import { calculateSkillDigest } from "./skill_digest.js";
 import { validateSkillManifest, type SkillScope } from "./skill_schema.js";
-import { loadSkillSettings, lookupSkillSetting } from "./skill_settings.js";
-import { loadTrustStore, lookupTrust } from "./skill_trust.js";
+import { loadSkillSettings, lookupSkillSetting, type SkillSettingsStore } from "./skill_settings.js";
+import { loadTrustStore, lookupTrust, type SkillTrustStore } from "./skill_trust.js";
 import type { SkillDescriptor, SkillIndex, SkillIndexError, SkillTrustState } from "./skill_types.js";
 
 export interface DiscoveryOptions {
@@ -70,6 +70,8 @@ function discoverOne(
   skillRoot: string,
   scope: SkillScope,
   projectRoot: string,
+  settings: SkillSettingsStore,
+  trustStore: SkillTrustStore,
 ): { descriptor?: SkillDescriptor; error?: SkillIndexError } {
   const manifestPath = join(skillRoot, "skill.json");
   if (!existsSync(manifestPath)) {
@@ -110,11 +112,10 @@ function discoverOne(
     // skill still runs (it is the user's own file) — recorded as trusted.
     trust = "trusted";
   } else {
-    const lookup = lookupTrust(loadTrustStore(), trustKey, manifest.id, digest.sha256);
+    const lookup = lookupTrust(trustStore, trustKey, manifest.id, digest.sha256);
     trust = lookup.state;
   }
 
-  const settings = loadSkillSettings();
   const setting = lookupSkillSetting(settings, trustKey, manifest.id);
   const enabled = setting ? setting.enabled : true;
   // Automatic selection: built-ins follow the manifest; user/project skills
@@ -150,6 +151,11 @@ function discoverOne(
  * never silently by source order.
  */
 export function discoverSkills(options: DiscoveryOptions): SkillIndex {
+  // Read both local authority stores once, even when no skill directory is
+  // present. A corrupt/future store is an admission refusal, never an empty
+  // index with default-enabled skills.
+  const settings = loadSkillSettings();
+  const trustStore = loadTrustStore();
   const targets: ScanTarget[] = [
     { scope: "builtin", root: options.builtinRoot ?? builtinSkillsRoot() },
     { scope: "user", root: userSkillsRoot() },
@@ -161,7 +167,7 @@ export function discoverSkills(options: DiscoveryOptions): SkillIndex {
 
   for (const target of targets) {
     for (const skillRoot of listSkillDirectories(target.root)) {
-      const result = discoverOne(skillRoot, target.scope, options.projectRoot);
+      const result = discoverOne(skillRoot, target.scope, options.projectRoot, settings, trustStore);
       if (result.error) { errors.push(result.error); continue; }
       const descriptor = result.descriptor;
       if (!descriptor) continue;

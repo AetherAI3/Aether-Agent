@@ -38,12 +38,19 @@ import { promptPrefix } from "../ui/prompt.js";
 import { InputBuffer } from "../ui/input_line.js";
 import { renderInputView } from "../ui/input_render.js";
 import { decodeKey, splitKeys } from "../ui/keys.js";
+import {
+  backspaceHistoryQuery, olderHistoryMatch, openHistorySearch, renderHistorySearch,
+  selectedHistoryMatch, typeHistoryQuery, type HistorySearchState,
+} from "../ui/history_search.js";
 import { ThinkingPulse } from "../ui/thinking.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
 import { ModelOutputBudget } from "../core/model_output_budget.js";
 import { sanitizeTerm, visibleWidth } from "../ui/text.js";
 import { registerRestore } from "../ui/restore.js";
-import { completeManifestSlash } from "./command_manifest.js";
+import {
+  acceptSlashPicker, moveSlashPicker, openSlashPicker, refreshSlashPicker, renderSlashPicker, slashDraft,
+  type SlashPickerState,
+} from "./slash_picker.js";
 // history_store.ts (origin/main's own persistence + AETHER_NO_HISTORY opt-out)
 // supersedes the old readline-backed ./history.js — see chat.ts's resolution
 // report for why that file is now dead code pending a cleanup pass.
@@ -61,7 +68,7 @@ import { ConsoleQueue, describeEntry, entryKind, parseQueueCommand, renderDispos
 import { HostRenderer } from "../ui/host_render.js";
 import type { TaskCommand } from "../core/brain.js";
 import { getRegistry } from "../core/context_registry.js";
-import { prepareToolApproval, requestToolApproval, terminalSafeReview } from "../core/tool_approval.js";
+import { bindToolApprovalVerdict, deniedToolResult, prepareToolApproval, requestToolApproval, terminalSafeReview, type ToolApprovalVerdict } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import {
   TRANSIENT_READ_AUTO_RETRIES,
@@ -75,6 +82,7 @@ import {
   type ToolFailureOrigin,
 } from "../core/tool_failure_budget.js";
 import type { SkillRefusal } from "../core/skills/skill_errors.js";
+import { refuseRunCapability, type RunCapability } from "../core/run_capability.js";
 import { renderHud, timerLive } from "../core/hud.js";
 import {
   createViewerState,
@@ -89,8 +97,9 @@ import {
 } from "../ui/workflow_viewer.js";
 import type { WorkflowViewerState } from "../ui/workflow_viewer.js";
 import type { StreamFrame } from "../core/stream.js";
-import type { BrainEvent } from "../core/brain_protocol.js";
+import type { BrainEvent, ToolName } from "../core/brain_protocol.js";
 import { ConsoleTaskContinuation, accountFingerprint, consoleWorkspaceState, observedWorkspaceChanges, type ModelTarget, type ObservedTool } from "./model_continuation.js";
+import { parseOneTurnSkill } from "./one_turn_skill.js";
 
 // Key decoding lives in ui/keys.ts (shared with pickers/viewers); re-exported
 // here so existing imports keep working.
@@ -109,10 +118,13 @@ interface ChatJsonResponse {
  *  failure to the one-shot `cmdChat` path. */
 /** Session-level skill selection for REPL/one-shot chat turns (`--skill`, `--no-skills`). */
 export interface TurnSkillOptions {
+  capability?: RunCapability;
   explicitSkill?: string;
   noSkills?: boolean;
   /** Shell attachments must never become durable receipt/export content. */
   ephemeralAttachment?: boolean;
+  /** /skill requires a host-executed route for the resolved policy. */
+  requireHostSkillEnforcement?: boolean;
   /** Local console authority, never serialized to Cloud. */
   exec?: ToolExecutor;
   /** Host-observed results only; no model text or shell output. */
@@ -477,6 +489,15 @@ export async function runTurn(
   preflightPulse.start();
   try {
     const backend = await resolveBackend(ctx);
+    if (skillOpts.capability === "planning" && backend === "cloud") {
+      throw new ChatTurnError("planning requires host-executed tools; this cloud chat route runs tools on the server. Use `aether agent --planning` or `aether agent --local --planning`.", undefined, false);
+    }
+    if (skillOpts.explicitSkill && skillOpts.noSkills) {
+      throw new ChatTurnError("/skill is unavailable while --no-skills is active.", undefined, false);
+    }
+    if (skillOpts.requireHostSkillEnforcement && backend === "cloud") {
+      throw new ChatTurnError("/skill requires host-executed tools; this cloud chat route runs tools on the server. Switch to a local model or use aether agent --skill <id> <task>.", undefined, false);
+    }
     // The same seam `aether agent` uses (commands/code.ts). Opened per turn, not
     // per session, because automatic skill selection reads THIS prompt — a turn
     // that says "the CI is failing" should pull the CI skill and the next one
@@ -484,6 +505,9 @@ export async function runTurn(
     const opened = openRunSession({
       projectRoot: ctx.flags.cwd,
       prompt,
+      selectedPins: getRegistry().selectedPins(),
+      selectedFileTransport: backend === "cloud" ? "unsupported" : "host",
+      ...(skillOpts.capability ? { capability: skillOpts.capability } : {}),
       allowIncompleteInstructionDiscovery: backend === "cloud",
       ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
       ...(skillOpts.noSkills ? { noSkills: true } : {}),
@@ -513,7 +537,7 @@ export async function runTurn(
     // exactly the cases the header exists to report.
     if (run.contextTokens > 0 || run.session.notices.length > 0 || run.hasWarnings) {
       const header = run.headerLines.join("\n");
-      if (header !== lastTurnHeader) {
+      if (skillOpts.requireHostSkillEnforcement || header !== lastTurnHeader) {
         lastTurnHeader = header;
         for (const line of run.headerLines) process.stderr.write(errTheme.dim("  " + line) + "\n");
       }
@@ -521,6 +545,7 @@ export async function runTurn(
       lastTurnHeader = null;
     }
     const brief = run.brief(prompt);
+    getRegistry().lastAdmitted = run.admittedContext();
 
     if (backend === "local") {
       // Aether meters nothing on a local brain, so the session is unmetered
@@ -528,7 +553,7 @@ export async function runTurn(
       getRegistry().markLocalUnmetered();
       // The signal used to be dropped here, so the REPL Ctrl+C controller could
       // not reach a local turn at all: the abort fired and nothing observed it.
-      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, ...(skillOpts.exec ? { exec: skillOpts.exec } : {}), ...(skillOpts.onToolResult ? { onToolResult: skillOpts.onToolResult } : {}), ...(skillOpts.steer ? { steer: skillOpts.steer } : {}) }, run.guard);
+      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, capability: skillOpts.capability, advertisedTools: run.effectiveTools as readonly ToolName[], ...(skillOpts.exec ? { exec: skillOpts.exec } : {}), ...(skillOpts.onToolResult ? { onToolResult: skillOpts.onToolResult } : {}), ...(skillOpts.steer ? { steer: skillOpts.steer } : {}) }, run.guard);
     }
     // /agent/chat/stream exposes no control acknowledgement, so a steer typed
     // during this turn is kept for the next one rather than reported as live.
@@ -550,7 +575,7 @@ export async function runTurn(
     return await runCloudTurn(ctx, brief, lifecycle, boundedSignal.signal, onFrame, onPulsePaint, deadlineAt, deadlineMs, skillOpts.ephemeralAttachment !== true);
   } catch (err) {
     const outcome = finalizeThrownTurn(lifecycle, err, ctx.cfg.baseUrl);
-    if (err instanceof ChatTurnError) throw err;
+    if (err instanceof ChatTurnError) throw err.outcome ? err : new ChatTurnError(err.message, outcome, err.rendered);
     throw attachTurnOutcome(err, outcome);
   } finally {
     clearTimeout(deadline);
@@ -796,6 +821,8 @@ async function runCloudTurn(
  * draws every event. Identical UX to cloud, just an offline brain.
  */
 export interface LocalTurnDeps {
+  capability?: RunCapability;
+  advertisedTools?: readonly ToolName[];
   brain?: Brain;
   exec?: {
     executeAsync(name: string, args: Record<string, unknown>, options?: RunOptions): Promise<ToolResult>;
@@ -842,33 +869,38 @@ export async function runLocalTurn(
   const model = resolveLocalModel(ctx.flags.model, ctx.cfg.localModel ?? "", {
     allowBareExplicit: ctx.flags.local === true,
   });
-  const brain = deps.brain ?? new OllamaBrain({ model });
+  const brain = deps.brain ?? new OllamaBrain({ model, ...(deps.advertisedTools ? { tools: deps.advertisedTools } : {}) });
   const exec = deps.exec ?? new ToolExecutor(cwd);
+  const seenCallIds = new Set<string>();
+  const controller = new AbortController();
   const renderer = new HostRenderer({ poolGb: 5, json: ctx.flags.json });
   const pulse = new ThinkingPulse({
     enabled: Boolean(process.stderr.isTTY) && !ctx.flags.json && process.env["AETHER_NO_ANIM"] !== "1",
     write: (s) => process.stderr.write(errTheme.dim(s)),
     onPaint: deps.onPulsePaint,
   });
-  const approveTool = async (name: string, args: Record<string, unknown>): Promise<boolean> => {
+  const approveTool = async (callId: string, name: string, args: Record<string, unknown>): Promise<ToolApprovalVerdict> => {
     let patchPreview: string | undefined;
     if (name === "patch_file" && exec.previewPatch) {
       const preview = exec.previewPatch(args);
       process.stderr.write(terminalSafeReview(preview.output) + "\n");
-      if (preview.exitCode !== 0) return true;
+      if (preview.exitCode !== 0) return { callId, approved: true };
       patchPreview = preview.output;
     }
     return requestToolApproval({
+      callId,
       name, args: args as Record<string, string | number>,
       permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
       yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
       shellCwd: exec.shellCwd ?? cwd, fileRoot: cwd, confirm: ctx.confirm,
+      ...(ctx.approvalFeedback ? { feedback: () => ctx.approvalFeedback!(controller.signal) } : {}),
       patchPreview,
       onDeny: () => process.stderr.write(`blocked ${name}: confirmation required; use --yes or permissionMode skip\n`),
     });
   };
   const task: TaskCommand = {
     type: "task",
+    capability: deps.capability ?? "coding",
     text: prompt,
     cwd,
     poolGb: 5,
@@ -877,7 +909,6 @@ export async function runLocalTurn(
   let partialOutput = false;
   let terminalError: ChatTurnError | null = null;
   const timeoutMs = deps.meaningfulProgressTimeoutMs ?? defaultStreamTimeoutMs();
-  const controller = new AbortController();
   const forwardAbort = (): void => controller.abort(signal?.reason ?? new DOMException("turn cancelled", "AbortError"));
   const closeBrain = (): void => {
     try { brain.close(); } catch { /* cleanup cannot replace the primary outcome */ }
@@ -937,13 +968,15 @@ export async function runLocalTurn(
         break;
       }
       if (ev.type === "tool_call") {
+        if (seenCallIds.has(ev.id)) continue; // one result and no second execution for one call ID
+        seenCallIds.add(ev.id);
         noteWaitingForTool(lifecycle);
         renderer.event(ev);
         // Same ordering as hostLoop (commands/code.ts): the skill narrowing is
         // checked first and refuses without executing or prompting; the
         // operator gate then decides about whatever survived. A skill can only
         // subtract here — it is never consulted again after this line.
-        const refusal = skillGuard ? skillGuard(ev.name) : null;
+        const refusal = refuseRunCapability(ev.name, task.capability ?? "coding") ?? (skillGuard ? skillGuard(ev.name) : null);
         const prepared = refusal ? null : prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
         const call = { name: ev.name, args: ev.args };
         const key = operationKey(call, { policy: Boolean(refusal), ...(prepared?.ok ? { binding: prepared.binding } : {}) });
@@ -1012,13 +1045,13 @@ export async function runLocalTurn(
             continue;
           }
           const approvalContext = exec.shellContext;
-          const approved = await boundedLocalOperation(
-            () => approveTool(ev.name, prepared.args),
+          const approval = bindToolApprovalVerdict(ev.id, await boundedLocalOperation(
+            () => approveTool(ev.id, ev.name, prepared.args),
             controller.signal,
             timeoutMs,
             lastMeaningfulAt,
             timeout,
-          );
+          ));
           const execute = (): Promise<ToolResult> => {
             const remaining = timeoutMs > 0
               ? Math.max(1, timeoutMs - (Date.now() - lastMeaningfulAt))
@@ -1037,8 +1070,8 @@ export async function runLocalTurn(
               timeout,
             );
           };
-          if (!approved) {
-            deliver({ output: `[tool ${ev.name} blocked: permission denied]`, exitCode: 1 }, "approval");
+          if (!approval.approved) {
+            deliver(deniedToolResult(ev.name, approval), "approval");
           } else if (!supersededBySteer()) {
             // Approval can take a while; a steer accepted during the prompt is
             // checked above, so an approved-but-stale write still never runs.
@@ -1300,6 +1333,27 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let busy = false;
   let setupOwnsInput = false;
   let terminalOwnsInput = false;
+  let approvalOwnsInput = false;
+  let picker: SlashPickerState | null = null;
+  let historySearch: HistorySearchState | null = null;
+  let searchPriorPicker: SlashPickerState | null = null;
+  let pickerPanelLines = 0;
+  let pickerSuppressed = false;
+  const composerCtx: AppContext = {
+    ...ctx,
+    confirm: async (question) => {
+      buf.endRecoveryScope();
+      approvalOwnsInput = true;
+      try { return await ctx.confirm(question); }
+      finally { approvalOwnsInput = false; }
+    },
+    approvalFeedback: async (signal) => {
+      buf.endRecoveryScope();
+      approvalOwnsInput = true;
+      try { return await ctx.approvalFeedback?.(signal) ?? null; }
+      finally { approvalOwnsInput = false; }
+    },
+  };
   const renderHudLine = (): void => {
     if (!process.stdout.isTTY) return;
     const reg = getRegistry();
@@ -1320,9 +1374,26 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   };
   const repaint = (): void => {
     if (busy) return;
+    if (pickerPanelLines) process.stdout.write(viewerClearSequence(pickerPanelLines));
+    pickerPanelLines = 0;
+    if (!buf.value) pickerSuppressed = false;
+    if (picker || historySearch) {
+      const lines = historySearch
+        ? renderHistorySearch(historySearch, process.stdout.columns ?? 80, process.stdout.rows ?? 24)
+        : renderSlashPicker(picker!, buf.value, process.stdout.columns ?? 80, process.stdout.rows ?? 24);
+      if (lines.length) {
+        process.stdout.write("\r\x1b[2K" + lines.join("\n") + "\n");
+        pickerPanelLines = lines.length;
+      }
+    }
     process.stdout.write(repaintString(prompt + consoleShell.prompt(), buf.value, buf.pos, process.stdout.columns ?? 80));
   };
   consoleWrite = (text: string): void => {
+    if (pickerPanelLines) {
+      process.stdout.write(viewerClearSequence(pickerPanelLines));
+      pickerPanelLines = 0;
+      picker = null;
+    }
     if (!busy) process.stdout.write("\r\x1b[2K");
     process.stdout.write(text);
     if (!busy) repaint();
@@ -1380,7 +1451,18 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   // duplicate copies in scrollback on every cursor move (Finding B).
   let viewerLastLines = 0;
   return await new Promise<number>((resolve) => {
-    const onResize = (): void => repaint();
+    const onResize = (): void => {
+      if ((process.stdout.rows ?? 24) < 3) {
+        picker = null;
+        searchPriorPicker = null;
+      }
+      if ((process.stdout.rows ?? 24) < 2 && historySearch) {
+        buf.restoreDraft(historySearch.priorValue, historySearch.priorCursor);
+        historySearch = null;
+        searchPriorPicker = null;
+      }
+      repaint();
+    };
     const cleanup = (): void => {
       consoleShell.close();
       process.stdout.write("\x1b[?2004l\x1b[?25h"); // paste off + cursor shown
@@ -1473,7 +1555,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         const nextPrompt = continuation.promptForNextTurn(built.prompt, continuation.hasAcceptedBrief ? await consoleContinuationState(ctx) : undefined);
         submittedPrompt = nextPrompt;
         if (await resolveBackend(ctx) === "cloud") authRepair.markHostedTurnStarted();
-        const outcome = await runTurn(ctx, nextPrompt, turnAbort.signal, (f) => {
+        const outcome = await runTurn(composerCtx, nextPrompt, turnAbort.signal, (f) => {
           if (receipts.length < 64) {
             if (f.type === "tool_call") receipts.push(sanitizeServerText(`tool call ${f.toolCallId} (${f.name})`));
             if (f.type === "tool_result_ack") receipts.push(sanitizeServerText(`tool result ${f.toolCallId}`));
@@ -1528,7 +1610,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               viewerOpen = false;
               break;
           }
-        }, redrawInput, { ...skillOpts, ephemeralAttachment: sharedShellResult, onToolResult: tool => toolResults.push(tool), steer: steerChannel });
+        }, redrawInput, { ...skillOpts, ephemeralAttachment: sharedShellResult, capability: input.capability ?? "coding",
+          ...(input.oneTurnSkill ? { explicitSkill: input.oneTurnSkill.reference, requireHostSkillEnforcement: true } : {}),
+          onToolResult: tool => toolResults.push(tool), steer: steerChannel });
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authContinuation);
         if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
@@ -1575,7 +1659,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         // commit() clears the submitted line before the request starts. Put it
         // back only when the user has not typed ahead; otherwise preserve their
         // newer draft and leave the failed submission in history for recall.
-        const recovered = sharedShellResult || authFailure ? buf.value : recoverSubmittedPrompt(text, buf.value);
+        const recovered = sharedShellResult || authFailure ? buf.value : recoverSubmittedPrompt(input.oneTurnSkill?.source ?? text, buf.value);
         if (recovered !== buf.value) {
           buf.clear();
           buf.insert(recovered);
@@ -1681,6 +1765,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     };
 
     const onCtrlC = (): void => {
+      picker = null;
+      historySearch = null;
+      searchPriorPicker = null;
       const now = Date.now();
       const armed = now - ctrlCArmedAt <= CTRL_C_WINDOW_MS && ctrlCArmedAt > 0;
       const active = turnAbort ?? slashAbort;
@@ -1744,6 +1831,29 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         return;
       }
       const queuePrefix = /^\s*\/queue[ \t]+/.exec(raw);
+      const oneTurnSkill = parseOneTurnSkill(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
+      if (oneTurnSkill) {
+        if (queuePrefix || busy) {
+          process.stdout.write("\n/skill runs only from the idle composer and cannot be queued. Draft preserved.\n");
+          repaint(); return;
+        }
+        if (skillOpts.noSkills) {
+          process.stdout.write("\n/skill is unavailable while --no-skills is active. Draft preserved.\n");
+          repaint(); return;
+        }
+        if (oneTurnSkill.kind === "usage") {
+          process.stdout.write("\n" + oneTurnSkill.message + "\n");
+          repaint(); return;
+        }
+        remember(raw);
+        buf.commit(raw);
+        process.stdout.write("\n");
+        busy = true;
+        await runAndDrain(queue.allocate({ kind: "chat", text: oneTurnSkill.task,
+          oneTurnSkill: { reference: oneTurnSkill.reference, source: oneTurnSkill.source } }));
+        renderHudLine(); repaint();
+        return;
+      }
       let input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
       if (input.kind === "share") {
         input = consoleShell.prepareShare(input, ctx.flags.json);
@@ -1887,10 +1997,12 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       }
       // ── stateless prompt-rewrite modes (/recon, /plan, /research, …) ──
       const mode = applyPromptMode(t);
+      let capability: RunCapability | undefined;
       if (mode.handled) {
         if (mode.error) { process.stdout.write(mode.error + "\n"); repaint(); return; }
         process.stdout.write(mode.notice + "\n");
         t = mode.prompt!;
+        capability = mode.capability;
       }
       busy = true;
       if (t.startsWith("/")) {
@@ -1925,10 +2037,14 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           renderHudLine(); repaint();
           return;
         }
-        setupOwnsInput = /^\/agent-create\s+ATS(?:\s|$)/i.test(t);
+        setupOwnsInput = /^\/agent-create\s+ATS(?:\s|$)|^\/(?:mcp|model|models|agent)\s*$/i.test(t);
+        if (setupOwnsInput) buf.endRecoveryScope();
         if (setupOwnsInput) process.stdout.write("\x1b[?2004l");
         try {
-          const res = await handleSlash(ctx, t, process.stdout, slashAbort.signal);
+          const res = await handleSlash(composerCtx, t, process.stdout, slashAbort.signal, {
+            ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
+            ...(skillOpts.noSkills ? { noSkills: true } : {}),
+          });
           if (res.exit) {
             discardQueue("session ended"); // entries held after a failure are listed, not lost silently
             cleanup();
@@ -1970,7 +2086,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         repaint();
         return;
       }
-      await runAndDrain(queue.allocate({ kind: "chat", text: t }));
+      await runAndDrain(queue.allocate({ kind: "chat", text: t, ...(capability ? { capability } : {}) }));
       renderHudLine();
       repaint();
     };
@@ -1986,6 +2102,21 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         : renderCiTree(viewerState);
       process.stdout.write(rendered + "\n");
       viewerLastLines = viewerLineCount(rendered);
+      repaint();
+    };
+
+    // Input-owner precedence: PTY/approval/setup are gated in onData; paste
+    // owns literal bytes. Idle search owns query/Enter/Escape before the slash
+    // picker, which in turn owns selection keys before viewer/history. Both
+    // overlays only edit the composer; a later Enter submits a draft.
+    const dismissPicker = (restore: boolean): void => {
+      if (!picker) return;
+      if (restore) buf.restoreDraft(picker.priorValue, picker.priorCursor);
+      picker = null;
+      repaint();
+    };
+    const refreshPicker = (): void => {
+      if (picker) picker = refreshSlashPicker(picker, buf.value);
       repaint();
     };
 
@@ -2012,35 +2143,107 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         }
         return;
       }
-      const k = decodeKey(seq);
+      const k = decodeKey(seq, ctx.cfg.lfSubmits);
+      if (k.kind === "history-search") {
+        if (busy || viewerOpen || (process.stdout.rows ?? 24) < 2) return;
+        if (historySearch) historySearch = olderHistoryMatch(historySearch);
+        else {
+          searchPriorPicker = picker;
+          picker = null;
+          buf.endRecoveryScope();
+          const enabled = historyEnabled();
+          historySearch = openHistorySearch(enabled ? buf.historyEntries() : [], buf.value, buf.pos, !enabled);
+        }
+        repaint();
+        return;
+      }
+      if (historySearch) {
+        switch (k.kind) {
+          case "char": historySearch = typeHistoryQuery(historySearch, k.value); repaint(); return;
+          case "backspace": historySearch = backspaceHistoryQuery(historySearch); repaint(); return;
+          case "submit": {
+            const match = selectedHistoryMatch(historySearch);
+            if (match === null) { repaint(); return; }
+            historySearch = null;
+            searchPriorPicker = null;
+            picker = null;
+            buf.replace(match);
+            repaint();
+            return;
+          }
+          case "escape":
+            buf.restoreDraft(historySearch.priorValue, historySearch.priorCursor);
+            historySearch = null;
+            picker = searchPriorPicker;
+            searchPriorPicker = null;
+            repaint();
+            return;
+          case "paste-start":
+            buf.restoreDraft(historySearch.priorValue, historySearch.priorCursor);
+            historySearch = null;
+            searchPriorPicker = null;
+            break; // paste is owned by the composer below
+          case "clear-screen":
+            process.stdout.write("\x1b[2J\x1b[H"); repaint(); return;
+          default: return;
+        }
+      }
       switch (k.kind) {
         case "paste-start":
+          picker = null;
+          pickerSuppressed = true;
           pasting = true;
           pasteAcc = "";
           return;
-        case "char":
+        case "char": {
+          const before = buf.value;
+          const beforeCursor = buf.pos;
           buf.insert(k.value);
+          if (picker) refreshPicker();
+          else {
+            if (!busy && !viewerOpen && !pickerSuppressed && (process.stdout.rows ?? 24) >= 3
+                && before === "" && k.value.startsWith("/") && !/\s/.test(k.value) && slashDraft(buf.value)) {
+              picker = openSlashPicker(buf.value, before, beforeCursor);
+            }
+            repaint();
+          }
+          return;
+        }
+        case "newline":
+          if (viewerOpen) return;
+          picker = null;
+          buf.insertNewline();
           repaint();
+          return;
+        case "undo":
+          if (viewerOpen) return;
+          buf.undo();
+          refreshPicker();
+          return;
+        case "yank":
+          if (viewerOpen) return;
+          buf.yank();
+          refreshPicker();
           return;
         case "backspace":
           buf.backspace();
-          repaint();
+          refreshPicker();
           return;
         case "delete":
           buf.deleteForward();
-          repaint();
+          refreshPicker();
           return;
         case "word-delete":
           buf.deleteWord();
-          repaint();
+          refreshPicker();
           return;
         case "kill-end":
           buf.killToEnd();
-          repaint();
+          refreshPicker();
           return;
         case "kill-start":
           buf.killToStart();
-          repaint();
+          refreshPicker();
           return;
         case "left":
           // While the tree is open on a workflow with real phase data,
@@ -2079,22 +2282,13 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           repaint();
           return;
         case "tab": {
-          // Slash-command completion: complete to the unambiguous prefix, or
-          // show the candidates. Plain text Tab is ignored (no file paths yet).
+          // Slash discovery never submits or mutates a reviewed shell item.
           if (busy) return;
-          const v = buf.value;
-          if (v.startsWith("/") && !/\s/.test(v) && buf.pos === [...v].length) {
-            const r = completeManifestSlash(v);
-            if (r.completed) {
-              buf.clear();
-              buf.insert(r.completed);
-            } else if (r.matches.length > 1) {
-              const shown = r.matches.slice(0, 12).map((m) => "/" + m).join("  ");
-              const more = r.matches.length > 12 ? `  … +${r.matches.length - 12} more` : "";
-              process.stdout.write("\n" + theme.dim(shown + more) + "\n");
-            }
-            repaint();
+          if (picker) picker = moveSlashPicker(picker, buf.value, 1);
+          else if (!viewerOpen && !pickerSuppressed && (process.stdout.rows ?? 24) >= 3 && slashDraft(buf.value)) {
+            picker = openSlashPicker(buf.value, buf.value, buf.pos);
           }
+          repaint();
           return;
         }
         case "clear-screen":
@@ -2112,7 +2306,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           repaint();
           return;
         case "up":
-          if (viewerOpen) {
+          if (picker) { picker = moveSlashPicker(picker, buf.value, -1); repaint(); }
+          else if (viewerOpen) {
             if (viewerState.selectedAgentId == null) {
               viewerState = moveCursor(viewerState, -1);
               redrawViewerTree();
@@ -2123,8 +2318,10 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           }
           return;
         case "down":
-          if (viewerState.visible && !viewerOpen) {
+          if (picker) { picker = moveSlashPicker(picker, buf.value, 1); repaint(); }
+          else if (viewerState.visible && !viewerOpen) {
             viewerOpen = true;
+            buf.endRecoveryScope();
             redrawViewerTree();
           } else if (viewerOpen) {
             if (viewerState.selectedAgentId == null) {
@@ -2143,6 +2340,13 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           if (!buf.value) finish(0);
           return;
         case "submit":
+          if (picker) {
+            const accepted = acceptSlashPicker(picker, buf.value, buf.pos);
+            picker = null;
+            if (accepted) buf.replace(accepted.value, accepted.cursor);
+            repaint();
+            return;
+          }
           // While the popout is open, Enter drills into the agent under the
           // cursor instead of submitting the input buffer as a chat turn
           // (Finding D: selectAgent/renderAgentFeed were fully built but
@@ -2167,6 +2371,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           });
           return;
         case "escape":
+          if (picker) { dismissPicker(true); return; }
           if (viewerOpen) {
             if (viewerState.selectedAgentId != null) {
               // Back out of the agent-feed drill-down to the tree, not a
@@ -2190,7 +2395,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     // decoded as two replacement chars.
     const decoder = new StringDecoder("utf8");
     const onData = (chunk: Buffer): void => {
-      if (terminalOwnsInput) return;
+      if (terminalOwnsInput || approvalOwnsInput) return;
       if (setupOwnsInput) { if (chunk.includes(3)) slashAbort?.abort(); return; }
       let data = carry + decoder.write(chunk);
       carry = "";
@@ -2200,7 +2405,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         data = data.slice(0, partial.index);
       }
       for (const seq of splitKeys(data)) {
-        if (setupOwnsInput || terminalOwnsInput) break;
+        if (setupOwnsInput || terminalOwnsInput || approvalOwnsInput) break;
         processSeq(seq);
       }
     };
@@ -2236,6 +2441,11 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     }
     const queuePrefix = /^\s*\/queue[ \t]+/.exec(rawLine);
     const line = queuePrefix ? rawLine.slice(queuePrefix[0].length) : rawLine;
+    if (parseOneTurnSkill(line)) {
+      process.stdout.write("/skill requires the idle interactive composer; line input is unchanged.\n");
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
     if (continuation.pending && !line.trim().startsWith("/switch")) {
       process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");
       if (p) process.stdout.write(p + consoleShell.prompt());
@@ -2317,7 +2527,10 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     if (t.startsWith("/")) {
       inflight = new AbortController();
       try {
-        const res = await handleSlash(ctx, t, process.stdout, inflight.signal);
+        const res = await handleSlash(ctx, t, process.stdout, inflight.signal, {
+          ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
+          ...(skillOpts.noSkills ? { noSkills: true } : {}),
+        });
         if (res.exit) break;
         if (res.restart) {
           applyRestart(ctx.flags, res.restart);

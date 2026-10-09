@@ -19,7 +19,9 @@ import { cmdAuth } from "./commands/auth.js";
 import { cmdModels, cmdAgents } from "./commands/models.js";
 import { cmdRun } from "./commands/run.js";
 import { cmdCode } from "./commands/code.js";
+import { promptFileConflict, readPromptFile } from "./commands/prompt_file.js";
 import { errTheme } from "./ui/theme.js";
+import { promptDenialFeedback } from "./ui/approval_feedback.js";
 // VERSION is imported ONCE from the generated version.js — main.ts must never
 // hardcode a duplicate version string that can drift from package.json.
 import { VERSION } from "./version.js";
@@ -117,6 +119,28 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  const promptFile = sf(values["prompt-file"]);
+  if (values["planning"] && cmd !== "agent" && cmd !== "code") {
+    process.stderr.write(`${errTheme.red("✗")} --planning is available only with aether agent or aether code\n`);
+    return 2;
+  }
+  if (promptFile !== undefined) {
+    if (cmd !== "agent" && cmd !== "code") {
+      process.stderr.write(`${errTheme.red("✗")} --prompt-file is available only with aether agent or aether code\n`);
+      return 2;
+    }
+    const conflict = promptFileConflict(positionals.slice(1), {
+      resume: sf(values["resume"]),
+      interactive: Boolean(values["interactive"]),
+      withToken: Boolean(values["with-token"]),
+      managedAgent: sf(values["agent"])?.startsWith("mag_"),
+    });
+    if (conflict) {
+      process.stderr.write(`${errTheme.red("✗")} ${conflict}\n`);
+      return 2;
+    }
+  }
+
   const cfg = loadConfig();
   // Embedded launch (desktop/web sets AETHER_TOKEN) authenticates as that session
   // with no re-login; standalone CLI use falls back to the on-disk token store.
@@ -156,7 +180,7 @@ export async function main(argv: string[]): Promise<number> {
         });
   const ctx: AppContext = {
     cfg, api, tokens, driveStaffTokens: new FileTokenStore(".drive-staff-session"),
-    flags, confirm,
+    flags, confirm, approvalFeedback: (signal) => promptDenialFeedback({ signal }),
   };
 
   const loginOpts: LoginOpts = {
@@ -180,6 +204,10 @@ export async function main(argv: string[]): Promise<number> {
     return 1;
   }
   if (cmd === "agent" && rest[0] && MANAGED_AGENT_VERBS.has(rest[0])) {
+    if (values["planning"]) {
+      process.stderr.write(`${errTheme.red("✗")} --planning applies to coding tasks, not managed agent commands\n`);
+      return 2;
+    }
     return cmdManagedAgents(ctx, rest, { hooks: createAtsHooks() });
   }
 
@@ -273,12 +301,31 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "agent":
     case "code": {
-      const task = rest.join(" ");
+      let task = rest.join(" ");
+      let promptInput;
+      if (promptFile !== undefined) {
+        try {
+          const loaded = await readPromptFile(promptFile);
+          task = loaded.task;
+          promptInput = loaded.input;
+        } catch (error) {
+          process.stderr.write(`${errTheme.red("✗")} ${error instanceof Error ? error.message : String(error)}\n`);
+          return 2;
+        }
+        const source = promptInput.kind === "stdin" ? "stdin" : promptInput.path;
+        if (flags.json) process.stdout.write(JSON.stringify({ type: "prompt_input", source, bytes: promptInput.bytes }) + "\n");
+        else process.stderr.write(`Prompt input: ${JSON.stringify(source)} (${promptInput.bytes} bytes)\n`);
+      }
       // No task and not resuming → open the persistent interactive agent REPL
       // (chat bar ready for the first question), Claude Code style.
+      if (values["planning"] && !task) {
+        process.stderr.write(`${errTheme.red("✗")} --planning requires a task or --prompt-file\n`);
+        return 2;
+      }
       if (!task && !sf(values["resume"])) return cmdChat(ctx, "", skillOpts);
       return cmdCode(ctx, task, {
         local: Boolean(values["local"]),
+        capability: values["planning"] ? "planning" : "coding",
         pool: Number(sf(values["pool"]) ?? "5") || 5,
         effort: sf(values["effort"]),
         testCmd: sf(values["test-cmd"]),
@@ -291,6 +338,7 @@ export async function main(argv: string[]): Promise<number> {
         resume: sf(values["resume"]),
         skill: sf(values["skill"]),
         noSkills: Boolean(values["no-skills"]),
+        ...(promptInput ? { promptInput } : {}),
       });
     }
     case "resume": {

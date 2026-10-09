@@ -37,4 +37,16 @@ test("embedded newlines render as ⏎ on the single row (no raw linefeed)", () =
   assert.ok(!v.text.includes("\n"), "a raw LF would break the pinned row");
   assert.ok(v.text.includes("⏎"));
   assert.equal(v.cursorCol, 2 + 5 + 1); // ⏎ counts one column
+  assert.match(v.text, /\[2L\]$/);
+});
+
+test("multiline Unicode input keeps a one-row cursor and line hint after resize", () => {
+  const value = "漢🙂\nsecond\nthird";
+  for (const cols of [12, 20, 40]) {
+    const view = renderInputView("> ", value, [...value].length, cols);
+    assert.ok(!view.text.includes("\n"));
+    assert.ok(view.cursorCol >= 1 && view.cursorCol <= cols);
+    assert.ok(stripAnsi(view.text).length <= cols);
+    if (cols >= 20) assert.match(view.text, /\[3L\]$/);
+  }
 });

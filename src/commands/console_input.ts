@@ -5,6 +5,7 @@ import { TerminalPty } from "../core/terminal_pty.js";
 import { ShellAttachmentPreview, captureShellResult, type ShellCapture, type ShellAttachment } from "./shell_attachment.js";
 import { sanitizeServerText } from "../core/transport.js";
 import { scanForSecrets } from "../core/redaction.js";
+import type { RunCapability } from "../core/run_capability.js";
 import { discoverShellProfiles, type ShellProfile } from "../core/shell_profiles.js";
 
 type ShareAction = "preview" | "lines" | "drop" | "replace" | "mask" | "redact" | "send" | "cancel";
@@ -20,7 +21,9 @@ export type ConsoleInput =
   | { kind: "profile"; action: "list" | "status" | "use"; profile?: "cmd" | "powershell" }
   | ShareInput
   | { kind: "error"; message: string }
-  | { kind: "chat"; text: string }
+  | { kind: "chat"; text: string; capability?: RunCapability;
+      /** Only idle /skill admission can set this; queued edits never resolve a skill. */
+      oneTurnSkill?: { reference: string; source: string } }
   | { kind: "empty" };
 
 export function classifyConsoleInput(raw: string): ConsoleInput {

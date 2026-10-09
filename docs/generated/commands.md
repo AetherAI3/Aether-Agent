@@ -1,12 +1,12 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:a535be0a97ba8f1858cd7a0bb92aa45f7f31738eb29c5990e388d9f51f884241 -->
+<!-- manifest-digest: sha256:86007ce5d891437da7961452d1cf085949b3148466cabfd5feae8d0a51786290 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
 
 Global shell flags accepted by the manifest:
 
-`--agent`, `--all`, `--apply`, `--audit`, `--available`, `--ci`, `--cwd`, `--effort`, `--help`, `--interactive`, `--json`, `--junit`, `--license-key`, `--local`, `--model`, `--no-browser`, `--no-log`, `--no-skills`, `--out`, `--password`, `--pool`, `--quiet`, `--repo`, `--resume`, `--scope`, `--skill`, `--test-cmd`, `--token`, `--username`, `--version`, `--with-token`, `--worktree`, `--yes`
+`--agent`, `--all`, `--apply`, `--audit`, `--available`, `--ci`, `--cwd`, `--effort`, `--help`, `--interactive`, `--json`, `--junit`, `--license-key`, `--local`, `--model`, `--no-browser`, `--no-log`, `--no-skills`, `--out`, `--password`, `--pool`, `--prompt-file`, `--quiet`, `--repo`, `--resume`, `--scope`, `--skill`, `--test-cmd`, `--token`, `--username`, `--version`, `--with-token`, `--worktree`, `--yes`
 
 ## Shell commands
 
@@ -23,6 +23,10 @@ Permission: `read-only` · Availability: `runtime-dependent` · Telemetry: `shel
 run the coding agent or manage account agents and shared conversations
 
 Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.agent` · Aliases: `aether code` · Requires: `aether.hosted-or-local`
+
+Command flags:
+
+- `--planning`
 
 #### `aether chat [prompt]`
 
@@ -445,6 +449,12 @@ deep reconnaissance
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.recon`
 
+#### `/skill <qualified-id> <task>`
+
+use a trusted skill for one idle local task
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.skill`
+
 #### `/plan <topic>`
 
 write implementation plan
@@ -556,6 +566,12 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 evict file from context
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.drop`
+
+#### `/context [next <task> | content <path>]`
+
+inspect admitted and next\-task selected context
+
+Permission: `read-only` · Availability: `runtime-dependent` · Telemetry: `slash.context`
 
 #### `/snapshot [resume <id>]`
 

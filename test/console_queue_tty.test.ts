@@ -94,7 +94,7 @@ async function withConsole(run: (h: Harness) => Promise<void>): Promise<void> {
     await until(() => output.includes("\x1b[?2004h"), "console ready");
     await run({ root, bodies, processCalls, output: () => output, submit, type, until, answer, waitForCall });
     process.stdin.emit("data", Buffer.from("\x03")); // clear any draft
-    submit("/exit");
+    submit("/exit"); process.stdin.emit("data", Buffer.from("\r"));
     assert.equal(await Promise.race([pending, new Promise((_, reject) => setTimeout(() => reject(new Error("TTY exit timed out")), 2000))]), 0);
     pending = null;
   } finally {
@@ -113,6 +113,27 @@ async function withConsole(run: (h: Harness) => Promise<void>): Promise<void> {
 }
 
 const shellResults = (output: string): number => (output.match(/"type":"shell_result"/g) ?? []).length;
+
+test("Ctrl+R does not take input ownership during a streaming turn; typeahead remains a draft", async () => {
+  await withConsole(async ({ bodies, output, submit, type, until, answer, waitForCall }) => {
+    submit("stored prompt");
+    await answer(1);
+    await until(() => (output().match(/"type":"turn_outcome"/g) ?? []).length >= 1, "first turn completed");
+    submit("active prompt");
+    await waitForCall(2);
+    const before = output().length;
+    type("\x12queued draft");
+    assert.doesNotMatch(output().slice(before), /Ctrl\+R/);
+    assert.equal(bodies.length, 2);
+    await answer(2);
+    await until(() => (output().match(/"type":"turn_outcome"/g) ?? []).length >= 2, "second turn completed");
+    type("\r");
+    await waitForCall(3);
+    assert.match(bodies[2]!, /queued draft/);
+    await answer(3);
+    await until(() => (output().match(/"type":"turn_outcome"/g) ?? []).length >= 3, "typeahead turn completed");
+  });
+});
 
 test("TTY: list, edit and remove mixed queued entries while a turn streams; removed entries make zero calls", async () => {
   await withConsole(async ({ root, bodies, output, submit, type, until, answer, waitForCall }) => {
@@ -212,6 +233,7 @@ test("TTY: a failed turn pauses pending entries until /queue resume; nothing sil
     // Terminal handoff cannot change the checkout underneath a held queue.
     process.stdin.emit("data", Buffer.from("\x03")); // clear the restored failed prompt
     submit("/terminal-status");
+    process.stdin.emit("data", Buffer.from("\r")); // accept picker, then run
     await until(() => output().includes("resume or clear pending entries before terminal handoff"), "pending terminal handoff refused");
     process.stdin.emit("data", Buffer.from("\x15"));
     // A new submission runs alone; the held entries stay held.
@@ -234,6 +256,26 @@ test("TTY: a failed turn pauses pending entries until /queue resume; nothing sil
   });
 });
 
+test("/skill refuses busy and queued admission before either can become chat prose", async () => {
+  await withConsole(async ({ bodies, output, submit, type, until, answer, waitForCall }) => {
+    submit("ordinary running task");
+    await waitForCall(1);
+    submit("/skill user/demo /clear !literal");
+    await until(() => output().includes("/skill runs only from the idle composer and cannot be queued"), "busy skill refusal");
+    type("\x15"); // refused draft remains editable
+    submit("/queue /skill user/demo task");
+    await until(() => (output().match(/cannot be queued/g) ?? []).length >= 2, "queued skill refusal");
+    assert.equal(bodies.length, 1);
+    assert.doesNotMatch(bodies[0]!, /user\/demo|!literal/);
+    type("\x15");
+    await answer(1);
+    await until(() => output().includes('"type":"turn_outcome"'), "normal turn finished");
+    type("\x1b[200~/skill user/demo task\x1b[201~\r");
+    await until(() => output().includes("/skill is unavailable while --no-skills is active"), "disabled skills refused");
+    assert.equal(bodies.length, 1);
+  });
+});
+
 test("TTY: cancelling a streaming turn discards and lists pending entries; none run", async () => {
   await withConsole(async ({ root, bodies, output, submit, until, waitForCall }) => {
     submit("long task");
@@ -248,6 +290,7 @@ test("TTY: cancelling a streaming turn discards and lists pending entries; none 
     assert.match(disposition, /q3 +user shell +!/);
     await new Promise(resolve => setTimeout(resolve, 50));
     submit("/queue");
+    process.stdin.emit("data", Buffer.from("\r")); // accept picker, then run
     await until(() => output().includes("Queue: 0 pending."), "empty after cancel");
     assert.equal(bodies.length, 1);
     assert.equal(existsSync(join(root, "never.txt")), false);
@@ -294,11 +337,13 @@ test("line mode has no pending queue: management explains itself and /queue <tas
   const input = new PassThrough();
   try {
     const session = replLines(context(root), { noSkills: true }, new ConsoleShell(root, text => { output += text; }, true), input);
-    input.end(["/queue list", "/queue edit q1 something", "/queue clear", touch("ran.txt").replace("!", "/queue !"), ""].join("\n"));
+    input.end(["/queue list", "/queue edit q1 something", "/queue clear", "/skill user/demo literal", touch("ran.txt").replace("!", "/queue !"), ""].join("\n"));
     assert.equal(await session, 0);
     assert.equal((output.match(/Line mode has no pending queue/g) ?? []).length, 3);
     assert.equal(existsSync(join(root, "ran.txt")), true, "/queue <shell> runs as the next line");
     assert.equal(modelCalls, 0);
+    assert.match(output, /\/skill requires the idle interactive composer/);
+    assert.doesNotMatch(output, /\x1b\[/, "line mode does not render the ANSI slash picker");
   } finally {
     globalThis.fetch = oldFetch; process.stdout.write = oldWrite;
     rmSync(historyPath(root), { force: true }); rmSync(root, { recursive: true, force: true });
@@ -314,7 +359,7 @@ test("TTY: leaving the console with held entries lists them as discarded", async
     await answer(1, Response.json({ detail: "insufficient UVT balance" }, { status: 402 }));
     await until(() => output().includes("Queue paused (q1 failed)"), "pause disposition");
     process.stdin.emit("data", Buffer.from("\x03")); // clear the restored failed prompt
-    submit("/exit");
+    submit("/exit"); process.stdin.emit("data", Buffer.from("\r"));
     await until(() => output().includes("Queue discarded (session ended): 1 pending entry removed; none ran and none will resume."), "exit disposition");
     assert.equal(bodies.length, 1);
     assert.equal(existsSync(join(root, "abandoned.txt")), false);
@@ -347,6 +392,7 @@ test("TTY: queued approved bytes survive same-capture edit/cancel and stay out o
     submit("!echo IMMUTABLE_CAPTURE_A");
     await until(() => shellResults(output()) === 1, "capture A");
     submit("/shell-result");
+    process.stdin.emit("data", Buffer.from("\r")); // accept picker, then run
     await until(() => output().includes('"type":"shell_share_preview"'), "reviewed preview");
     const record = output().split("\n").find(line => line.includes('"type":"shell_share_preview"'))!;
     const exact = (JSON.parse(record.slice(record.indexOf('{"type":"shell_share_preview"'))) as { attachment: string }).attachment;
@@ -384,6 +430,7 @@ test("TTY: full queue preserves the exact edited shell draft for explicit retry"
     submit("!echo CAPACITY_CAPTURE");
     await until(() => shellResults(output()) === 1, "capture for capacity test");
     submit("/shell-result");
+    process.stdin.emit("data", Buffer.from("\r")); // accept picker, then run
     submit("/shell-result replace 1 EDITED_CAPACITY_DRAFT");
     await until(() => output().includes("EDITED_CAPACITY_DRAFT"), "edited review");
     const record = output().split("\n").filter(line => line.includes('"type":"shell_share_preview"')).at(-1)!;

@@ -16,6 +16,7 @@ import type { ApiClient } from "./transport.js";
 import { AGENT_CONTEXT_PATH } from "./transport.js";
 import type { HudElementId, HudTimer } from "./hud.js";
 import { createTimer, timerSwitch } from "./hud.js";
+import type { AdmittedContext, PinSelection } from "./selected_context.js";
 
 // ── Types ──
 import { confineToWorkspace, isCurrentWorkspace, normalizeWorkspace, resolveOpaqueChild } from "./workspace_scope.js";
@@ -58,6 +59,10 @@ export interface SnapshotData {
 export class ContextRegistry {
   pins: PinnedEntry[] = [];
   drops: string[] = [];
+  /** Workspace from which pin paths were selected; never sent in registry sync. */
+  originWorkspace: string | null = null;
+  /** Frozen turn context for the local /context inspector, never snapshotted. */
+  lastAdmitted: AdmittedContext | null = null;
   uvtCap: number | null = null;
 
   /**
@@ -92,7 +97,15 @@ export class ContextRegistry {
   hudElements: HudElementId[] = [];
   hudTimer: HudTimer = createTimer();
 
-  pin(path: string, label: string, reason: string): PinnedEntry {
+  pin(path: string, label: string, reason: string, originWorkspace?: string): PinnedEntry {
+    if (originWorkspace) {
+      const origin = normalizeWorkspace(originWorkspace);
+      if (this.originWorkspace && !isCurrentWorkspace(this.originWorkspace, origin)) {
+        throw new Error("pins belong to another workspace; clear or restore that context before pinning here");
+      }
+      path = confineToWorkspace(origin, path);
+      this.originWorkspace = origin;
+    }
     // Deduplicate — remove from drops if it was dropped, update pin
     this.drops = this.drops.filter((d) => d !== path);
     const existing = this.pins.findIndex((p) => p.path === path);
@@ -105,8 +118,13 @@ export class ContextRegistry {
     return entry;
   }
 
+  selectedPins(): PinSelection {
+    return { originRoot: this.originWorkspace, entries: this.pins.map((pin) => ({ ...pin })) };
+  }
+
   drop(path: string): boolean {
     this.pins = this.pins.filter((p) => p.path !== path);
+    if (this.pins.length === 0) this.originWorkspace = null;
     if (!this.drops.includes(path)) {
       this.drops.push(path);
       return true;
@@ -163,6 +181,8 @@ export class ContextRegistry {
   purge(): { clearedPins: number; removedFiles: number } {
     const clearedPins = this.pins.length;
     this.pins = [];
+    this.originWorkspace = null;
+    this.lastAdmitted = null;
     this.drops = [];
     this.uvtCap = null;
     this.uvtObserved = null;
@@ -267,6 +287,7 @@ export class ContextRegistry {
     }
     if (!Array.isArray(data.pins) || !Array.isArray(data.drops)) throw new Error("invalid snapshot");
     const reg = new ContextRegistry();
+    reg.originWorkspace = normalizeWorkspace(cwd);
     reg.sessionLabel = data.sessionLabel;
     reg.pins = data.pins.map((pin) => ({ ...pin, path: confineToWorkspace(cwd, pin.path) }));
     reg.drops = data.drops.map((path) => confineToWorkspace(cwd, path));

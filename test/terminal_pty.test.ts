@@ -149,7 +149,7 @@ while time.monotonic()<deadline:
  elif stage==2 and (b'exited -9' if sys.argv[3]=='crash' else b'exited 0') in data:
   time.sleep(.05); os.write(m,b'\r' if sys.argv[3]=='crash' else b'normal chat\r'); stage=3
  elif stage==3 and b'MODEL_REPLY' in data:
-  time.sleep(.05); os.write(m,b'/exit\r'); stage=4
+  time.sleep(.05); os.write(m,b'/exit\r\r'); stage=4
  if p.poll() is not None: break
 if p.poll() is None: p.kill()
 p.wait(); os.close(m); sys.stdout.buffer.write(data); sys.exit(p.returncode)`;

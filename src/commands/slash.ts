@@ -26,7 +26,7 @@ import type { CatalogItem, CatalogResponse } from "../types.js";
 import { MODELS_PATH } from "../core/transport.js";
 import { fetchTrail } from "../core/audit.js";
 import { theme } from "../ui/theme.js";
-import { suggestManifestCommand } from "./command_manifest.js";
+import { commandInvocationStatus, findManifestCommand, suggestManifestCommand } from "./command_manifest.js";
 import { printSlashHelp } from "./slash_help.js";
 import { EFFORT_TIERS, normalizeEffort, renderEffortSlider, renderCodeProArt } from "../ui/effort.js";
 import { saveConfig } from "../core/config.js";
@@ -38,7 +38,7 @@ import { normalizeOllamaHost } from "../core/ollama.js";
 import { listInstalledOllamaModels, OllamaModelsError } from "../core/ollama_models.js";
 import { runLogsViewer } from "../ui/logs_viewer.js";
 
-import { pinSlash, dropSlash, snapshotSlash, limitSlash, auditReceiptSlash, purgeSlash } from "./slash_context.js";
+import { pinSlash, dropSlash, contextSlash, snapshotSlash, limitSlash, auditReceiptSlash, purgeSlash, type ContextInspectorOptions } from "./slash_context.js";
 import { rollbackSlash, revertSlash, stageDiffSlash } from "./slash_git_tools.js";
 import { reviewSlash } from "./review.js";
 import { shipSlash } from "./ship.js";
@@ -175,8 +175,16 @@ export async function handleSlash(
   line: string,
   out: Writable,
   signal?: AbortSignal,
+  contextOptions: ContextInspectorOptions = {},
 ): Promise<SlashResult> {
   const { cmd, arg } = splitSlashCommand(line);
+
+  const manifestEntry = findManifestCommand("slash", cmd);
+  if (manifestEntry?.sessionScope === "managed-agent"
+      && commandInvocationStatus(manifestEntry, "coding") === "unsupported") {
+    out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
+    return { exit: false };
+  }
 
   switch (cmd) {
     case "terminal":
@@ -203,9 +211,7 @@ export async function handleSlash(
       break;
     case "browser":
     case "ats":
-      // These operations belong to the managed chat hook/session lifecycle.
-      // The coding REPL only gives a handoff, and never replays the arguments.
-      out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
+      // Reached only if the shared manifest scope gate above changes.
       break;
     case "models": {
       const r = await showPicker(ctx, out, "model", signal);
@@ -419,11 +425,17 @@ export async function handleSlash(
     case "code-review":
       out.write(`/${cmd} is handled directly in the interactive REPL.\n`);
       break;
+    case "skill":
+      out.write("/skill requires the idle interactive composer; it is unavailable in line input or other owners.\n");
+      break;
     case "pin":
       await pinSlash(ctx, out, arg, line);
       break;
     case "drop":
       await dropSlash(ctx, out, arg);
+      break;
+    case "context":
+      await contextSlash(ctx, out, arg, { ...contextOptions, backend: await activeBackend(ctx) });
       break;
     case "snapshot":
       await snapshotSlash(ctx, out, arg);
