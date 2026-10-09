@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:f047dc15eff1c35784add44adb5ab9699d07d9e865d06fcc757b2f9b9718d721 -->
+<!-- manifest-digest: sha256:15c107ce5164a95e2383d4e4b82c4f8dee285d5942b384498ee7dedbb9b934d6 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -560,6 +560,12 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 evict file from context
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.drop`
+
+#### `/context [next <task> | content <path>]`
+
+inspect admitted and next\-task selected context
+
+Permission: `read-only` · Availability: `runtime-dependent` · Telemetry: `slash.context`
 
 #### `/snapshot [resume <id>]`
 

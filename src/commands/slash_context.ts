@@ -14,6 +14,93 @@ import {
 import { readCustodyLog, shortCustodyHash } from "../core/custody.js";
 import { fetchTrail } from "../core/audit.js";
 import type { AuditEntry } from "../core/audit.js";
+import { openRunSession } from "../core/skills/run_session.js";
+import { sanitizeForTransport } from "../core/skills/context_packet.js";
+import { applyPromptMode } from "./prompt_modes.js";
+import type { AdmittedContext } from "../core/selected_context.js";
+
+export interface ContextInspectorOptions {
+  backend?: "local" | "cloud";
+  explicitSkill?: string;
+  noSkills?: boolean;
+}
+
+function showContext(out: Writable, heading: string, admitted: AdmittedContext): void {
+  const d = admitted.descriptor;
+  out.write(`${heading}\n`);
+  out.write(`  mode: ${d.capability} · route: ${d.transport}\n`);
+  out.write(`  execution workspace: ${JSON.stringify(d.executionRoot)}\n`);
+  out.write(`  pin origin: ${d.originRoot ? JSON.stringify(d.originRoot) : "none"}\n`);
+  out.write(`  assembled context: ${d.contextBytes}/${d.contextLimitBytes} bytes\n`);
+  out.write(`  rules: ${d.rules.length ? "" : "none"}\n`);
+  for (const rule of d.rules) out.write(`    ${JSON.stringify(rule.path)} · ${rule.digest} · ${rule.status}\n`);
+  out.write(`  skills: ${d.skills.length ? "" : "none"}\n`);
+  for (const skill of d.skills) out.write(`    ${skill.id} · ${skill.digest} · ${skill.invocation}\n`);
+  out.write(`  selected files: ${d.files.length ? "" : "none"}\n`);
+  for (const file of d.files) {
+    const binding = file.executionPath ? ` · bound to ${JSON.stringify(file.executionPath)}` : "";
+    const digest = file.digest ? ` · ${file.digest}` : "";
+    out.write(`    ${JSON.stringify(file.path)} · ${file.status} · ${file.includedBytes}/${file.sourceBytes ?? "?"} bytes${digest}${binding}\n`);
+    out.write(`      ${file.range ?? file.reason}\n`);
+  }
+}
+
+/** Metadata by default. Content requires an explicit local preview command. */
+export async function contextSlash(ctx: AppContext, out: Writable, arg: string, options: ContextInspectorOptions = {}): Promise<void> {
+  const registry = getRegistry();
+  const command = arg.trim();
+  if (!command) {
+    if (registry.lastAdmitted) showContext(out, "Last admitted turn (frozen at admission):", registry.lastAdmitted);
+    else out.write("Last admitted turn: none in this console.\n");
+    out.write(`Next-draft preview: not resolved without a task (${registry.pins.length} pin${registry.pins.length === 1 ? "" : "s"} configured). Use /context next <task>.\n`);
+    out.write("Use /context content <project-relative path> to preview an admitted local file.\n");
+    return;
+  }
+  if (command === "next" || command === "content") {
+    out.write(command === "next" ? "usage: /context next <task>\n" : "usage: /context content <project-relative path>\n");
+    return;
+  }
+  if (command.startsWith("content ")) {
+    const path = command.slice("content ".length).trim().replace(/\\/g, "/");
+    const admitted = registry.lastAdmitted;
+    if (!admitted) { out.write("No admitted turn is available for a local content preview.\n"); return; }
+    const file = admitted.descriptor.files.find((entry) => entry.path === path && entry.status === "included");
+    const content = admitted.contents.get(path);
+    if (!file || content === undefined) { out.write(`No admitted local file content for ${JSON.stringify(path)}.\n`); return; }
+    const bytes = Buffer.from(content, "utf8");
+    const limit = 4096;
+    const preview = sanitizeForTransport(bytes.subarray(0, limit).toString("utf8"));
+    out.write(`Local content preview: ${JSON.stringify(path)} · ${file.digest} · first ${Math.min(bytes.length, limit)}/${bytes.length} UTF-8 bytes\n`);
+    out.write(preview + (preview.endsWith("\n") ? "" : "\n"));
+    if (bytes.length > limit) out.write("[preview clipped; admitted file was included in full]\n");
+    return;
+  }
+  if (command.startsWith("next ")) {
+    const rawTask = command.slice("next ".length);
+    if (!rawTask.trim()) { out.write("usage: /context next <task>\n"); return; }
+    const mode = applyPromptMode(rawTask);
+    if (mode.error) { out.write(mode.error + "\n"); return; }
+    if (mode.capability === "planning" && options.backend === "cloud") {
+      out.write("Next-draft preview refused: /plan cannot run on server-executed cloud chat. Use aether agent --planning.\n");
+      return;
+    }
+    const prompt = mode.handled ? mode.prompt! : rawTask;
+    const opened = openRunSession({
+      projectRoot: ctx.flags.cwd,
+      prompt,
+      selectedPins: registry.selectedPins(),
+      selectedFileTransport: options.backend === "cloud" ? "unsupported" : "host",
+      ...(mode.capability ? { capability: mode.capability } : {}),
+      ...(options.explicitSkill ? { explicitSkill: options.explicitSkill } : {}),
+      ...(options.noSkills ? { noSkills: true } : {}),
+      allowIncompleteInstructionDiscovery: options.backend === "cloud",
+    });
+    if (!opened.ok) { for (const line of opened.lines) out.write(line + "\n"); return; }
+    showContext(out, "Next-draft preview (not admitted or sent):", opened.run.admittedContext());
+    return;
+  }
+  out.write("usage: /context [next <task> | content <project-relative path>]\n");
+}
 
 // ── /pin ──────────────────────────────────────
 
@@ -39,9 +126,9 @@ export async function pinSlash(ctx: AppContext, out: Writable, arg: string, _lin
   const resolved = confineToWorkspace(ctx.flags.cwd, pth);
   const label = pth.split("/").pop() || pth;
 
-  const entry = getRegistry().pin(resolved, label, reason);
+  const entry = getRegistry().pin(resolved, label, reason, ctx.flags.cwd);
   out.write(`${theme.cyan("📌 pinned")} ${theme.bold(entry.label)}  ${theme.dim(entry.path)}  (${entry.reason})\n`);
-  out.write(theme.dim("  This file will persist in context across /recon and /autonomous-execution loops.\n"));
+  out.write(theme.dim("  Its bounded contents will be read from the task's execution checkout at turn admission; /context shows what was included.\n"));
   syncAfter(ctx);
 }
 
@@ -68,15 +155,16 @@ export async function dropSlash(ctx: AppContext, out: Writable, arg: string): Pr
   }
 
   const pth = arg.trim();
-  const resolved = confineToWorkspace(ctx.flags.cwd, pth);
-  const wasPinned = getRegistry().isPinned(resolved);
-  getRegistry().drop(resolved);
+  const registry = getRegistry();
+  const resolved = confineToWorkspace(registry.originWorkspace ?? ctx.flags.cwd, pth);
+  const wasPinned = registry.isPinned(resolved);
+  registry.drop(resolved);
 
   if (wasPinned) {
     out.write(`${theme.cyan("🗑  dropped")} ${theme.bold(pth)} — removed from pinned context\n`);
   } else {
     out.write(`${theme.cyan("🗑  evicted")} ${theme.dim(pth)}\n`);
-    out.write(theme.dim("  (wasn't pinned, but will be excluded from future context loads)\n"));
+    out.write(theme.dim("  (recorded in the drop list; explicit file-reading tools remain available)\n"));
   }
   syncAfter(ctx);
 }

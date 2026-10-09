@@ -89,6 +89,7 @@ import { turnOutcomeRecord } from "./chat.js";
 import { openRcCodingObserver, type RcCodingObserver } from "./rc_observation.js";
 import { publishCodingVerification } from "./rc_verification.js";
 import { promptInputLabel, type PromptInput } from "./prompt_file.js";
+import { getRegistry } from "../core/context_registry.js";
 import { refuseRunCapability, type RunCapability } from "../core/run_capability.js";
 import {
   TRANSIENT_READ_AUTO_RETRIES,
@@ -921,6 +922,7 @@ export async function cmdCode(
   const opened = openRunSession({
     projectRoot: cwd,
     prompt: task || label,
+    selectedPins: getRegistry().selectedPins(),
     ...(opts.capability ? { capability: opts.capability } : {}),
     ...(opts.skill ? { explicitSkill: opts.skill } : {}),
     ...(opts.noSkills ? { noSkills: true } : {}),
@@ -1092,6 +1094,7 @@ export async function cmdCode(
     model: localSelection?.tag ?? (resolvedHostedModel || undefined),
     testCmd: opts.capability === "planning" ? undefined : opts.testCmd,
   };
+  getRegistry().lastAdmitted = run.admittedContext();
 
   // One correlation identity owns the production run. A brain `done` event is
   // advisory; the lifecycle remains completing until host verification below.

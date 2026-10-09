@@ -155,6 +155,15 @@ Type `/` at an idle raw terminal prompt to browse described commands. Use
 arrows or Tab to choose, Enter to insert editable command text, then Enter
 again to run it; Escape restores your earlier draft.
 
+Use `/pin src/guide.md` to attach that file's complete, bounded UTF-8 content
+to each admitted coding turn. The file is read from the execution checkout, so
+a worktree turn uses its own copy. `/context` shows what the last turn actually
+included, with digests and omissions but no file bodies; `/context next <task>`
+previews a draft, and `/context content src/guide.md` explicitly previews local
+admitted content. `/drop src/guide.md` stops automatic inclusion on later turns.
+Server-executed cloud chat reports pin delivery as unsupported when the local
+host cannot inspect it. [Limits and details](COMMANDS.md#context--limits).
+
 ## Everyday commands
 
 | Goal | Command |

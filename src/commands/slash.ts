@@ -38,7 +38,7 @@ import { normalizeOllamaHost } from "../core/ollama.js";
 import { listInstalledOllamaModels, OllamaModelsError } from "../core/ollama_models.js";
 import { runLogsViewer } from "../ui/logs_viewer.js";
 
-import { pinSlash, dropSlash, snapshotSlash, limitSlash, auditReceiptSlash, purgeSlash } from "./slash_context.js";
+import { pinSlash, dropSlash, contextSlash, snapshotSlash, limitSlash, auditReceiptSlash, purgeSlash, type ContextInspectorOptions } from "./slash_context.js";
 import { rollbackSlash, revertSlash, stageDiffSlash } from "./slash_git_tools.js";
 import { reviewSlash } from "./review.js";
 import { shipSlash } from "./ship.js";
@@ -175,6 +175,7 @@ export async function handleSlash(
   line: string,
   out: Writable,
   signal?: AbortSignal,
+  contextOptions: ContextInspectorOptions = {},
 ): Promise<SlashResult> {
   const { cmd, arg } = splitSlashCommand(line);
 
@@ -429,6 +430,9 @@ export async function handleSlash(
       break;
     case "drop":
       await dropSlash(ctx, out, arg);
+      break;
+    case "context":
+      await contextSlash(ctx, out, arg, { ...contextOptions, backend: await activeBackend(ctx) });
       break;
     case "snapshot":
       await snapshotSlash(ctx, out, arg);
