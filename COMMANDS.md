@@ -115,12 +115,36 @@ session manifest. In a git checkout, a completed check is also recorded for
 | `--pool <gb>` | Context pool size in GB (status-bar reach = pool × 233M tokens). |
 | `--effort <t>` | Effort tier: `LOW` \| `MED` \| `HIGH` \| `MAX` \| `ULTRA` \| `CODEPRO` (overrides the saved `/effort` dial). |
 | `--test-cmd <c>` | Command the verification gate runs (unverified without it). |
+| `--prompt-file <path\|->` | Read one UTF-8 coding task from a file or stdin through EOF (maximum 256 KiB). |
 | `--quiet` | Plain output (strip the personality frames). |
 | `--interactive` | Pause at each stage boundary to type a steer (TTY only). |
 | `--no-log` | Disable the local session log (`~/.aether-agent/logs`). |
 | `--swarm <N>` | N-agent swarm (gated; local-only; refuses at runtime — see `commands/code.ts`). |
 | `--skill <id>` | Load this skill for the run (id, short name, or command alias) and **apply its tool policy** — the host refuses any tool the skill does not declare. |
 | `--no-skills` | Load no skill. The project's own `AGENTS.md` still applies — it is not a skill. |
+
+For a multiline specification, put the complete task in `task.md` and run:
+
+```bash
+aether agent --prompt-file task.md --test-cmd "npm test"
+cat task.md | aether agent --prompt-file - --test-cmd "npm test"
+```
+
+PowerShell: `Get-Content -Raw task.md | aether agent --prompt-file -`.
+Input is read once, kept literal (including newlines, `/`, `!`, backticks, and
+`$()`), and sent as one coding task. The 256 KiB cap is measured in UTF-8 bytes;
+oversized, invalid UTF-8, missing, unreadable, or blank input exits before a
+model or session starts. A failed read never opens the line REPL. The session
+manifest and JSON `prompt_input` event record source and byte size, not the task
+body. Explicit session sharing continues to use its existing controls.
+
+| Combination with `--prompt-file` | Result |
+|---|---|
+| Positional task or managed-agent verb | Refused: one explicit source only. |
+| `--resume` | Refused: continuation and a new file task have different ownership. |
+| `--interactive` | Refused: stage steering may need stdin. |
+| `--with-token` | Refused: it also consumes stdin. |
+| `--test-cmd`, `--local`, `--skill`, `--no-skills`, `--worktree`, `--repo`, `--yes` | Supported; normal coding routing, permissions, and verification apply. |
 
 Before the run starts, the agent prints what it loaded and what it will enforce:
 

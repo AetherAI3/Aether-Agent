@@ -19,6 +19,7 @@ import { cmdAuth } from "./commands/auth.js";
 import { cmdModels, cmdAgents } from "./commands/models.js";
 import { cmdRun } from "./commands/run.js";
 import { cmdCode } from "./commands/code.js";
+import { promptFileConflict, readPromptFile } from "./commands/prompt_file.js";
 import { errTheme } from "./ui/theme.js";
 // VERSION is imported ONCE from the generated version.js — main.ts must never
 // hardcode a duplicate version string that can drift from package.json.
@@ -115,6 +116,24 @@ export async function main(argv: string[]): Promise<number> {
     const target = cmd === "help" ? positionals[1] : cmd;
     process.stdout.write(renderManifestHelp("shell", target));
     return 0;
+  }
+
+  const promptFile = sf(values["prompt-file"]);
+  if (promptFile !== undefined) {
+    if (cmd !== "agent" && cmd !== "code") {
+      process.stderr.write(`${errTheme.red("✗")} --prompt-file is available only with aether agent or aether code\n`);
+      return 2;
+    }
+    const conflict = promptFileConflict(positionals.slice(1), {
+      resume: sf(values["resume"]),
+      interactive: Boolean(values["interactive"]),
+      withToken: Boolean(values["with-token"]),
+      managedAgent: sf(values["agent"])?.startsWith("mag_"),
+    });
+    if (conflict) {
+      process.stderr.write(`${errTheme.red("✗")} ${conflict}\n`);
+      return 2;
+    }
   }
 
   const cfg = loadConfig();
@@ -273,7 +292,21 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "agent":
     case "code": {
-      const task = rest.join(" ");
+      let task = rest.join(" ");
+      let promptInput;
+      if (promptFile !== undefined) {
+        try {
+          const loaded = await readPromptFile(promptFile);
+          task = loaded.task;
+          promptInput = loaded.input;
+        } catch (error) {
+          process.stderr.write(`${errTheme.red("✗")} ${error instanceof Error ? error.message : String(error)}\n`);
+          return 2;
+        }
+        const source = promptInput.kind === "stdin" ? "stdin" : promptInput.path;
+        if (flags.json) process.stdout.write(JSON.stringify({ type: "prompt_input", source, bytes: promptInput.bytes }) + "\n");
+        else process.stderr.write(`Prompt input: ${JSON.stringify(source)} (${promptInput.bytes} bytes)\n`);
+      }
       // No task and not resuming → open the persistent interactive agent REPL
       // (chat bar ready for the first question), Claude Code style.
       if (!task && !sf(values["resume"])) return cmdChat(ctx, "", skillOpts);
@@ -291,6 +324,7 @@ export async function main(argv: string[]): Promise<number> {
         resume: sf(values["resume"]),
         skill: sf(values["skill"]),
         noSkills: Boolean(values["no-skills"]),
+        ...(promptInput ? { promptInput } : {}),
       });
     }
     case "resume": {

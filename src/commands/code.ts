@@ -88,6 +88,7 @@ import { isPublicationToolCall } from "../core/goal_run.js";
 import { turnOutcomeRecord } from "./chat.js";
 import { openRcCodingObserver, type RcCodingObserver } from "./rc_observation.js";
 import { publishCodingVerification } from "./rc_verification.js";
+import { promptInputLabel, type PromptInput } from "./prompt_file.js";
 import {
   TRANSIENT_READ_AUTO_RETRIES,
   checkpointDoneEvent,
@@ -205,6 +206,8 @@ export interface CodeOpts {
   skill?: string;
   /** `--no-skills`: load no skill. The project's own AGENTS.md still applies. */
   noSkills?: boolean;
+  /** Explicit task intake provenance. The task text itself stays in TaskCommand. */
+  promptInput?: PromptInput;
   /** An explicit goal run is already bound to this checkout. */
   workspaceMode?: "current";
   /** Cancel the brain, tools, and final check from an external controller. */
@@ -798,7 +801,7 @@ export async function cmdCode(
   }
   // What the run is CALLED (worktree branch, session manifest, summary) stays
   // the human-sized instruction; the brief below is what the brain reads.
-  const label = task.trim() || handoff!.task;
+  const label = opts.promptInput ? promptInputLabel(opts.promptInput) : task.trim() || handoff!.task;
   // Swarm is GATED on purpose: never swarm an unproven loop — N agents multiply
   // the #1 failure (tool-call emission fraying). It is also LOCAL-ONLY (the cloud
   // path has its own orchestration). Stays gated until the single-agent loop is
@@ -987,6 +990,7 @@ export async function cmdCode(
     : new SessionLog(
         {
           task: label,
+          ...(opts.promptInput ? { promptInput: opts.promptInput } : {}),
           model: resolvedModel,
           poolGb,
           brain: brainKind,
