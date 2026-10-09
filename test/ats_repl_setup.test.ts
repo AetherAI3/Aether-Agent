@@ -33,13 +33,13 @@ test("coding REPL slash setup never queues wizard answers and restores the promp
   let output = "", errors = "";
   const sent = new Set<string>();
   const replies: Array<[string, string]> = [
-    ["Type a prompt,", "/agent-create ATS Atlas\r"],
+    ["Type a prompt,", "/agent-create ATS Atlas\r\r"],
     ["Choice [2]:", "1\r"],
     ["Memory drive/folder", join(root, "memory") + "\r"],
     ["Memory size in GiB", "5\r"],
     ["Strategy folder", join(root, "strategies") + "\r"],
     ["Data provider:", "\x03"],
-    ["Setup canceled.", "/exit\r"],
+    ["Setup canceled.", "/exit\r\r"],
   ];
   child.stdout.on("data", chunk => {
     output += String(chunk);

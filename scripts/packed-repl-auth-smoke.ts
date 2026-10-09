@@ -68,7 +68,7 @@ async function runInstalledRepl(baseUrl: string, scratch: string): Promise<Child
       exitSent = true;
       // A failed submission is intentionally restored as a draft. Ctrl+C
       // clears that draft, then /exit demonstrates that the REPL accepts input.
-      exitTimer = setTimeout(() => child.stdin.write("\x03/exit\r"), 100);
+      exitTimer = setTimeout(() => child.stdin.write("\x03/exit\r\r"), 100);
     }
   };
   child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); maybeDrive(); });

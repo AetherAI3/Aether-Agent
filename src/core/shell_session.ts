@@ -129,7 +129,15 @@ export class ShellSession {
     const fail = this.failActive;
     const child = this.child;
     this.child = null;
-    if (!child?.pid || child.exitCode !== null || child.signalCode !== null) { fail?.(reason); return; }
+    if (!child?.pid) { fail?.(reason); return; }
+    // `exit` precedes stdio `close`. Keep command listeners attached until
+    // the final buffered output has been delivered, including after SIGKILL.
+    child.once("close", () => fail?.(reason));
+    if (child.exitCode !== null || child.signalCode !== null) {
+      const drainDeadline = setTimeout(() => fail?.(reason), 200);
+      drainDeadline.unref();
+      return;
+    }
     const pid = child.pid;
     if (process.platform === "win32") {
       const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });

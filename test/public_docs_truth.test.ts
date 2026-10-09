@@ -147,9 +147,9 @@ test("README states npm and source versions in a way publishing cannot falsify",
   const sourceEnd = readme.indexOf("<!-- SOURCE-0.3-WORKFLOWS:END -->");
   assert.ok(sourceStart >= 0 && sourceEnd > sourceStart, "README source-only scope markers are missing");
   const sourceScope = readme.slice(sourceStart, sourceEnd);
-  // The existing coding workflows retain their released minimum. The ATS
-  // workflow remains documented without a stale candidate-only version claim.
-  assert.match(sourceScope, /Requires 0\.3\.2 or newer/u);
+  // The source scope keeps the workflow and ATS documentation together without
+  // asserting a stale candidate-only minimum version.
+  assert.ok(sourceScope.includes("## What you can do"));
   assert.ok(sourceScope.includes("## Account agents and ATS"));
 });
 

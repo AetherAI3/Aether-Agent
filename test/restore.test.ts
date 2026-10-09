@@ -4,9 +4,10 @@ import { registerRestore, runRestores, restoreCount } from "../src/ui/restore.js
 
 test("registerRestore runs steps once, LIFO, and consumes them", () => {
   const order: string[] = [];
+  const prior = restoreCount();
   registerRestore(() => order.push("outer"));
   registerRestore(() => order.push("inner"));
-  assert.equal(restoreCount(), 2);
+  assert.equal(restoreCount(), prior + 2);
   runRestores();
   assert.deepEqual(order, ["inner", "outer"]); // innermost surface restores first
   assert.equal(restoreCount(), 0);

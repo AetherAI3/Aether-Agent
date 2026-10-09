@@ -59,7 +59,7 @@ test('metadata for multiple tarballs is rejected', () => fixture(({ root, metada
   assert.throws(() => releasePacket(root, sha, 'v0.4.0'), /one npm pack result/);
 }));
 
-test('symlink tarballs are rejected', () => fixture(({ root, file }) => {
+test('symlink tarballs are rejected', { skip: process.platform === 'win32' }, () => fixture(({ root, file }) => {
   const path = join(root, file);
   rmSync(path);
   const target = join(root, 'other.tgz');

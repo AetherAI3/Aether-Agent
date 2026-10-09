@@ -186,7 +186,7 @@ for (const tty of [false, true]) {
       const tokens = { get: async () => 'test-token' };
       const ctx = { cfg: { backend:'cloud', baseUrl:'https://stub.test', defaultModel:'', defaultEffort:'', permissionMode:'ask', autoApply:false, telemetry:false }, flags: { cwd:${JSON.stringify(cwd)}, json:false, yes:false }, tokens, api:new ApiClient('https://stub.test', tokens) };
       const enter = ${tty ? "'\\r'" : "'\\n'"};
-      const submit = text => input.write(text + enter);
+      const submit = text => input.write(text + (${tty} && text.startsWith('/') ? enter + enter : enter));
       const until = async (predicate, label) => {
         const deadline = Date.now() + 5000;
         while (!predicate()) {

@@ -6,6 +6,10 @@ on:
       tag:
         required: true
         type: string
+      manual_self_hosted_exception:
+        required: false
+        default: false
+        type: boolean
     outputs:
       source_sha:
         description: Exact qualified source commit
@@ -21,8 +25,13 @@ on:
       tag:
         description: Candidate version tag; this workflow only prepares and never publishes
         required: true
-        default: v0.4.0
+        default: v4.21.0
         type: string
+      manual_self_hosted_exception:
+        description: One-time v4.21.0 preparation with evidence in logs while artifact storage is full
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -36,7 +45,7 @@ jobs:
     # Manual preparation executes only the reviewed main workflow. Release source
     # is additionally required to belong to main or the exact v0.3 maintenance head.
     if: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
-    runs-on: ${{ vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.manual_self_hosted_exception && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || (vars.AETHER_CI_SELF_HOSTED == '1' && vars.AETHER_CI_SELF_HOSTED_MAIN == '1' && fromJSON('["self-hosted","Linux","X64","aether-agent-ci"]') || 'ubuntu-latest') }}
     timeout-minutes: 25
     permissions:
       contents: read
@@ -48,6 +57,13 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       EXPECTED_SOURCE_SHA: ${{ github.sha }}
     steps:
+      - name: Limit the artifact exception to manual v4.21.0 preparation
+        if: ${{ inputs.manual_self_hosted_exception }}
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          node -e "if(process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||process.env.GITHUB_REF!=='refs/heads/main'||process.env.RELEASE_TAG!=='v4.21.0'||process.env.RUNNER_ENVIRONMENT!=='self-hosted')throw new Error('artifact exception is restricted to v4.21.0 on a self-hosted main run')"
+
       - name: Checkout immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,6 +147,7 @@ jobs:
 
       - name: Upload preparation evidence
         id: evidence_upload
+        if: ${{ !inputs.manual_self_hosted_exception }}
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -153,5 +170,5 @@ jobs:
         run: node scripts/ci-interim-evidence.mjs "$TARBALL" aether-agents.cdx.json pack-metadata.json npm-release-packet.json
 
       - name: Require preparation artifact upload
-        if: ${{ always() && steps.evidence_upload.outcome != 'success' }}
+        if: ${{ always() && !inputs.manual_self_hosted_exception && steps.evidence_upload.outcome != 'success' }}
         run: exit 1

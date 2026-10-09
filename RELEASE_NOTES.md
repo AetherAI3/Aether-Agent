@@ -1,3 +1,35 @@
+# Aether Agent v4.21.0 — clearer coding workflow
+
+**October 9, 2026.** This is the v4.21.0 release source. Check the
+[npm package](https://www.npmjs.com/package/aether-agents) for current
+availability and the operator packet for its qualification record.
+
+## Coding console
+
+- Browse described slash commands from the idle composer. Ctrl+R searches
+  saved prompt history; multiline editing has bounded undo and yank controls.
+  (#329, #330, #333)
+- Pin bounded workspace files for a coding turn, inspect the context actually
+  admitted, and invoke a trusted skill for one local turn. (#332, #335)
+- Feed a task from a file or standard input as one literal specification, and
+  use read-only host planning before deciding whether to edit. (#328, #331)
+- When a tool approval is denied, the failed tool result carries the
+  operator's short feedback without granting that action. (#334)
+
+## Install and qualification
+
+`npm install -g aether-agents@latest --ignore-scripts` installs the current
+published CLI. This source declares v4.21.0; the registry and immutable tag
+determine whether its archive is available. The PyPI launcher remains a
+separate release step.
+
+The release qualification uses the self-hosted runner pool. GitHub artifact
+storage limits require a documented log-evidence exception; the v4.21.0
+operator packet records what was actually verified.
+This release does not extend ATS trading or Cloud service claims.
+
+---
+
 # Aether Agent v4.20.0 — a more capable coding console
 
 **October 6, 2026.** A substantial update to task control, the coding console,

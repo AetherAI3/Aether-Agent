@@ -13,6 +13,10 @@ as prerelease evidence while the registry and tag remain authoritative.
 
 ## Index
 
+- [2026-10-09](2026-10-09.md) — **v4.21.0 source candidate** for console
+  discovery, prompt editing, context pinning, and read-only planning. npm
+  publication is pending. Packet:
+  [OPERATOR-PACKET-v4.21.0.md](OPERATOR-PACKET-v4.21.0.md).
 - [2026-10-06](2026-10-06.md) — **v4.20.0 release record** for coding
   console control, remote viewing status, and managed-agent readiness. The npm
   CLI is published; the PyPI launcher and GitHub Release remain pending. Packet:
