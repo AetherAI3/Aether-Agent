@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG: AetherConfig = {
   localModel: "",
   permissionMode: "ask",
   autoApply: false,
+  lfSubmits: false,
   telemetry: true,
   defaultEffort: "",
   // Local-first: 'auto' runs the cloud brain when signed in, else local Ollama.

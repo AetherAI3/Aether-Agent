@@ -1297,6 +1297,16 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let busy = false;
   let setupOwnsInput = false;
   let terminalOwnsInput = false;
+  let approvalOwnsInput = false;
+  const composerCtx: AppContext = {
+    ...ctx,
+    confirm: async (question) => {
+      buf.endRecoveryScope();
+      approvalOwnsInput = true;
+      try { return await ctx.confirm(question); }
+      finally { approvalOwnsInput = false; }
+    },
+  };
   const renderHudLine = (): void => {
     if (!process.stdout.isTTY) return;
     const reg = getRegistry();
@@ -1470,7 +1480,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         const nextPrompt = continuation.promptForNextTurn(built.prompt, continuation.hasAcceptedBrief ? await consoleContinuationState(ctx) : undefined);
         submittedPrompt = nextPrompt;
         if (await resolveBackend(ctx) === "cloud") authRepair.markHostedTurnStarted();
-        const outcome = await runTurn(ctx, nextPrompt, turnAbort.signal, (f) => {
+        const outcome = await runTurn(composerCtx, nextPrompt, turnAbort.signal, (f) => {
           if (receipts.length < 64) {
             if (f.type === "tool_call") receipts.push(sanitizeServerText(`tool call ${f.toolCallId} (${f.name})`));
             if (f.type === "tool_result_ack") receipts.push(sanitizeServerText(`tool result ${f.toolCallId}`));
@@ -1918,10 +1928,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           renderHudLine(); repaint();
           return;
         }
-        setupOwnsInput = /^\/agent-create\s+ATS(?:\s|$)/i.test(t);
+        setupOwnsInput = /^\/agent-create\s+ATS(?:\s|$)|^\/(?:mcp|model|models|agent)\s*$/i.test(t);
+        if (setupOwnsInput) buf.endRecoveryScope();
         if (setupOwnsInput) process.stdout.write("\x1b[?2004l");
         try {
-          const res = await handleSlash(ctx, t, process.stdout, slashAbort.signal);
+          const res = await handleSlash(composerCtx, t, process.stdout, slashAbort.signal);
           if (res.exit) {
             discardQueue("session ended"); // entries held after a failure are listed, not lost silently
             cleanup();
@@ -2005,7 +2016,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         }
         return;
       }
-      const k = decodeKey(seq);
+      const k = decodeKey(seq, ctx.cfg.lfSubmits);
       switch (k.kind) {
         case "paste-start":
           pasting = true;
@@ -2013,6 +2024,21 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           return;
         case "char":
           buf.insert(k.value);
+          repaint();
+          return;
+        case "newline":
+          if (viewerOpen) return;
+          buf.insertNewline();
+          repaint();
+          return;
+        case "undo":
+          if (viewerOpen) return;
+          buf.undo();
+          repaint();
+          return;
+        case "yank":
+          if (viewerOpen) return;
+          buf.yank();
           repaint();
           return;
         case "backspace":
@@ -2079,8 +2105,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           if (v.startsWith("/") && !/\s/.test(v) && buf.pos === [...v].length) {
             const r = completeManifestSlash(v);
             if (r.completed) {
-              buf.clear();
-              buf.insert(r.completed);
+              buf.replace(r.completed);
             } else if (r.matches.length > 1) {
               const shown = r.matches.slice(0, 12).map((m) => "/" + m).join("  ");
               const more = r.matches.length > 12 ? `  … +${r.matches.length - 12} more` : "";
@@ -2118,6 +2143,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         case "down":
           if (viewerState.visible && !viewerOpen) {
             viewerOpen = true;
+            buf.endRecoveryScope();
             redrawViewerTree();
           } else if (viewerOpen) {
             if (viewerState.selectedAgentId == null) {
@@ -2183,7 +2209,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     // decoded as two replacement chars.
     const decoder = new StringDecoder("utf8");
     const onData = (chunk: Buffer): void => {
-      if (terminalOwnsInput) return;
+      if (terminalOwnsInput || approvalOwnsInput) return;
       if (setupOwnsInput) { if (chunk.includes(3)) slashAbort?.abort(); return; }
       let data = carry + decoder.write(chunk);
       carry = "";
@@ -2193,7 +2219,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         data = data.slice(0, partial.index);
       }
       for (const seq of splitKeys(data)) {
-        if (setupOwnsInput || terminalOwnsInput) break;
+        if (setupOwnsInput || terminalOwnsInput || approvalOwnsInput) break;
         processSeq(seq);
       }
     };

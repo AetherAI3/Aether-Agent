@@ -139,6 +139,11 @@ On Windows, run `/shell-profile list` to see the installed executable and versio
 
 Shell and terminal output stays out of saved chat history and automatic hosted prompts. Account-agent DMs use a separate console. [Full shell and Linux guide](docs/LOCAL_SHELL_SESSION.md).
 
+In the raw terminal composer, Ctrl+J adds a newline, Enter submits, Ctrl+_
+undoes recent edits, and Ctrl+Y restores killed text. The single-row input
+shows newlines as `⏎` with a line count. If your terminal sends LF for Enter,
+set `aether config set lfSubmits true` to keep LF as submit. [Composer details](COMMANDS.md#aether--interactive-repl).
+
 ## Everyday commands
 
 | Goal | Command |
