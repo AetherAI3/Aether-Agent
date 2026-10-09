@@ -50,7 +50,9 @@ export type ConsoleInput =
   | { kind: "profile"; action: "list" | "status" | "use"; profile?: "cmd" | "powershell" }
   | ShareInput
   | { kind: "error"; message: string }
-  | { kind: "chat"; text: string; capability?: RunCapability }
+  | { kind: "chat"; text: string; capability?: RunCapability;
+      /** Only idle /skill admission can set this; queued edits never resolve a skill. */
+      oneTurnSkill?: { reference: string; source: string } }
   | { kind: "empty" };
 
 export function classifyConsoleInput(raw: string): ConsoleInput {

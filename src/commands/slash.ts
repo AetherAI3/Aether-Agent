@@ -425,6 +425,9 @@ export async function handleSlash(
     case "code-review":
       out.write(`/${cmd} is handled directly in the interactive REPL.\n`);
       break;
+    case "skill":
+      out.write("/skill requires the idle interactive composer; it is unavailable in line input or other owners.\n");
+      break;
     case "pin":
       await pinSlash(ctx, out, arg, line);
       break;

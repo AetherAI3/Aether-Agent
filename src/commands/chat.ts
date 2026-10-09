@@ -99,6 +99,7 @@ import type { WorkflowViewerState } from "../ui/workflow_viewer.js";
 import type { StreamFrame } from "../core/stream.js";
 import type { BrainEvent, ToolName } from "../core/brain_protocol.js";
 import { ConsoleTaskContinuation, accountFingerprint, consoleWorkspaceState, observedWorkspaceChanges, type ModelTarget, type ObservedTool } from "./model_continuation.js";
+import { parseOneTurnSkill } from "./one_turn_skill.js";
 
 // Key decoding lives in ui/keys.ts (shared with pickers/viewers); re-exported
 // here so existing imports keep working.
@@ -120,6 +121,8 @@ export interface TurnSkillOptions {
   capability?: RunCapability;
   explicitSkill?: string;
   noSkills?: boolean;
+  /** /skill requires a host-executed route for the resolved policy. */
+  requireHostSkillEnforcement?: boolean;
   /** Local console authority, never serialized to Cloud. */
   exec?: ToolExecutor;
   /** Host-observed results only; no model text or shell output. */
@@ -487,6 +490,12 @@ export async function runTurn(
     if (skillOpts.capability === "planning" && backend === "cloud") {
       throw new ChatTurnError("planning requires host-executed tools; this cloud chat route runs tools on the server. Use `aether agent --planning` or `aether agent --local --planning`.", undefined, false);
     }
+    if (skillOpts.explicitSkill && skillOpts.noSkills) {
+      throw new ChatTurnError("/skill is unavailable while --no-skills is active.", undefined, false);
+    }
+    if (skillOpts.requireHostSkillEnforcement && backend === "cloud") {
+      throw new ChatTurnError("/skill requires host-executed tools; this cloud chat route runs tools on the server. Switch to a local model or use aether agent --skill <id> <task>.", undefined, false);
+    }
     // The same seam `aether agent` uses (commands/code.ts). Opened per turn, not
     // per session, because automatic skill selection reads THIS prompt — a turn
     // that says "the CI is failing" should pull the CI skill and the next one
@@ -526,7 +535,7 @@ export async function runTurn(
     // exactly the cases the header exists to report.
     if (run.contextTokens > 0 || run.session.notices.length > 0 || run.hasWarnings) {
       const header = run.headerLines.join("\n");
-      if (header !== lastTurnHeader) {
+      if (skillOpts.requireHostSkillEnforcement || header !== lastTurnHeader) {
         lastTurnHeader = header;
         for (const line of run.headerLines) process.stderr.write(errTheme.dim("  " + line) + "\n");
       }
@@ -564,7 +573,7 @@ export async function runTurn(
     return await runCloudTurn(ctx, brief, lifecycle, boundedSignal.signal, onFrame, onPulsePaint, deadlineAt, deadlineMs);
   } catch (err) {
     const outcome = finalizeThrownTurn(lifecycle, err, ctx.cfg.baseUrl);
-    if (err instanceof ChatTurnError) throw err;
+    if (err instanceof ChatTurnError) throw err.outcome ? err : new ChatTurnError(err.message, outcome, err.rendered);
     throw attachTurnOutcome(err, outcome);
   } finally {
     clearTimeout(deadline);
@@ -1598,7 +1607,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               viewerOpen = false;
               break;
           }
-        }, redrawInput, { ...skillOpts, capability: input.capability ?? "coding", onToolResult: tool => toolResults.push(tool), steer: steerChannel });
+        }, redrawInput, { ...skillOpts, capability: input.capability ?? "coding",
+          ...(input.oneTurnSkill ? { explicitSkill: input.oneTurnSkill.reference, requireHostSkillEnforcement: true } : {}),
+          onToolResult: tool => toolResults.push(tool), steer: steerChannel });
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authContinuation);
         if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
@@ -1645,7 +1656,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         // commit() clears the submitted line before the request starts. Put it
         // back only when the user has not typed ahead; otherwise preserve their
         // newer draft and leave the failed submission in history for recall.
-        const recovered = sharedShellResult || authFailure ? buf.value : recoverSubmittedPrompt(text, buf.value);
+        const recovered = sharedShellResult || authFailure ? buf.value : recoverSubmittedPrompt(input.oneTurnSkill?.source ?? text, buf.value);
         if (recovered !== buf.value) {
           buf.clear();
           buf.insert(recovered);
@@ -1817,6 +1828,29 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         return;
       }
       const queuePrefix = /^\s*\/queue[ \t]+/.exec(raw);
+      const oneTurnSkill = parseOneTurnSkill(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
+      if (oneTurnSkill) {
+        if (queuePrefix || busy) {
+          process.stdout.write("\n/skill runs only from the idle composer and cannot be queued. Draft preserved.\n");
+          repaint(); return;
+        }
+        if (skillOpts.noSkills) {
+          process.stdout.write("\n/skill is unavailable while --no-skills is active. Draft preserved.\n");
+          repaint(); return;
+        }
+        if (oneTurnSkill.kind === "usage") {
+          process.stdout.write("\n" + oneTurnSkill.message + "\n");
+          repaint(); return;
+        }
+        remember(raw);
+        buf.commit(raw);
+        process.stdout.write("\n");
+        busy = true;
+        await runAndDrain(queue.allocate({ kind: "chat", text: oneTurnSkill.task,
+          oneTurnSkill: { reference: oneTurnSkill.reference, source: oneTurnSkill.source } }));
+        renderHudLine(); repaint();
+        return;
+      }
       const input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
       const commit = (): void => {
         if (input.kind === "chat") { remember(buf.value); buf.commit(buf.value); }
@@ -2400,6 +2434,11 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     }
     const queuePrefix = /^\s*\/queue[ \t]+/.exec(rawLine);
     const line = queuePrefix ? rawLine.slice(queuePrefix[0].length) : rawLine;
+    if (parseOneTurnSkill(line)) {
+      process.stdout.write("/skill requires the idle interactive composer; line input is unchanged.\n");
+      if (p) process.stdout.write(p + consoleShell.prompt());
+      continue;
+    }
     if (continuation.pending && !line.trim().startsWith("/switch")) {
       process.stdout.write("Choose /switch continue, fresh, cancel, brief, or edit first; input was not sent.\n");
       if (p) process.stdout.write(p + consoleShell.prompt());

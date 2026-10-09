@@ -164,6 +164,12 @@ Type `/` at an idle raw terminal prompt to browse described commands. Use
 arrows or Tab to choose, Enter to insert editable command text, then Enter
 again to run it; Escape restores your earlier draft.
 
+On a local model, `/skill user/fix-ci Investigate the failing unit test` uses
+that trusted skill for one idle task, then restores your normal skill defaults.
+The task text stays literal; the run header shows the resolved skill digest and
+host tool limits. Busy, queued, line-input, `--no-skills`, and server-executed
+cloud chat invocations are refused. [Skill details](COMMANDS.md#aether-skills-subcommand--inspect-trust-and-manage-agent-skills).
+
 Use `/pin src/guide.md` to attach that file's complete, bounded UTF-8 content
 to each admitted coding turn. The file is read from the execution checkout, so
 a worktree turn uses its own copy. `/context` shows what the last turn actually

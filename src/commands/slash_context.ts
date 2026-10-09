@@ -17,6 +17,7 @@ import type { AuditEntry } from "../core/audit.js";
 import { openRunSession } from "../core/skills/run_session.js";
 import { sanitizeForTransport } from "../core/skills/context_packet.js";
 import { applyPromptMode } from "./prompt_modes.js";
+import { parseOneTurnSkill } from "./one_turn_skill.js";
 import type { AdmittedContext } from "../core/selected_context.js";
 
 export interface ContextInspectorOptions {
@@ -78,20 +79,29 @@ export async function contextSlash(ctx: AppContext, out: Writable, arg: string, 
   if (command.startsWith("next ")) {
     const rawTask = command.slice("next ".length);
     if (!rawTask.trim()) { out.write("usage: /context next <task>\n"); return; }
-    const mode = applyPromptMode(rawTask);
+    const oneTurnSkill = parseOneTurnSkill(rawTask);
+    if (oneTurnSkill?.kind === "usage") { out.write(oneTurnSkill.message + "\n"); return; }
+    if (oneTurnSkill?.kind === "invoke" && options.noSkills) {
+      out.write("Next-draft preview refused: /skill is unavailable while --no-skills is active.\n"); return;
+    }
+    if (oneTurnSkill?.kind === "invoke" && options.backend === "cloud") {
+      out.write("Next-draft preview refused: /skill requires host-executed tools; switch to a local model.\n"); return;
+    }
+    const mode = oneTurnSkill ? { handled: false as const } : applyPromptMode(rawTask);
     if (mode.error) { out.write(mode.error + "\n"); return; }
     if (mode.capability === "planning" && options.backend === "cloud") {
       out.write("Next-draft preview refused: /plan cannot run on server-executed cloud chat. Use aether agent --planning.\n");
       return;
     }
-    const prompt = mode.handled ? mode.prompt! : rawTask;
+    const prompt = oneTurnSkill?.kind === "invoke" ? oneTurnSkill.task : mode.handled ? mode.prompt! : rawTask;
     const opened = openRunSession({
       projectRoot: ctx.flags.cwd,
       prompt,
       selectedPins: registry.selectedPins(),
       selectedFileTransport: options.backend === "cloud" ? "unsupported" : "host",
       ...(mode.capability ? { capability: mode.capability } : {}),
-      ...(options.explicitSkill ? { explicitSkill: options.explicitSkill } : {}),
+      ...(oneTurnSkill?.kind === "invoke" ? { explicitSkill: oneTurnSkill.reference }
+        : options.explicitSkill ? { explicitSkill: options.explicitSkill } : {}),
       ...(options.noSkills ? { noSkills: true } : {}),
       allowIncompleteInstructionDiscovery: options.backend === "cloud",
     });
