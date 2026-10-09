@@ -75,7 +75,7 @@ These apply to any command (parsed anywhere on the line).
 ### `aether` — interactive REPL
 Opens a session. Type a prompt to chat; type `/` commands to control it (see
 [Slash commands](#slash-commands)). Up-arrow recalls prompts across sessions
-(history lives at `~/.aether-agent/history`); Tab completes slash commands.
+(history lives at `~/.aether-agent/history`).
 `Ctrl-C` mid-answer cancels the turn and keeps the session; `Ctrl-C` at an
 empty prompt (or `/exit`) leaves.
 
@@ -90,6 +90,16 @@ Some terminals send LF for Enter as well as Ctrl+J, so those two keys cannot
 be distinguished there. Use `aether config set lfSubmits true` to make LF
 submit for compatibility; `aether config set lfSubmits false` restores Ctrl+J
 newline entry. This setting affects only the raw TTY composer.
+
+Typing `/` at the start of an idle raw TTY draft opens a bounded command
+picker. Rows show canonical names, argument hints, and descriptions from the
+command manifest; commands owned by managed agent chat are omitted. Up/Down or
+Tab changes the selection. Enter inserts the selected command into the editable
+draft; press Enter again to run it. Escape restores the draft and cursor from
+before the picker opened. With no match, Enter dismisses the picker and keeps
+the literal slash text for a later explicit submission. Pasted text, ongoing
+turns, and non-TTY input do not open the picker. Tab can also open it for an
+existing leading slash draft with arguments, preserving the suffix and caret.
 
 ### `aether "<prompt>"` — one-shot
 Runs a single turn against your default (or `--model`) and streams the answer.
@@ -576,8 +586,8 @@ mirrors the live registry in `src/commands/slash_registry.ts`.
 | `/mcp [list|doctor|repair]` | Diagnose or confirmation-gated repair for MCP servers. |
 | `/exit`, `/quit` | Leave the REPL. |
 
-Typos get a nudge: `/modle` answers `did you mean /model?`. Tab completes any
-of the above.
+Typos get a nudge: `/modle` answers `did you mean /model?`. The raw TTY picker
+shows descriptions while typing a leading slash command.
 
 ### Agent modes
 

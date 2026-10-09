@@ -43,7 +43,10 @@ import { ModelTextProgress } from "../core/model_text_progress.js";
 import { ModelOutputBudget } from "../core/model_output_budget.js";
 import { sanitizeTerm, visibleWidth } from "../ui/text.js";
 import { registerRestore } from "../ui/restore.js";
-import { completeManifestSlash } from "./command_manifest.js";
+import {
+  acceptSlashPicker, moveSlashPicker, openSlashPicker, refreshSlashPicker, renderSlashPicker, slashDraft,
+  type SlashPickerState,
+} from "./slash_picker.js";
 // history_store.ts (origin/main's own persistence + AETHER_NO_HISTORY opt-out)
 // supersedes the old readline-backed ./history.js — see chat.ts's resolution
 // report for why that file is now dead code pending a cleanup pass.
@@ -1298,6 +1301,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let setupOwnsInput = false;
   let terminalOwnsInput = false;
   let approvalOwnsInput = false;
+  let picker: SlashPickerState | null = null;
+  let pickerPanelLines = 0;
+  let pickerSuppressed = false;
   const composerCtx: AppContext = {
     ...ctx,
     confirm: async (question) => {
@@ -1327,9 +1333,24 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   };
   const repaint = (): void => {
     if (busy) return;
+    if (pickerPanelLines) process.stdout.write(viewerClearSequence(pickerPanelLines));
+    pickerPanelLines = 0;
+    if (!buf.value) pickerSuppressed = false;
+    if (picker) {
+      const lines = renderSlashPicker(picker, buf.value, process.stdout.columns ?? 80, process.stdout.rows ?? 24);
+      if (lines.length) {
+        process.stdout.write("\r\x1b[2K" + lines.join("\n") + "\n");
+        pickerPanelLines = lines.length;
+      }
+    }
     process.stdout.write(repaintString(prompt + consoleShell.prompt(), buf.value, buf.pos, process.stdout.columns ?? 80));
   };
   consoleWrite = (text: string): void => {
+    if (pickerPanelLines) {
+      process.stdout.write(viewerClearSequence(pickerPanelLines));
+      pickerPanelLines = 0;
+      picker = null;
+    }
     if (!busy) process.stdout.write("\r\x1b[2K");
     process.stdout.write(text);
     if (!busy) repaint();
@@ -1387,7 +1408,10 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   // duplicate copies in scrollback on every cursor move (Finding B).
   let viewerLastLines = 0;
   return await new Promise<number>((resolve) => {
-    const onResize = (): void => repaint();
+    const onResize = (): void => {
+      if ((process.stdout.rows ?? 24) < 3) picker = null;
+      repaint();
+    };
     const cleanup = (): void => {
       consoleShell.close();
       process.stdout.write("\x1b[?2004l\x1b[?25h"); // paste off + cursor shown
@@ -1688,6 +1712,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     };
 
     const onCtrlC = (): void => {
+      picker = null;
       const now = Date.now();
       const armed = now - ctrlCArmedAt <= CTRL_C_WINDOW_MS && ctrlCArmedAt > 0;
       const active = turnAbort ?? slashAbort;
@@ -1993,6 +2018,22 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       repaint();
     };
 
+    // Input-owner precedence: PTY/approval/setup are gated in onData; paste
+    // owns literal bytes; while idle, the slash picker owns Enter/Escape and
+    // selection keys before the workflow viewer or history. Dismissal returns
+    // those keys to their prior owners. Acceptance edits only the composer;
+    // a second, explicit Enter invokes the command.
+    const dismissPicker = (restore: boolean): void => {
+      if (!picker) return;
+      if (restore) buf.restoreDraft(picker.priorValue, picker.priorCursor);
+      picker = null;
+      repaint();
+    };
+    const refreshPicker = (): void => {
+      if (picker) picker = refreshSlashPicker(picker, buf.value);
+      repaint();
+    };
+
     // SYNC on purpose: every key is fully processed before the next token, so
     // out-of-order edits are impossible. Submits are fired un-awaited — the
     // busy flag is set synchronously inside onSubmit before its first await,
@@ -2019,47 +2060,60 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       const k = decodeKey(seq, ctx.cfg.lfSubmits);
       switch (k.kind) {
         case "paste-start":
+          picker = null;
+          pickerSuppressed = true;
           pasting = true;
           pasteAcc = "";
           return;
-        case "char":
+        case "char": {
+          const before = buf.value;
+          const beforeCursor = buf.pos;
           buf.insert(k.value);
-          repaint();
+          if (picker) refreshPicker();
+          else {
+            if (!busy && !viewerOpen && !pickerSuppressed && (process.stdout.rows ?? 24) >= 3
+                && before === "" && k.value.startsWith("/") && !/\s/.test(k.value) && slashDraft(buf.value)) {
+              picker = openSlashPicker(buf.value, before, beforeCursor);
+            }
+            repaint();
+          }
           return;
+        }
         case "newline":
           if (viewerOpen) return;
+          picker = null;
           buf.insertNewline();
           repaint();
           return;
         case "undo":
           if (viewerOpen) return;
           buf.undo();
-          repaint();
+          refreshPicker();
           return;
         case "yank":
           if (viewerOpen) return;
           buf.yank();
-          repaint();
+          refreshPicker();
           return;
         case "backspace":
           buf.backspace();
-          repaint();
+          refreshPicker();
           return;
         case "delete":
           buf.deleteForward();
-          repaint();
+          refreshPicker();
           return;
         case "word-delete":
           buf.deleteWord();
-          repaint();
+          refreshPicker();
           return;
         case "kill-end":
           buf.killToEnd();
-          repaint();
+          refreshPicker();
           return;
         case "kill-start":
           buf.killToStart();
-          repaint();
+          refreshPicker();
           return;
         case "left":
           // While the tree is open on a workflow with real phase data,
@@ -2098,21 +2152,13 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           repaint();
           return;
         case "tab": {
-          // Slash-command completion: complete to the unambiguous prefix, or
-          // show the candidates. Plain text Tab is ignored (no file paths yet).
+          // Slash discovery never submits or mutates a reviewed shell item.
           if (busy) return;
-          const v = buf.value;
-          if (v.startsWith("/") && !/\s/.test(v) && buf.pos === [...v].length) {
-            const r = completeManifestSlash(v);
-            if (r.completed) {
-              buf.replace(r.completed);
-            } else if (r.matches.length > 1) {
-              const shown = r.matches.slice(0, 12).map((m) => "/" + m).join("  ");
-              const more = r.matches.length > 12 ? `  … +${r.matches.length - 12} more` : "";
-              process.stdout.write("\n" + theme.dim(shown + more) + "\n");
-            }
-            repaint();
+          if (picker) picker = moveSlashPicker(picker, buf.value, 1);
+          else if (!viewerOpen && !pickerSuppressed && (process.stdout.rows ?? 24) >= 3 && slashDraft(buf.value)) {
+            picker = openSlashPicker(buf.value, buf.value, buf.pos);
           }
+          repaint();
           return;
         }
         case "clear-screen":
@@ -2130,7 +2176,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           repaint();
           return;
         case "up":
-          if (viewerOpen) {
+          if (picker) { picker = moveSlashPicker(picker, buf.value, -1); repaint(); }
+          else if (viewerOpen) {
             if (viewerState.selectedAgentId == null) {
               viewerState = moveCursor(viewerState, -1);
               redrawViewerTree();
@@ -2141,7 +2188,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           }
           return;
         case "down":
-          if (viewerState.visible && !viewerOpen) {
+          if (picker) { picker = moveSlashPicker(picker, buf.value, 1); repaint(); }
+          else if (viewerState.visible && !viewerOpen) {
             viewerOpen = true;
             buf.endRecoveryScope();
             redrawViewerTree();
@@ -2162,6 +2210,13 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           if (!buf.value) finish(0);
           return;
         case "submit":
+          if (picker) {
+            const accepted = acceptSlashPicker(picker, buf.value, buf.pos);
+            picker = null;
+            if (accepted) buf.replace(accepted.value, accepted.cursor);
+            repaint();
+            return;
+          }
           // While the popout is open, Enter drills into the agent under the
           // cursor instead of submitting the input buffer as a chat turn
           // (Finding D: selectAgent/renderAgentFeed were fully built but
@@ -2186,6 +2241,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
           });
           return;
         case "escape":
+          if (picker) { dismissPicker(true); return; }
           if (viewerOpen) {
             if (viewerState.selectedAgentId != null) {
               // Back out of the agent-feed drill-down to the tree, not a

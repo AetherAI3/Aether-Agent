@@ -198,6 +198,18 @@ test("history recall and slash completion are undoable within one draft", () => 
   assert.equal(b.value, "draft");
 });
 
+test("picker dismissal restores a prior draft and Unicode cursor exactly", () => {
+  const b = new InputBuffer();
+  b.insert("α🙂 tail");
+  b.restoreDraft("α🙂 tail", 2);
+  b.replace("/help tail", 5);
+  b.restoreDraft("α🙂 tail", 2);
+  assert.equal(b.value, "α🙂 tail");
+  assert.equal(b.pos, 2);
+  b.undo();
+  assert.equal(b.value, "α🙂 tail", "dismissal ends the temporary edit scope");
+});
+
 test("undo retains at most 64 edit snapshots", () => {
   const b = new InputBuffer();
   for (let i = 0; i < 100; i++) { b.insert("x"); b.left(); b.right(); }

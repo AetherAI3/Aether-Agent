@@ -270,7 +270,7 @@ test("raw console cancellation restores a draft typed while the model catalog lo
     assert.doesNotMatch(bodies[0]!, /Accepted console continuation brief/);
     assert.match(bodies[1]!, /queued follow-up/);
     await until(() => output.includes("turn_outcome"));
-    submit("/exit");
+    submit("/exit"); process.stdin.emit("data", Buffer.from("\r"));
     assert.equal(await running, 0);
     running = null;
   } finally {

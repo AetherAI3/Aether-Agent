@@ -144,6 +144,10 @@ undoes recent edits, and Ctrl+Y restores killed text. The single-row input
 shows newlines as `⏎` with a line count. If your terminal sends LF for Enter,
 set `aether config set lfSubmits true` to keep LF as submit. [Composer details](COMMANDS.md#aether--interactive-repl).
 
+Type `/` at an idle raw terminal prompt to browse described commands. Use
+arrows or Tab to choose, Enter to insert editable command text, then Enter
+again to run it; Escape restores your earlier draft.
+
 ## Everyday commands
 
 | Goal | Command |

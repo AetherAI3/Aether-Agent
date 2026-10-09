@@ -85,7 +85,7 @@ async function withConsole(run: (h: Harness) => Promise<void>): Promise<void> {
     await until(() => output.includes("\x1b[?2004h"), "console ready");
     await run({ root, bodies, output: () => output, submit, type, until, answer, waitForCall });
     process.stdin.emit("data", Buffer.from("\x03")); // clear any draft
-    submit("/exit");
+    submit("/exit"); process.stdin.emit("data", Buffer.from("\r"));
     assert.equal(await Promise.race([pending, new Promise((_, reject) => setTimeout(() => reject(new Error("TTY exit timed out")), 2000))]), 0);
     pending = null;
   } finally {
@@ -230,6 +230,7 @@ test("TTY: cancelling a streaming turn discards and lists pending entries; none 
     assert.match(disposition, /q3 +user shell +!/);
     await new Promise(resolve => setTimeout(resolve, 50));
     submit("/queue");
+    process.stdin.emit("data", Buffer.from("\r")); // accept picker, then run
     await until(() => output().includes("Queue: 0 pending."), "empty after cancel");
     assert.equal(bodies.length, 1);
     assert.equal(existsSync(join(root, "never.txt")), false);
@@ -289,6 +290,7 @@ test("line mode has no pending queue: management explains itself and /queue <tas
     assert.equal((output.match(/Line mode has no pending queue/g) ?? []).length, 3);
     assert.equal(existsSync(join(root, "ran.txt")), true, "/queue <shell> runs as the next line");
     assert.equal(modelCalls, 0);
+    assert.doesNotMatch(output, /\x1b\[/, "line mode does not render the ANSI slash picker");
   } finally {
     globalThis.fetch = oldFetch; process.stdout.write = oldWrite;
     rmSync(historyPath(root), { force: true }); rmSync(root, { recursive: true, force: true });
@@ -304,7 +306,7 @@ test("TTY: leaving the console with held entries lists them as discarded", async
     await answer(1, Response.json({ detail: "insufficient UVT balance" }, { status: 402 }));
     await until(() => output().includes("Queue paused (q1 failed)"), "pause disposition");
     process.stdin.emit("data", Buffer.from("\x03")); // clear the restored failed prompt
-    submit("/exit");
+    submit("/exit"); process.stdin.emit("data", Buffer.from("\r"));
     await until(() => output().includes("Queue discarded (session ended): 1 pending entry removed; none ran and none will resume."), "exit disposition");
     assert.equal(bodies.length, 1);
     assert.equal(existsSync(join(root, "abandoned.txt")), false);
