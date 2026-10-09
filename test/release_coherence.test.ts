@@ -213,15 +213,15 @@ function assertCandidatePacket(packet: string): void {
   assert.equal(onlyPacketRow(rows, "Proposed tag"), `\`v${VERSION}\``);
   assert.equal(
     onlyPacketRow(rows, "Source identity"),
-    "The final release commit must be on `main`; its exact SHA must match the tag and the npm and PyPI workflow checkouts. ATS source custody remains pinned in `packages/ats-skills-source.json`.",
+    "The final release commit must be on `main`; its exact SHA must match the tag and the npm package checkout. ATS source custody remains pinned in `packages/ats-skills-source.json`.",
   );
   assert.equal(
     onlyPacketRow(rows, "Archive evidence"),
-    "The final tag archive, package digest, SBOM, provenance, and installed tarball smoke remain pending until protected workflows complete.",
+    "No v4.21.0 tarball digest, SBOM, or installed-package smoke result has been qualified yet. Self-hosted npm publishing cannot emit npm trusted-publishing provenance.",
   );
   assert.equal(
     onlyPacketRow(rows, "Hosted checks"),
-    "At candidate preparation, the latest `main` checks were failing or queued: release truth found a stale README slash-command example and the prior published version's candidate packet; CI and CodeQL could not upload required evidence because GitHub artifact storage quota was full; the Windows self-hosted runner was offline. Rerun on the exact final commit after these conditions clear.",
+    "Three self-hosted runners were online at preparation. Main CI had functional test failures and GitHub artifact upload failures because storage was at quota; exact-source reruns remain pending.",
   );
   assert.equal(
     onlyPacketRow(rows, "Live service evidence"),
@@ -229,7 +229,7 @@ function assertCandidatePacket(packet: string): void {
   );
   assert.equal(
     onlyPacketRow(rows, "Publication evidence"),
-    "No `v4.20.0` tag, GitHub Release, npm/PyPI publish, trusted-publishing provenance, or registry dist-tag update is established by this packet.",
+    "No v4.21.0 tag, GitHub Release, npm/PyPI publish, or registry dist-tag update is established by this packet.",
   );
 }
 

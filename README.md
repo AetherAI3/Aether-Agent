@@ -15,7 +15,7 @@ Choose hosted models or local Ollama. Keep working in the same terminal.
 [![Node 24+](https://img.shields.io/badge/node-24%2B-14b8a6)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-06b6d4)](LICENSE)
 
-[Quickstart](#quickstart) · [v4.20.0 update](#whats-new-in-v4200) · [Features](#what-you-can-do) · [Models](#choose-your-model) · [Terminal](#chat-and-terminal) · [Docs](#documentation) · [Contribute](#build-and-contribute)
+[Quickstart](#quickstart) · [v4.21.0 update](#whats-new-in-v4210) · [Features](#what-you-can-do) · [Models](#choose-your-model) · [Terminal](#chat-and-terminal) · [Docs](#documentation) · [Contribute](#build-and-contribute)
 
 <img width="820" alt="Aether Agent startup, command help, and model picker" src="assets/aether-agent-demo.gif" />
 
@@ -68,26 +68,24 @@ The cloud chat route refuses `/plan` because its tools execute on the server.
 
 A completed check records its exit code. Changing the repository makes that verification stale until you run it again.
 
-The npm CLI is published as **v4.20.0**. Run `aether --version` to check the
-version you have installed. For a fixed install, use
-`npm install -g aether-agents@4.20.0 --ignore-scripts`.
+The [npm version badge](#versions) shows the published CLI version. Run
+`aether --version` to check your installation. For the latest published build,
+use `npm install -g aether-agents@latest --ignore-scripts`.
 
 Prefer Python? `pipx install aether-agent` installs a launcher for the same CLI. [Python setup](packages/pypi-cli/README.md).
 
-## What's new in v4.20.0
+## What's new in v4.21.0
 
-- **Stay in control of a task.** `/steer` updates the active run; switching
-  models continues it. Saved goals can execute a phase with host verification.
-- **Review before sharing.** Inspect, edit, or cancel queued input, and preview
-  shell output before attaching it to a model turn. Repeated tool failures pause
-  at a recovery checkpoint.
-- **Work comfortably across terminals.** Search installed Ollama models in the
-  picker, opt into a persistent PowerShell session on Windows, and draft PR
-  descriptions from final branch evidence.
-- **See more honest status.** Remote viewing reports measured host and run state;
-  account-agent chat distinguishes saved messages from admitted runs.
+- **Find and enter commands faster.** The idle composer describes slash
+  commands, searches earlier prompts with Ctrl+R, and supports multiline
+  editing with undo and yank.
+- **Keep task context under your control.** Pin bounded files for a coding turn,
+  inspect what reached the model, and run a trusted skill for one local turn.
+- **Use safer task inputs.** `aether agent --prompt-file` accepts one literal
+  specification, while planning runs with read-only host tools. Tool denials
+  carry the operator's feedback into the failed result.
 
-See the [full v4.20.0 release notes](RELEASE_NOTES.md)
+See the [full v4.21.0 release notes](RELEASE_NOTES.md)
 for fixes, install options, and qualification limits.
 
 ## Choose your model
@@ -292,7 +290,7 @@ The runtime bundles reviewed ATS adapter code and pinned browser/context depende
 |---|---:|---|
 | npm `latest` | [![npm latest](https://img.shields.io/npm/v/aether-agents?label=&color=14b8a6)](https://www.npmjs.com/package/aether-agents) | Published CLI; the badge resolves the live dist-tag. |
 | PyPI `aether-agent` | [![PyPI latest](https://img.shields.io/pypi/v/aether-agent?label=&color=3775a9)](https://pypi.org/project/aether-agent/) | Python launcher for npm `latest`, unless pinned. |
-| `main` source build | **4.20.0** | See the [v4.20.0 notes](RELEASE_NOTES.md) and [operator packet](docs/releases/OPERATOR-PACKET-v4.20.0.md). |
+| `main` source build | **4.21.0** | See the [v4.21.0 notes](RELEASE_NOTES.md) and [operator packet](docs/releases/OPERATOR-PACKET-v4.21.0.md). |
 
 [Release notes](RELEASE_NOTES.md) · [Release log](docs/releases/README.md) · [Releases and tags](https://github.com/AetherAI3/aether-agent/releases)
 
