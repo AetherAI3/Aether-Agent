@@ -59,6 +59,13 @@ For a multiline task, save the specification in `task.md` and run
 coding task; see [prompt input rules](COMMANDS.md#aether-code-task--autonomous-coding-agent)
 for the size limit and flag conflicts.
 
+To inspect the current checkout and receive a plan without changing it, run
+`aether agent --planning "outline the migration"`, or use `/plan <topic>` in a
+local interactive session. Planning permits only file reading, directory
+listing, and repository search; it skips worktree creation and verification.
+Save a plan or execute a phase later through the explicit goal controls.
+The cloud chat route refuses `/plan` because its tools execute on the server.
+
 A completed check records its exit code. Changing the repository makes that verification stale until you run it again.
 
 The npm CLI is published as **v4.20.0**. Run `aether --version` to check the

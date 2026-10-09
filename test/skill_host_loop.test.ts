@@ -34,6 +34,7 @@ import { CloudBrain } from "../src/core/brain_cloud.js";
 import { ApiClient } from "../src/core/transport.js";
 import { ToolExecutor, type ToolResult } from "../src/core/tool_executor.js";
 import { TOOLS, type BrainEvent } from "../src/core/brain_protocol.js";
+import { PLANNING_TOOLS } from "../src/core/run_capability.js";
 import type { Brain, TaskCommand } from "../src/core/brain.js";
 import type { AppContext } from "../src/core/context.js";
 import type { TokenStore } from "../src/core/auth.js";
@@ -351,6 +352,109 @@ test("runLocalTurn enforces the same policy on the REPL's local path", async () 
   assert.deepEqual(spy.executed, [], "run_shell never executed on the REPL path either");
   assert.equal(brain.results.length, 1);
   assert.match(brain.results[0]?.result.output ?? "", /skill\.tool_not_declared/);
+});
+
+test("unskilled planning advertises and enforces only the three inspection tools", async () => {
+  const fixture = makeFixture();
+  const opened = openRunSession({ projectRoot: fixture.root, prompt: "outline a change", builtinRoot: fixture.builtinRoot, noSkills: true, capability: "planning" });
+  assert.equal(opened.ok, true, opened.ok ? "" : opened.lines.join("\n"));
+  if (!opened.ok) return;
+  const run = opened.run;
+  assert.deepEqual(run.effectiveTools, PLANNING_TOOLS);
+  for (const tool of PLANNING_TOOLS) assert.equal(run.guard(tool), null, tool);
+  assert.match(run.headerLines.join("\n"), /planning · read_file/);
+  assert.match(run.brief("outline a change"), /Do not save it or execute a phase/);
+  for (const tool of TOOLS.filter((name) => !PLANNING_TOOLS.includes(name as typeof PLANNING_TOOLS[number]))) {
+    assert.equal(run.guard(tool)?.code, "run.capability_denied", tool);
+  }
+  const brain = new ScriptedBrain([
+    { name: "read_file", args: { path: "AGENTS.md" } },
+    { name: "write_file", args: { path: "victim.txt", content: "bad" } },
+    { name: "run_shell", args: { command: "echo bad" } },
+    { name: "run_tests", args: { command: "echo bad" } },
+    { name: "git_commit", args: { message: "bad" } },
+    { name: "web_fetch", args: { url: "https://example.invalid" } },
+  ]);
+  const spy = new SpyExecutor();
+  await hostLoop(brain, spy as unknown as ToolExecutor, noopEvent, { ...task(run.brief("outline a change")), capability: "planning", cwd: fixture.root }, undefined, async () => true, run.guard, { failureBudget: false });
+  assert.deepEqual(spy.executed, ["read_file"]);
+  assert.equal(existsSync(join(fixture.root, "victim.txt")), false);
+  assert.ok(brain.results.slice(1).every((entry) => entry.result.output.includes("run.capability_denied")));
+});
+
+test("hosted dev-session planning advertises the narrow set and refuses a forged write call", async () => {
+  const fixture = makeFixture();
+  const opened = openRunSession({ projectRoot: fixture.root, prompt: "outline", builtinRoot: fixture.builtinRoot, noSkills: true, capability: "planning" });
+  assert.equal(opened.ok, true);
+  if (!opened.ok) return;
+  let createBody: Record<string, unknown> | null = null;
+  const posts: Record<string, unknown>[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/agent/dev/sessions")) {
+      createBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ session_id: "s1", protocol_version: 1 }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.endsWith("/tool-results")) {
+      posts.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("/stream")) {
+      const frames = [
+        { type: "tool_call", seq: 1, tool_call_id: "w1", name: "write_file", args: { path: "victim.txt", content: "bad" } },
+        { type: "done", seq: 2, ok: true },
+      ].map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("");
+      return new Response(frames, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const tokens = { get: async () => "aek_t" } as unknown as TokenStore;
+  const api = new ApiClient("https://example.invalid", tokens);
+  (api as unknown as { fetchImpl: typeof fetch }).fetchImpl = fetchImpl;
+  const original = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  const spy = new SpyExecutor();
+  try {
+    const brain = new CloudBrain(api, undefined, { requireLocalAuthority: true, localToolCapabilities: opened.run.effectiveTools });
+    await hostLoop(brain, spy as unknown as ToolExecutor, noopEvent, { ...task(opened.run.brief("outline")), cwd: fixture.root, capability: "planning" }, undefined, async () => true, opened.run.guard, { failureBudget: false });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.deepEqual((createBody as unknown as Record<string, unknown>)["capabilities"], PLANNING_TOOLS);
+  assert.deepEqual(spy.executed, []);
+  assert.equal(existsSync(join(fixture.root, "victim.txt")), false);
+  assert.match(String(posts[0]?.["output"] ?? ""), /run.capability_denied/);
+});
+
+test("planning refuses a skill whose required authority is unavailable", () => {
+  const fixture = makeFixture();
+  const { id } = installSkill(fixture.root, { requires: ["shell.execute"], allowed: ["read_file", "run_shell"] });
+  const opened = openRunSession({ projectRoot: fixture.root, prompt: "outline a change", builtinRoot: fixture.builtinRoot, explicitSkill: id, capability: "planning" });
+  assert.equal(opened.ok, false);
+  if (!opened.ok) assert.equal(opened.refusal.code, "skill.permission_unavailable");
+});
+
+test("planning and an explicit skill intersect without treating required permissions as tool grants", () => {
+  const fixture = makeFixture();
+  const { id } = installSkill(fixture.root, { allowed: ["read_file", "run_shell"] });
+  const opened = openRunSession({ projectRoot: fixture.root, prompt: "outline", builtinRoot: fixture.builtinRoot, explicitSkill: id, capability: "planning" });
+  assert.equal(opened.ok, true, opened.ok ? "" : opened.lines.join("\n"));
+  if (!opened.ok) return;
+  assert.deepEqual(opened.run.effectiveTools, ["read_file"]);
+  assert.equal(opened.run.guard("repo_search")?.code, "skill.tool_not_declared");
+  assert.equal(opened.run.guard("run_shell")?.code, "run.capability_denied");
+});
+
+test("local planning refuses mutating calls without an active skill or permission prompt", async () => {
+  const fixture = makeFixture();
+  const brain = new ScriptedBrain([{ name: "write_file", args: { path: "victim.txt", content: "bad" } }]);
+  const spy = new SpyExecutor();
+  const ctx = { cfg: { permissionMode: "skip", autoApply: true, baseUrl: "" }, flags: { cwd: fixture.root, json: true, yes: true }, confirm: async () => true } as unknown as AppContext;
+  await runLocalTurn(ctx, "plan", undefined, { brain, exec: spy, capability: "planning" });
+  assert.deepEqual(spy.executed, []);
+  assert.match(brain.results[0]?.result.output ?? "", /run.capability_denied/);
+  assert.equal(existsSync(join(fixture.root, "victim.txt")), false);
 });
 
 // ── 3. never widen ──────────────────────────────────────────────────────────

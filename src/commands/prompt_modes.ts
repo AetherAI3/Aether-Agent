@@ -5,6 +5,7 @@
 
 export interface PromptModeResult {
   handled: boolean;
+  capability?: "planning";
   /** The rewritten prompt to send as a normal turn. */
   prompt?: string;
   /** A one-line notice to print before the turn starts. */
@@ -20,6 +21,7 @@ interface PromptMode {
   usage?: string;
   notice: (arg: string) => string;
   build: (arg: string) => string;
+  capability?: "planning";
 }
 
 const slugify = (topic: string): string =>
@@ -71,12 +73,13 @@ const MODES: PromptMode[] = [
   },
   {
     cmd: "/plan",
+    capability: "planning",
     takesArg: true,
     usage: "usage: /plan <topic>",
     notice: (topic) => `📋 Planning: "${topic}"`,
     build: (topic) =>
       `PLANNING MODE. Write a detailed, actionable implementation plan for: ${topic}. ` +
-      `Save to .hermes/plans/${slugify(topic)}.md. Include: phases with numbered tasks, ` +
+      `Return the plan in your response without writing files or running commands. Include: phases with numbered tasks, ` +
       "file manifest (new + modified files), testing strategy, risk assessment, " +
       "and out-of-scope items. Be specific — no hand-waving.",
   },
@@ -157,7 +160,7 @@ export function applyPromptMode(line: string): PromptModeResult {
       if (line !== m.cmd && !line.startsWith(m.cmd + " ")) continue;
       const arg = line.slice(m.cmd.length).trim();
       if (!arg) return { handled: true, error: m.usage! };
-      return { handled: true, prompt: m.build(arg), notice: m.notice(arg) };
+      return { handled: true, prompt: m.build(arg), notice: m.notice(arg), ...(m.capability ? { capability: m.capability } : {}) };
     }
     if (!line.startsWith(m.cmd)) continue;
     return { handled: true, prompt: m.build(""), notice: m.notice("") };

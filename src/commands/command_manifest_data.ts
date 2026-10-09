@@ -92,7 +92,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "deprecatedAliases": [],
     "args": "[task | list | create | show | configure | chat | activate | pause | resume]",
     "summary": "run the coding agent or manage account agents and shared conversations",
-    "detailedHelp": "aether agent list | create [ATS] <name> | show <id> | configure <id> <key> <value> | chat [id] | activate|pause|resume <id>\nCoding tasks: aether agent <task> | aether agent --prompt-file task.md | cat task.md | aether agent --prompt-file -\n--prompt-file reads one literal UTF-8 task (maximum 256 KiB); it conflicts with positional tasks, --resume, --interactive, and --with-token. Managed agents sync with your account and use the shared Online DM. aether code accepts the same coding flags.",
+    "detailedHelp": "aether agent list | create [ATS] <name> | show <id> | configure <id> <key> <value> | chat [id] | activate|pause|resume <id>\nCoding tasks: aether agent <task> | aether agent --prompt-file task.md | cat task.md | aether agent --prompt-file -\nPlanning: aether agent --planning \"outline the migration\" (or /plan <topic> in a local REPL). The host permits read_file, list_directory, and repo_search only; it skips workspace preparation and verification. --planning conflicts with --repo, --worktree, and --resume. Cloud chat /plan is refused because tools run server-side. Saving and executing a plan are later explicit actions.\n--prompt-file reads one literal UTF-8 task (maximum 256 KiB); it conflicts with positional tasks, --resume, --interactive, and --with-token. Managed agents sync with your account and use the shared Online DM. aether code accepts the same coding flags.",
     "section": "Start",
     "hidden": false,
     "permissionClass": "local-write",
@@ -140,7 +140,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
       "worktree",
       "yes"
     ],
-    "ownedFlags": {},
+    "ownedFlags": { "planning": { "type": "boolean", "default": false } },
     "handler": {
       "id": "handler:shell:agent",
       "kind": "host",

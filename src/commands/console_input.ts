@@ -6,6 +6,7 @@ import { BoundedOutput } from "../core/bounded_output.js";
 import { sanitizeServerText } from "../core/transport.js";
 import { redactForBundle, scanForSecrets } from "../core/redaction.js";
 import { stripAnsi } from "../ui/text.js";
+import type { RunCapability } from "../core/run_capability.js";
 import { discoverShellProfiles, type ShellProfile } from "../core/shell_profiles.js";
 
 type ShareAction = "preview" | "lines" | "drop" | "replace" | "mask" | "redact" | "send" | "cancel";
@@ -49,7 +50,7 @@ export type ConsoleInput =
   | { kind: "profile"; action: "list" | "status" | "use"; profile?: "cmd" | "powershell" }
   | ShareInput
   | { kind: "error"; message: string }
-  | { kind: "chat"; text: string }
+  | { kind: "chat"; text: string; capability?: RunCapability }
   | { kind: "empty" };
 
 export function classifyConsoleInput(raw: string): ConsoleInput {

@@ -3,6 +3,7 @@
 // renamed once released (CONTRACTS.md discipline applies).
 
 export const SKILL_ERROR_CODES = [
+  "run.capability_denied",
   "skill.untrusted",
   "skill.changed",
   "skill.disabled",

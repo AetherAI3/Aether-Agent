@@ -160,6 +160,8 @@ export type FinalStatus =
 
 export interface SessionMeta {
   task: string;
+  /** Host-enforced authority for this invocation. */
+  capability?: "coding" | "planning";
   /** Source and UTF-8 byte size only; never the prompt body. */
   promptInput?: PromptInput;
   /** Resolved model provenance. Local runs store `ollama/<tag>`; cloud auto
@@ -381,6 +383,7 @@ export class SessionLog {
     return {
       sessionId: this.sessionId,
       task: redactInline(m.task),
+      ...(m.capability ? { capability: m.capability } : {}),
       ...(m.promptInput ? { promptInput: {
         kind: m.promptInput.kind,
         bytes: m.promptInput.bytes,

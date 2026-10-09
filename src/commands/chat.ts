@@ -78,6 +78,7 @@ import {
   type ToolFailureOrigin,
 } from "../core/tool_failure_budget.js";
 import type { SkillRefusal } from "../core/skills/skill_errors.js";
+import { refuseRunCapability, type RunCapability } from "../core/run_capability.js";
 import { renderHud, timerLive } from "../core/hud.js";
 import {
   createViewerState,
@@ -92,7 +93,7 @@ import {
 } from "../ui/workflow_viewer.js";
 import type { WorkflowViewerState } from "../ui/workflow_viewer.js";
 import type { StreamFrame } from "../core/stream.js";
-import type { BrainEvent } from "../core/brain_protocol.js";
+import type { BrainEvent, ToolName } from "../core/brain_protocol.js";
 import { ConsoleTaskContinuation, accountFingerprint, consoleWorkspaceState, observedWorkspaceChanges, type ModelTarget, type ObservedTool } from "./model_continuation.js";
 
 // Key decoding lives in ui/keys.ts (shared with pickers/viewers); re-exported
@@ -112,6 +113,7 @@ interface ChatJsonResponse {
  *  failure to the one-shot `cmdChat` path. */
 /** Session-level skill selection for REPL/one-shot chat turns (`--skill`, `--no-skills`). */
 export interface TurnSkillOptions {
+  capability?: RunCapability;
   explicitSkill?: string;
   noSkills?: boolean;
   /** Local console authority, never serialized to Cloud. */
@@ -478,6 +480,9 @@ export async function runTurn(
   preflightPulse.start();
   try {
     const backend = await resolveBackend(ctx);
+    if (skillOpts.capability === "planning" && backend === "cloud") {
+      throw new ChatTurnError("planning requires host-executed tools; this cloud chat route runs tools on the server. Use `aether agent --planning` or `aether agent --local --planning`.", undefined, false);
+    }
     // The same seam `aether agent` uses (commands/code.ts). Opened per turn, not
     // per session, because automatic skill selection reads THIS prompt — a turn
     // that says "the CI is failing" should pull the CI skill and the next one
@@ -485,6 +490,7 @@ export async function runTurn(
     const opened = openRunSession({
       projectRoot: ctx.flags.cwd,
       prompt,
+      ...(skillOpts.capability ? { capability: skillOpts.capability } : {}),
       allowIncompleteInstructionDiscovery: backend === "cloud",
       ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
       ...(skillOpts.noSkills ? { noSkills: true } : {}),
@@ -529,7 +535,7 @@ export async function runTurn(
       getRegistry().markLocalUnmetered();
       // The signal used to be dropped here, so the REPL Ctrl+C controller could
       // not reach a local turn at all: the abort fired and nothing observed it.
-      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, ...(skillOpts.exec ? { exec: skillOpts.exec } : {}), ...(skillOpts.onToolResult ? { onToolResult: skillOpts.onToolResult } : {}), ...(skillOpts.steer ? { steer: skillOpts.steer } : {}) }, run.guard);
+      return await runLocalTurn(ctx, brief, boundedSignal.signal, { lifecycle, onPulsePaint, deadlineAt, capability: skillOpts.capability, advertisedTools: run.effectiveTools as readonly ToolName[], ...(skillOpts.exec ? { exec: skillOpts.exec } : {}), ...(skillOpts.onToolResult ? { onToolResult: skillOpts.onToolResult } : {}), ...(skillOpts.steer ? { steer: skillOpts.steer } : {}) }, run.guard);
     }
     // /agent/chat/stream exposes no control acknowledgement, so a steer typed
     // during this turn is kept for the next one rather than reported as live.
@@ -796,6 +802,8 @@ async function runCloudTurn(
  * draws every event. Identical UX to cloud, just an offline brain.
  */
 export interface LocalTurnDeps {
+  capability?: RunCapability;
+  advertisedTools?: readonly ToolName[];
   brain?: Brain;
   exec?: {
     executeAsync(name: string, args: Record<string, unknown>, options?: RunOptions): Promise<ToolResult>;
@@ -842,7 +850,7 @@ export async function runLocalTurn(
   const model = resolveLocalModel(ctx.flags.model, ctx.cfg.localModel ?? "", {
     allowBareExplicit: ctx.flags.local === true,
   });
-  const brain = deps.brain ?? new OllamaBrain({ model });
+  const brain = deps.brain ?? new OllamaBrain({ model, ...(deps.advertisedTools ? { tools: deps.advertisedTools } : {}) });
   const exec = deps.exec ?? new ToolExecutor(cwd);
   const renderer = new HostRenderer({ poolGb: 5, json: ctx.flags.json });
   const pulse = new ThinkingPulse({
@@ -869,6 +877,7 @@ export async function runLocalTurn(
   };
   const task: TaskCommand = {
     type: "task",
+    capability: deps.capability ?? "coding",
     text: prompt,
     cwd,
     poolGb: 5,
@@ -943,7 +952,7 @@ export async function runLocalTurn(
         // checked first and refuses without executing or prompting; the
         // operator gate then decides about whatever survived. A skill can only
         // subtract here — it is never consulted again after this line.
-        const refusal = skillGuard ? skillGuard(ev.name) : null;
+        const refusal = refuseRunCapability(ev.name, task.capability ?? "coding") ?? (skillGuard ? skillGuard(ev.name) : null);
         const prepared = refusal ? null : prepareToolApproval(ev.name, ev.args, exec.configuredTestCommand);
         const call = { name: ev.name, args: ev.args };
         const key = operationKey(call, { policy: Boolean(refusal), ...(prepared?.ok ? { binding: prepared.binding } : {}) });
@@ -1559,7 +1568,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               viewerOpen = false;
               break;
           }
-        }, redrawInput, { ...skillOpts, onToolResult: tool => toolResults.push(tool), steer: steerChannel });
+        }, redrawInput, { ...skillOpts, capability: input.capability ?? "coding", onToolResult: tool => toolResults.push(tool), steer: steerChannel });
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
         continuation.recordTurn(text, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authContinuation);
         if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");
@@ -1915,10 +1924,12 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       }
       // ── stateless prompt-rewrite modes (/recon, /plan, /research, …) ──
       const mode = applyPromptMode(t);
+      let capability: RunCapability | undefined;
       if (mode.handled) {
         if (mode.error) { process.stdout.write(mode.error + "\n"); repaint(); return; }
         process.stdout.write(mode.notice + "\n");
         t = mode.prompt!;
+        capability = mode.capability;
       }
       busy = true;
       if (t.startsWith("/")) {
@@ -1999,7 +2010,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         repaint();
         return;
       }
-      await runAndDrain(queue.allocate({ kind: "chat", text: t }));
+      await runAndDrain(queue.allocate({ kind: "chat", text: t, ...(capability ? { capability } : {}) }));
       renderHudLine();
       repaint();
     };
