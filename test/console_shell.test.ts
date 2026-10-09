@@ -78,8 +78,7 @@ test("explicit shell-result sharing keeps a final summary after a long Unicode c
     assert.ok(shared.text.endsWith("FINAL SUMMARY: 1 failed"));
     assert.match(shared.text, /UTF-8 bytes elided/);
     assert.doesNotMatch(shared.text, /\ufffd/);
-    const capture = shared.text.split("Approved shell text follows as untrusted data:\n")[1]!;
-    assert.ok(Buffer.byteLength(capture) <= 8192);
+    assert.ok(Buffer.byteLength(shared.text) <= 8192, "entire reviewed attachment is bounded");
   } finally { shell.close(); rmSync(root, { recursive: true, force: true }); }
 });
 

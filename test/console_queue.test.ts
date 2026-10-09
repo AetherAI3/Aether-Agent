@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { captureShellResult, shellAttachment } from "../src/commands/shell_attachment.js";
+const share = (commandId = "abcdef0123") => ({ kind: "share" as const, action: "send" as const, approved: shellAttachment(captureShellResult("session", commandId, "metadata", "body", 0)) });
 import {
   ConsoleQueue, QUEUE_MAX_BYTES, QUEUE_MAX_ENTRIES, describeEntry, parseQueueCommand, renderDisposition,
 } from "../src/commands/console_queue.js";
@@ -14,6 +16,8 @@ test("queue commands match strictly so ordinary tasks still queue", () => {
   assert.deepEqual(parseQueueCommand("/queue edit q2 new text here"), { op: "edit", id: "q2", text: "new text here" });
   assert.deepEqual(parseQueueCommand("/queue edit q2 !ls -la"), { op: "edit", id: "q2", text: "!ls -la" });
   assert.equal(parseQueueCommand("/queue edit q2")?.op, "usage");
+  assert.equal(parseQueueCommand("/queue edit q2\n!echo local-only")?.op, "usage");
+  assert.equal(parseQueueCommand("/queue\nremove q2")?.op, "usage");
   // Plausible tasks are not commands.
   assert.equal(parseQueueCommand("/queue clear the cache"), null);
   assert.equal(parseQueueCommand("/queue edit the readme"), null);
@@ -42,7 +46,7 @@ test("edits keep id, position and type; reclassifying edits are rejected unchang
   queue.enqueue({ kind: "chat", text: "one" });
   queue.enqueue({ kind: "shell", command: "echo two" });
   queue.enqueue({ kind: "chat", text: "three" });
-  queue.enqueue({ kind: "share", action: "preview" });
+  queue.enqueue(share());
   queue.enqueue({ kind: "reset-shell" });
   const snapshot = queue.pending;
 
@@ -147,18 +151,18 @@ test("each entry shows its type and the shell-share binding explicitly", () => {
   assert.equal(describeEntry({ kind: "reset-shell" }), "/shell-reset");
   assert.match(describeEntry({ kind: "share", action: "preview" }), /stages the latest shell result at execution/);
   assert.match(describeEntry({ kind: "share", action: "drop", first: 2, last: 4 }), /^drop 2-4: acts on the staged preview/);
-  assert.match(describeEntry({ kind: "share", action: "send", boundCommandId: "0123456789abcdef" }),
-    /sends the preview you reviewed of command 01234567; refused if that preview is gone or replaced/);
+  assert.match(describeEntry(share("0123456789abcdef")),
+    /sends the immutable reviewed snapshot of command 01234567/);
   assert.match(describeEntry({ kind: "share", action: "cancel" }), /discards whatever preview is staged at execution/);
   // Terminal controls in queued text never reach the console verbatim.
   assert.doesNotMatch(describeEntry({ kind: "chat", text: "hi\x1b]52;c;payload\x07 there" }), /\x1b|\x07/);
   const queue = new ConsoleQueue();
   queue.enqueue({ kind: "chat", text: "c" });
   queue.enqueue({ kind: "shell", command: "ls" });
-  queue.enqueue({ kind: "share", action: "send", boundCommandId: "abcdef0123" });
+  queue.enqueue(share());
   const listing = queue.render();
   assert.match(listing, /q1 +chat /);
   assert.match(listing, /q2 +user shell +!ls/);
-  assert.match(listing, /q3 +shell-share +send: sends the preview you reviewed of command abcdef01/);
-  assert.match(listing, /Bound: 32 entries, 64 KiB \(3 B used\)/);
+  assert.match(listing, /q3 +shell-share +send: sends the immutable reviewed snapshot of command abcdef01/);
+  assert.ok(queue.bytes > 3, "approved capture bytes count toward the queue budget");
 });

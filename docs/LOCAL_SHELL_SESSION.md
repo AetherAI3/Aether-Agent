@@ -60,14 +60,21 @@ tools. Online account-agent and ATS chats remain separate surfaces.
   Ctrl+C cancels the active command/turn and discards its queued follow-ups;
   typing ahead retains the newer composer draft. See [Queued input](#queued-input).
 - Shell commands and results are excluded from chat history and hosted prompts.
-  `/shell-result` explicitly shares up to 8 KiB of the latest user result as
-  untrusted data. Reset clears that result.
+  `/shell-result` previews a local attachment; only explicit Send shares it.
+  The entire attachment, including metadata and fixed untrusted/omission framing,
+  is capped at 8 KiB. Dropping or replacing a metadata line really removes it;
+  mask/redact affect only editable text, never the protected framing. Redaction
+  is an aid, not a guarantee. Reset/profile changes clear unsent previews.
+  Pipes/JSON allow one explicit Send of a fresh result; sent/cancelled/empty
+  selections cannot silently restage on repeat Send. Explicit preview can stage
+  a deliberate retry. Attachment turns do not write custody receipts that might
+  echo their content into an export or copy blocked submissions into history.
   Ordinary chat history still honors `AETHER_NO_HISTORY=1`.
 
 ## Queued input
 
-Anything submitted while a turn, shell command or slash command is running
-waits in one strictly ordered queue. Each entry gets a session-stable id
+Chat, user shell, and approved shell-share submissions made while a turn,
+shell command or slash command is running wait in one ordered queue. Each entry gets a session-stable id
 (`q1`, `q2`, … never reused) and a type: `chat`, `user shell`, `shell reset`,
 `shell profile` or `shell-share`. The input that is running also has an id and is shown
 separately; it cannot be edited (Ctrl+C cancels it).
@@ -92,20 +99,25 @@ separately; it cannot be edited (Ctrl+C cancels it).
   queue again. A
   rejected edit leaves the entry unchanged.
 - Management keywords match exactly, so `/queue clear the cache` queues a
-  task. Edit and remove act only on `q<number>` ids.
-- Bound: 32 entries and 64 KiB of queued text. A rejected entry is not queued
+  task. Edit and remove act only on `q<number>` ids. Malformed controls naming
+  such an id are refused locally, including pasted newline separators.
+- Bound: 32 entries and 64 KiB of queued text, including approved attachment
+  bytes and retained capture provenance. A rejected entry is not queued
   and its draft stays in the composer.
 - Slash commands typed mid-turn other than `/steer`, `/btw` and `/queue` are
   not queued; the console says so and ↑ recalls them.
 
-Shell-share binding is explicit. A queued `/shell-result send` binds, when it
-is queued, to the preview you reviewed (its command id). At execution it sends
-only that preview, and it refuses and sends nothing if the preview was cancelled
-or replaced by a different command's. It is not queued at all if nothing is
-staged. Queued preview and edit actions (`lines`, `drop`, `replace`, `mask`,
-`redact`) act on the staged preview, or stage the **latest shell result at
-execution** if none is staged. A queued `cancel` discards whatever is staged
-when it runs.
+Shell-share binding freezes the exact fully framed reviewed bytes, capture and
+session identity before queueing. Later edits, cancellation of a new preview,
+or newly completed commands cannot alter that approved entry. To withdraw it,
+use `/queue remove <id>` or `/queue clear`; preview Cancel affects only the
+unsent preview. Preview/line/edit/redaction/cancel controls always run locally
+at submission, even while a model streams, and never become queued prompts.
+Queued shell-shares remain immutable; remove and re-review to change one.
+
+Terminal handoff requires pending entries to be resumed or cleared first, so
+terminal checkout reconciliation cannot move old queued commands to a fresh
+shell. A shell/session generation change discards pending entries explicitly.
 
 What happens to pending entries:
 

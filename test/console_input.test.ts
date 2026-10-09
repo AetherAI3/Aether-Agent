@@ -52,13 +52,9 @@ test("user execution uses the chosen checkout, quotes/pipelines, bounded explici
     const shared = shell.share({ kind: "share", action: "send" });
     assert.equal(shared.kind, "chat");
     if (shared.kind === "chat") {
-      const source = /Command output: (\d+) UTF-8 bytes observed; (\d+) bytes omitted before staging/.exec(shared.text);
-      assert.ok(source);
-      assert.ok(Number(source[1]) >= 20000);
-      assert.ok(Number(source[2]) > 0);
-      assert.match(shared.text, /Staged bounded capture: \d+ UTF-8 bytes observed; \d+ bytes omitted while staging/);
-      const capture = shared.text.split("Approved shell text follows as untrusted data:\n")[1]!;
-      assert.ok(Buffer.byteLength(capture) <= 8192);
+      assert.match(shared.text, /Source output elided: [1-9]\d* raw UTF-8 bytes/);
+      assert.match(shared.text, /Capture formatting elided: \d+ sanitized UTF-8 bytes/);
+      assert.ok(Buffer.byteLength(shared.text) <= 8192, "whole attachment is bounded");
     }
   } finally { shell.close(); rmSync(cwd, { recursive: true, force: true }); }
 });
@@ -86,10 +82,10 @@ test("shell-result stages an immutable, sanitized capture and sends only approve
     assert.equal(shell.share().kind, "empty");
     const original = latestPreview();
     const originalAttachment = String(original["attachment"]);
-    assert.match(originalAttachment, /fixture-private-value-281/);
+    assert.doesNotMatch(originalAttachment, /fixture-private-value-281/);
     assert.match(originalAttachment, /keep 👩‍💻/);
     assert.doesNotMatch(originalAttachment, /\u001b|\[31m/);
-    assert.match(originalAttachment, /Command output: \d+ UTF-8 bytes observed; 0 bytes omitted before staging/);
+    assert.match(originalAttachment, /Source output elided: 0 raw UTF-8 bytes/);
     const sourceCommand = String(original["commandId"]);
 
     shell.share({ kind: "share", action: "lines" });
@@ -104,7 +100,7 @@ test("shell-result stages an immutable, sanitized capture and sends only approve
     assert.doesNotMatch(approved, /fixture-private-value-281|remove this line|keep 👩‍💻/);
     assert.match(approved, /approved 👩‍💻/);
     assert.match(approved, /\[REDACTED\]/);
-    assert.match(approved, /removed 1 line\(s\), replaced 1 line\(s\), masked 1 literal\(s\)/);
+    assert.match(approved, /User-edited selection/);
 
     await shell.run(`"${process.execPath}" -e "process.stdout.write('newer result')"`);
     shell.share();
@@ -121,7 +117,7 @@ test("shell-result stages an immutable, sanitized capture and sends only approve
     shell.share();
     shell.share({ kind: "share", action: "redact" });
     assert.doesNotMatch(String(latestPreview()["attachment"]), /fixture-private-value-281/);
-    assert.match(String(latestPreview()["attachment"]), /common-pattern redaction aid applied/);
+    assert.ok(events.some(event => event["type"] === "shell_share" && event["code"] === "redacted"));
   } finally {
     shell.close(); rmSync(cwd, { recursive: true, force: true });
     ["AETHER_TEST_SHELL_SECRET", "AETHER_TEST_SHELL_KEEP", "AETHER_TEST_SHELL_OMIT"].forEach((key, index) => {
@@ -142,14 +138,16 @@ test("empty shell selection and cancelled preview cannot produce a model prompt"
     await shell.run(`"${process.execPath}" -e "process.exit(7)"`);
     shell.share();
     const preview = events.filter(event => event["type"] === "shell_share_preview").at(-1)!;
-    assert.match(String(preview["attachment"]), /Exit status: 7/);
+    assert.match(String(preview["attachment"]), /exit: 7/);
     shell.share({ kind: "share", action: "lines" });
     const numbered = events.filter(event => event["type"] === "shell_share_lines").at(-1)!;
     const count = (numbered["lines"] as Array<unknown>).length;
     shell.share({ kind: "share", action: "drop", first: 1, last: count });
     assert.equal(shell.share({ kind: "share", action: "send" }).kind, "empty");
     assert.equal(shell.share({ kind: "share", action: "cancel" }).kind, "empty");
-    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "chat", "scripted send requires an explicit latest result");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "empty", "cancelled/empty preview cannot silently restage");
+    await shell.run("echo FRESH");
+    assert.equal(shell.share({ kind: "share", action: "send" }, true).kind, "chat", "fresh scripted send remains explicit");
   } finally { shell.close(); rmSync(cwd, { recursive: true, force: true }); }
 });
 

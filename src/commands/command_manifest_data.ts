@@ -4138,7 +4138,7 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     "compatibilityAliases": [],
     "deprecatedAliases": [],
     "summary": "preview and edit a bounded local shell result before sharing it",
-    "detailedHelp": "/shell-result previews the exact bounded attachment without contacting a model. Use /shell-result lines to inspect numbered rows; drop <first>[-<last>], replace <line> <text>, mask <literal>, or redact to edit the staged snapshot. /shell-result send shares that snapshot; /shell-result cancel discards it. In pipes or JSON sessions, /shell-result send is the explicit one-step send form. A newer command never replaces a staged preview. Redaction is an aid, not a guarantee.",
+    "detailedHelp": "/shell-result previews the exact bounded attachment without contacting a model. Use /shell-result lines to inspect numbered rows; drop <first>[-<last>], replace <line> <text>, mask <literal>, or redact to edit the staged snapshot. /shell-result send shares that snapshot; /shell-result cancel discards it. In pipes or JSON sessions, /shell-result send is the explicit one-step send form. The whole attachment stays within 8 KiB. Send freezes reviewed bytes before queueing; later edits/commands cannot replace them. Preview controls remain local while busy. Repeated/cancelled/empty script sends cannot silently restage. Redaction is an aid, not a guarantee.",
     "section": "Steering",
     "hidden": false,
     "permissionClass": "network",

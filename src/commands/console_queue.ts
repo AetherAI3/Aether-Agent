@@ -38,6 +38,7 @@ export function parseQueueCommand(raw: string): QueueCommand | null {
     const replacement = (edit[2] ?? "").trim();
     return replacement ? { op: "edit", id: edit[1]!.toLowerCase(), text: replacement } : { op: "usage", message: "usage: /queue edit <id> <text>" };
   }
+  if (/^\/queue\s+(?:edit|remove|rm)\s+q\d+(?:\s|$)/i.test(text)) return { op: "usage", message: "Invalid queue edit/remove syntax; nothing queued. Use /queue edit <id> <text> or /queue remove <id>." };
   return null;
 }
 
@@ -53,7 +54,7 @@ export function entryKind(input: QueueableInput): "chat" | "user shell" | "shell
 function inputBytes(input: QueueableInput): number {
   if (input.kind === "chat") return Buffer.byteLength(input.text, "utf8");
   if (input.kind === "shell") return Buffer.byteLength(input.command, "utf8");
-  if (input.kind === "share") return Buffer.byteLength(input.value ?? "", "utf8");
+  if (input.kind === "share") return Buffer.byteLength(JSON.stringify(input), "utf8");
   return 0;
 }
 
@@ -65,11 +66,9 @@ function clip(text: string, max = 55): string {
 /** States the shell-share binding explicitly so nobody has to guess which
  * result a queued action will touch when it finally runs. */
 export function shareBinding(input: Extract<QueueableInput, { kind: "share" }>): string {
-  if (input.action === "send") {
-    return input.boundCommandId
-      ? `sends the preview you reviewed of command ${input.boundCommandId.slice(0, 8)}; refused if that preview is gone or replaced`
-      : "sends the staged preview";
-  }
+  if (input.action === "send") return input.approved
+    ? `sends the immutable reviewed snapshot of command ${input.approved.capture.commandId.slice(0, 8)} (${Buffer.byteLength(input.approved.text)} bytes)`
+    : "requires a prepared reviewed snapshot";
   if (input.action === "cancel") return "discards whatever preview is staged at execution";
   return "acts on the staged preview, or stages the latest shell result at execution";
 }
@@ -107,10 +106,11 @@ export class ConsoleQueue {
 
   /** An id for an input that runs immediately, so the running entry is named too. */
   allocate(input: QueueableInput): QueueEntry {
-    return { id: `q${this.nextId++}`, input };
+    return Object.freeze({ id: `q${this.nextId++}`, input: Object.freeze({ ...input }) });
   }
 
   enqueue(input: QueueableInput): QueueResult {
+    if (input.kind === "share" && (input.action !== "send" || !input.approved)) return { ok: false, message: "Shell preview controls stay local; queued Send requires an immutable reviewed snapshot." };
     if (this.entries.length >= QUEUE_MAX_ENTRIES) {
       return { ok: false, message: `Queue full (${QUEUE_MAX_ENTRIES} entries); not queued. Remove entries with /queue remove <id> or /queue clear.` };
     }

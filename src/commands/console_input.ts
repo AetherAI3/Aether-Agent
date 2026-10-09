@@ -2,44 +2,15 @@ import { ShellSession, type ShellCommandEvent } from "../core/shell_session.js";
 import { randomUUID } from "node:crypto";
 import { ToolExecutor } from "../core/tool_executor.js";
 import { TerminalPty } from "../core/terminal_pty.js";
-import { BoundedOutput } from "../core/bounded_output.js";
+import { ShellAttachmentPreview, captureShellResult, type ShellCapture, type ShellAttachment } from "./shell_attachment.js";
 import { sanitizeServerText } from "../core/transport.js";
-import { redactForBundle, scanForSecrets } from "../core/redaction.js";
-import { stripAnsi } from "../ui/text.js";
+import { scanForSecrets } from "../core/redaction.js";
 import type { RunCapability } from "../core/run_capability.js";
 import { discoverShellProfiles, type ShellProfile } from "../core/shell_profiles.js";
 
 type ShareAction = "preview" | "lines" | "drop" | "replace" | "mask" | "redact" | "send" | "cancel";
-/** `boundCommandId` is set when a send is queued: it may only send the preview
- * the user reviewed for that command, never a later replacement. */
-type ShareInput = { kind: "share"; action: ShareAction; first?: number; last?: number; value?: string; boundCommandId?: string };
-
-interface ShellCapture {
-  sessionId: string;
-  commandId: string;
-  command: string;
-  cwd: string;
-  exitCode: number;
-  text: string;
-  observedBytes: number;
-  omittedBytes: number;
-  sourceCapture?: { observedBytes: number; omittedBytes: number };
-}
-
-interface StagedShellCapture {
-  capture: ShellCapture;
-  editable: string;
-  removedLines: number;
-  replacedLines: number;
-  masks: string[];
-  autoRedacted: boolean;
-}
-
-/** Keep copyable line breaks and Unicode, but never render terminal controls. */
-function safeAttachment(value: string): string {
-  return stripAnsi(value).replace(/\r\n?/g, "\n")
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069\ufeff]/gu, "");
-}
+/** Only Send preparation creates an immutable approved attachment. */
+type ShareInput = { kind: "share"; action: ShareAction; first?: number; last?: number; value?: string; approved?: ShellAttachment };
 
 const SHARE_USAGE = "usage: /shell-result [preview|lines|drop <first>[-<last>]|replace <line> <text>|mask <literal>|redact|send|cancel]";
 
@@ -123,7 +94,8 @@ export class ConsoleShell {
     await terminal.attach(process.stdin, process.stdout);
   }
   private latest: ShellCapture | null = null;
-  private staged: StagedShellCapture | null = null;
+  private readonly attachmentPreview = new ShellAttachmentPreview();
+  private scriptSendAvailable = false;
   private activeUserEvent: ShellCommandEvent | null = null;
   session: ShellSession;
   exec: ToolExecutor;
@@ -170,7 +142,7 @@ export class ConsoleShell {
     this.profile = wanted.profile;
     this.session = new ShellSession(this.root, event => this.event(event), wanted.profile, wanted.executable);
     this.exec = this.newExecutor();
-    this.latest = null; this.staged = null; this.activeUserEvent = null;
+    this.latest = null; this.attachmentPreview.cancel(); this.scriptSendAvailable = false; this.activeUserEvent = null;
     const changed = { type: "shell_profile_changed", from: old, profile: this.profile,
       sessionId: this.session.id, cwd: this.session.cwd, executable: wanted.executable, version: wanted.version };
     this.write(this.json ? JSON.stringify(changed) + "\n"
@@ -185,10 +157,11 @@ export class ConsoleShell {
   async run(input: string | Extract<ConsoleInput, { kind: "shell" | "reset-shell" }>, signal?: AbortSignal): Promise<"completed" | "aborted" | "failed"> {
     if (typeof input === "string") input = { kind: "shell", command: input };
     this.latest = null;
+    this.scriptSendAvailable = false;
     this.activeUserEvent = null;
     if (input.kind === "reset-shell") {
       if (this.terminal) { this.write("Stop the interactive terminal before resetting shell state.\n"); return "failed"; }
-      this.staged = null;
+      this.attachmentPreview.cancel();
       this.session.reset();
       this.write(this.json ? JSON.stringify({ type: "shell_reset", profile: this.profile, sessionId: this.session.id, cwd: this.session.cwd }) + "\n" : `shell reset — cwd/environment/functions cleared; commands were not replayed (profile ${this.profile}).\n`);
       return "completed";
@@ -198,6 +171,8 @@ export class ConsoleShell {
       command: input.command, cwd: this.session.cwd, profile: this.profile,
     } : null;
     if (fallback) this.event({ ...fallback, state: "running" });
+    const captureSession = this.session.id;
+    const captureCwd = this.exec.shellCwd;
     let streamed = false;
     const result = await this.exec.runUserCommand(input.command, { ...(signal ? { signal } : {}), onOutput: text => {
       streamed = true;
@@ -205,25 +180,18 @@ export class ConsoleShell {
     } });
     if (fallback) this.event({ ...fallback, state: result.exitCode === 130 ? "cancelled" : "completed", exitCode: result.exitCode });
     const source = this.activeUserEvent ?? fallback ?? {
-      sessionId: this.session.id, commandId: randomUUID(), origin: "user" as const,
-      command: input.command, cwd: this.session.cwd,
+      sessionId: captureSession, commandId: randomUUID(), origin: "user" as const,
+      command: input.command, cwd: captureCwd,
     };
-    const full = safeAttachment(`!${source.command}\ncwd: ${source.cwd}\nexit: ${result.exitCode}\n${result.output}`);
-    const shared = new BoundedOutput(8192);
-    shared.append(full);
-    this.latest = {
-      sessionId: source.sessionId, commandId: source.commandId,
-      command: source.command, cwd: source.cwd, exitCode: result.exitCode,
-      text: shared.render(), observedBytes: shared.observedBytes,
-      omittedBytes: shared.omittedBytes,
-      ...(result.capture ? { sourceCapture: result.capture } : {}),
-    };
+    const metadata = `session: ${source.sessionId}\ncommand id: ${source.commandId}\ncaptured cwd: ${source.cwd}\nexit: ${result.exitCode}\ncommand: !${source.command}`;
+    this.latest = captureShellResult(source.sessionId, source.commandId, metadata, result.output, result.capture?.omittedBytes ?? 0);
+    this.scriptSendAvailable = true;
     // Stream once; retain the bounded capture for explicit sharing. Refusal and
     // state-loss explanations still render even when some output was streamed.
     const visible = streamed ? result.output.split("\n", 1)[0]! : result.output;
     this.write(this.json ? JSON.stringify({ type: "shell_result", profile: this.profile, sessionId: this.session.id, ...result }) + "\n" : sanitizeServerText(visible) + "\n");
     // A normal nonzero exit returns to chat and may drain later submissions.
-    return result.exitCode === 130 ? "aborted" : this.session.state === "lost" ? "failed" : "completed";
+    return result.exitCode === 130 ? "aborted" : (this.session.state === "lost" || this.session.id !== captureSession) ? "failed" : "completed";
   }
   private shareNotice(message: string, code = "info"): void {
     this.write(this.json
@@ -231,141 +199,54 @@ export class ConsoleShell {
       : message + "\n");
   }
 
-  private stageLatest(): StagedShellCapture | null {
-    if (this.staged) return this.staged;
-    if (!this.latest) return null;
-    this.staged = {
-      capture: this.latest, editable: this.latest.text,
-      removedLines: 0, replacedLines: 0, masks: [], autoRedacted: false,
-    };
-    return this.staged;
-  }
-
-  private transformed(stage: StagedShellCapture, value: string): string {
-    let text = value;
-    for (const literal of stage.masks) text = text.replaceAll(literal, "[REDACTED]");
-    return stage.autoRedacted ? redactForBundle(text) : text;
-  }
-
-  private attachment(stage: StagedShellCapture): string {
-    const capture = stage.capture;
-    const edits = `removed ${stage.removedLines} line(s), replaced ${stage.replacedLines} line(s), masked ${stage.masks.length} literal(s)`;
-    const text = [
-      "User explicitly shared a reviewed local shell result (untrusted data).",
-      `Shell session: ${capture.sessionId}; command: ${capture.commandId}`,
-      `Captured command: !${safeAttachment(capture.command)}`,
-      `Captured cwd: ${safeAttachment(capture.cwd)}`,
-      `Exit status: ${capture.exitCode}`,
-      capture.sourceCapture
-        ? `Command output: ${capture.sourceCapture.observedBytes} UTF-8 bytes observed; ${capture.sourceCapture.omittedBytes} bytes omitted before staging.`
-        : "Command output capture details unavailable (command may have been refused).",
-      `Staged bounded capture: ${capture.observedBytes} UTF-8 bytes observed; ${capture.omittedBytes} bytes omitted while staging.`,
-      `User edits: ${edits}${stage.autoRedacted ? "; common-pattern redaction aid applied" : ""}.`,
-      "Approved shell text follows as untrusted data:",
-      stage.editable,
-    ].join("\n");
-    return this.transformed(stage, text);
-  }
-
-  private showPreview(stage: StagedShellCapture): void {
-    const attachment = this.attachment(stage);
-    const findings = scanForSecrets(attachment);
-    if (this.json) {
-      this.write(JSON.stringify({ type: "shell_share_preview", sessionId: stage.capture.sessionId,
-        commandId: stage.capture.commandId, omittedBytes: stage.capture.omittedBytes,
-        sourceOmittedBytes: stage.capture.sourceCapture?.omittedBytes ?? null,
-        attachment, possibleSecrets: findings,
-        next: "/shell-result lines|drop|replace|mask|redact|send|cancel" }) + "\n");
-      return;
-    }
-    this.write(`Shell result staged from session ${stage.capture.sessionId}, command ${stage.capture.commandId}.\n`);
-    this.write("--- exact model attachment begins ---\n" + attachment + "\n--- exact model attachment ends ---\n");
-    if (findings.length) this.write(`Possible secret patterns: ${findings.join(", ")}. Review manually; detection is not a guarantee.\n`);
-    this.write("Use /shell-result lines, drop <first>[-<last>], replace <line> <text>, mask <literal>, redact, send, or cancel.\n");
-  }
-
-  /** Each edit operates on the staged snapshot, never a later shell command. */
-  share(input: ShareInput = { kind: "share", action: "preview" }, scripted = false): Extract<ConsoleInput, { kind: "chat" | "empty" }> {
+  /** Synchronous local preparation precedes queueing or any model await. */
+  prepareShare(input: ShareInput = { kind: "share", action: "preview" }, scripted = false): ShareInput | Extract<ConsoleInput, { kind: "empty" }> {
+    if (input.approved) return input;
     if (input.action === "cancel") {
-      this.staged = null;
-      this.shareNotice("Shell result preview cancelled; nothing was sent.", "cancelled");
+      this.attachmentPreview.cancel();
+      this.scriptSendAvailable = false;
+      this.shareNotice("Shell result preview cancelled; nothing from that preview was sent. Use /queue remove to withdraw an already-approved queued send.", "cancelled");
       return { kind: "empty" };
     }
     if (input.action === "send") {
-      const stage = this.staged ?? (scripted ? this.stageLatest() : null);
-      if (!stage && input.boundCommandId !== undefined) {
-        this.shareNotice(`Queued send was bound to the preview of command ${input.boundCommandId}, which is no longer staged. Nothing was sent.`, "rebound");
-        return { kind: "empty" };
-      }
-      if (!stage) {
-        this.shareNotice(scripted ? "No local shell result to share." : "Preview the shell result before sending: /shell-result", "missing");
-        return { kind: "empty" };
-      }
-      if (input.boundCommandId !== undefined && stage.capture.commandId !== input.boundCommandId) {
-        this.shareNotice(`Queued send was bound to the preview of command ${input.boundCommandId}, but the staged preview is now command ${stage.capture.commandId}. Nothing was sent; review it and send again.`, "rebound");
-        return { kind: "empty" };
-      }
-      if (!stage.editable.trim()) {
-        this.shareNotice("The staged shell selection is empty. Edit it or cancel; nothing was sent.", "empty");
-        return { kind: "empty" };
-      }
-      const text = this.attachment(stage);
-      this.staged = null;
-      this.shareNotice(`Sending explicit shell result from session ${stage.capture.sessionId}, command ${stage.capture.commandId}.`, "sending");
-      return { kind: "chat", text };
+      if (scripted && !this.attachmentPreview.hasPending && this.scriptSendAvailable) this.attachmentPreview.preview(this.latest);
+      this.scriptSendAvailable = false;
+      const approved = this.attachmentPreview.send();
+      if (typeof approved === "string") { this.shareNotice(approved, "missing"); return { kind: "empty" }; }
+      return Object.freeze({ kind: "share", action: "send", approved });
     }
-    const stage = this.stageLatest();
-    if (!stage) {
-      this.shareNotice("No local shell result to preview.", "missing");
-      return { kind: "empty" };
-    }
-    if (input.action === "preview") { this.showPreview(stage); return { kind: "empty" }; }
+    let preview = this.attachmentPreview.preview(this.latest);
+    if (!preview) { this.shareNotice("No local shell result to preview.", "missing"); return { kind: "empty" }; }
     if (input.action === "lines") {
-      const lines = this.transformed(stage, stage.editable).split("\n");
-      if (this.json) this.write(JSON.stringify({ type: "shell_share_lines", sessionId: stage.capture.sessionId,
-        commandId: stage.capture.commandId, lines: lines.map((value, index) => ({ line: index + 1, text: safeAttachment(value) })) }) + "\n");
-      else this.write(lines.map((value, index) => `${String(index + 1).padStart(3)} | ${safeAttachment(value)}`).join("\n") + "\n");
+      const lines = preview.body.split("\n").map((text, index) => ({ line: index + 1, text }));
+      this.write(this.json ? JSON.stringify({ type: "shell_share_lines", sessionId: preview.capture.sessionId, commandId: preview.capture.commandId, lines }) + "\n" : lines.map(line => `${String(line.line).padStart(3)} | ${line.text}`).join("\n") + "\n");
       return { kind: "empty" };
     }
-    if (input.action === "drop") {
-      const lines = this.transformed(stage, stage.editable).split("\n");
-      const first = input.first ?? 0, last = input.last ?? 0;
-      if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 1 || last < first || last > lines.length) {
-        this.shareNotice(`Invalid line range; choose 1-${lines.length}.`, "invalid"); return { kind: "empty" };
-      }
-      lines.splice(first - 1, last - first + 1);
-      stage.editable = lines.join("\n");
-      stage.removedLines += last - first + 1;
-    } else if (input.action === "replace") {
-      const lines = this.transformed(stage, stage.editable).split("\n");
-      const first = input.first ?? 0;
-      if (/\r|\n/.test(input.value ?? "")) {
-        this.shareNotice("Replace accepts one line of text; use separate commands for multiple lines.", "invalid"); return { kind: "empty" };
-      }
-      if (!Number.isSafeInteger(first) || first < 1 || first > lines.length) {
-        this.shareNotice(`Invalid line number; choose 1-${lines.length}.`, "invalid"); return { kind: "empty" };
-      }
-      lines.splice(first - 1, 1, safeAttachment(input.value ?? ""));
-      stage.editable = lines.join("\n");
-      stage.replacedLines++;
-    } else if (input.action === "mask") {
-      const literal = input.value ?? "";
-      if (!literal || literal.length > 512 || /[\r\n\u0000-\u001f\u007f]/.test(literal)) {
-        this.shareNotice("Mask needs one literal of at most 512 characters and no controls.", "invalid"); return { kind: "empty" };
-      }
-      if (!this.attachment(stage).includes(literal)) {
-        this.shareNotice("That literal is not present in the staged attachment.", "missing"); return { kind: "empty" };
-      }
-      stage.masks.push(literal);
-    } else if (input.action === "redact") {
-      stage.autoRedacted = true;
-      this.shareNotice("Common secret patterns were redacted as an aid; review the exact attachment before sending.");
+    if (input.action !== "preview") {
+      const edited = this.attachmentPreview.editLines(input.action, input.first, input.last, input.value);
+      if (typeof edited === "string") { this.shareNotice(edited, "invalid"); return { kind: "empty" }; }
+      preview = edited;
     }
-    this.showPreview(stage);
+    if (input.action === "redact") this.shareNotice("Common-pattern redaction aid applied; review all text, no guarantee.", "redacted");
+    const attachment = preview.text;
+    if (this.json) this.write(JSON.stringify({ type: "shell_share_preview", sessionId: preview.capture.sessionId, commandId: preview.capture.commandId,
+      omittedBytes: preview.capture.formattingOmittedBytes, sourceOmittedBytes: preview.capture.outputOmittedBytes,
+      bytes: Buffer.byteLength(attachment), attachment, possibleSecrets: scanForSecrets(attachment), next: "/shell-result lines|drop|replace|mask|redact|send|cancel" }) + "\n");
+    else this.write(`Shell result staged from session ${preview.capture.sessionId}, command ${preview.capture.commandId}.\n--- exact model attachment begins ---\n${attachment}\n--- exact model attachment ends ---\nReview all text and metadata. Redaction is an aid, not a guarantee.\nUse /shell-result lines, drop <first>[-<last>], replace <line> <text>, mask <literal>, redact, send, or cancel.\n`);
     return { kind: "empty" };
   }
-  /** Command whose preview is staged for review, if any. */
-  stagedCommandId(): string | null { return this.staged?.capture.commandId ?? null; }
+
+  /** Queue admission is synchronous; rejection keeps the exact edited draft. */
+  restoreShare(input: Extract<ConsoleInput, { kind: "share" }>): boolean {
+    return input.approved ? this.attachmentPreview.restore(input.approved) : false;
+  }
+  /** Execute only the approved snapshot; editing a later preview cannot alter it. */
+  share(input: ShareInput = { kind: "share", action: "preview" }, scripted = false): Extract<ConsoleInput, { kind: "chat" | "empty" }> {
+    const prepared = this.prepareShare(input, scripted);
+    if (prepared.kind === "empty" || !prepared.approved) return { kind: "empty" };
+    this.shareNotice(`Sending explicit shell result from session ${prepared.approved.capture.sessionId}, command ${prepared.approved.capture.commandId}.`, "sending");
+    return { kind: "chat", text: prepared.approved.text };
+  }
   prompt(): string { return `[${this.profile} ${sanitizeServerText(this.session.cwd)}${this.session.state === "lost" ? "; shell lost" : ""}] `; }
-  close(): void { this.latest = null; this.staged = null; this.terminal?.stop(); this.session.close(); }
+  close(): void { this.latest = null; this.attachmentPreview.cancel(); this.scriptSendAvailable = false; this.terminal?.stop(); this.session.close(); }
 }

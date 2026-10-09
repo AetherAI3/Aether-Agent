@@ -121,6 +121,8 @@ export interface TurnSkillOptions {
   capability?: RunCapability;
   explicitSkill?: string;
   noSkills?: boolean;
+  /** Shell attachments must never become durable receipt/export content. */
+  ephemeralAttachment?: boolean;
   /** /skill requires a host-executed route for the resolved policy. */
   requireHostSkillEnforcement?: boolean;
   /** Local console authority, never serialized to Cloud. */
@@ -570,7 +572,7 @@ export async function runTurn(
         ) + "\n",
       );
     }
-    return await runCloudTurn(ctx, brief, lifecycle, boundedSignal.signal, onFrame, onPulsePaint, deadlineAt, deadlineMs);
+    return await runCloudTurn(ctx, brief, lifecycle, boundedSignal.signal, onFrame, onPulsePaint, deadlineAt, deadlineMs, skillOpts.ephemeralAttachment !== true);
   } catch (err) {
     const outcome = finalizeThrownTurn(lifecycle, err, ctx.cfg.baseUrl);
     if (err instanceof ChatTurnError) throw err.outcome ? err : new ChatTurnError(err.message, outcome, err.rendered);
@@ -596,6 +598,7 @@ async function runCloudTurn(
   onPulsePaint?: (frame: string) => void,
   deadlineAt = Date.now() + chatTurnDeadlineMs(),
   deadlineMs = chatTurnDeadlineMs(),
+  persistCustody = true,
 ): Promise<TurnOutcome> {
   beginConnecting(lifecycle);
   const reg = getRegistry();
@@ -720,7 +723,7 @@ async function runCloudTurn(
       // turn id so a reconnect replaying it cannot count the same turn twice,
       // and only from the server's own number — never estimated from tokens.
       if (frame.type === "done") getRegistry().settleTurn(lifecycle.id, frame.uvt);
-      if (frame.type === "custody") appendCustody(frame.custody);
+      if (frame.type === "custody" && persistCustody) appendCustody(frame.custody);
 
       if (frame.type === "tool_call") {
         noteWaitingForTool(lifecycle);
@@ -1543,7 +1546,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         if (await resolveBackend(ctx) === "cloud") {
           if (authRepair.submissionBlocked) {
             process.stdout.write("Account changed or could not be verified. Use /auth new before sending another hosted task.\n");
-            if (!buf.value) buf.insert(text);
+            if (!sharedShellResult && !buf.value) buf.insert(text);
             steerEnd = "retryable";
             return "failed";
           }
@@ -1607,7 +1610,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
               viewerOpen = false;
               break;
           }
-        }, redrawInput, { ...skillOpts, capability: input.capability ?? "coding",
+        }, redrawInput, { ...skillOpts, ephemeralAttachment: sharedShellResult, capability: input.capability ?? "coding",
           ...(input.oneTurnSkill ? { explicitSkill: input.oneTurnSkill.reference, requireHostSkillEnforcement: true } : {}),
           onToolResult: tool => toolResults.push(tool), steer: steerChannel });
         const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
@@ -1678,8 +1681,12 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     const runEntry = async (entry: QueueEntry, authContinuation = false): Promise<"completed" | "aborted" | "failed"> => {
       queue.setRunning(entry);
+      const sessionId = consoleShell.session.id;
       try { return await runQueuedTurn(entry.input, authContinuation); }
-      finally { queue.setRunning(null); }
+      finally {
+        if (consoleShell.session.id !== sessionId || consoleShell.session.state !== "ready") discardQueue("shell session changed");
+        queue.setRunning(null);
+      }
     };
 
     /** Run one entry, then drain pending entries in strict order. A failure
@@ -1705,17 +1712,13 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     /** Queue one input behind the active operation. Returns false (and says
      * why) when it was not queued, so the caller keeps the draft. */
     const enqueueInput = (input: QueueableInput): boolean => {
-      let toQueue = input;
-      if (input.kind === "share" && input.action === "send") {
-        const bound = consoleShell.stagedCommandId();
-        if (!bound) {
-          process.stdout.write("\nNot queued: a queued /shell-result send must bind to a preview you have reviewed, and none is staged. Draft kept.\n");
-          return false;
-        }
-        toQueue = { ...input, boundCommandId: bound };
-      }
+      const toQueue = input;
       const result = queue.enqueue(toQueue);
-      if (!result.ok) { process.stdout.write(`\n${result.message} Draft kept.\n`); return false; }
+      if (!result.ok) {
+        const restored = input.kind !== "share" || consoleShell.restoreShare(input);
+        process.stdout.write(`\n${result.message} ${restored ? "Draft kept." : "A newer shell preview was preserved; the rejected send was not queued."}\n`);
+        return false;
+      }
       const paused = queue.held ? "; queue PAUSED, /queue resume runs it" : "";
       process.stdout.write(`\n⏳ Queued ${result.entry.id} (${entryKind(toQueue)}, ${queue.length} pending${paused}): ${describeEntry(toQueue)}\n`);
       return true;
@@ -1819,7 +1822,7 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         return;
       }
       if (ConsoleShell.isTerminalCommand(raw)) {
-        if (busy) { process.stdout.write("\nWait for the current operation before terminal handoff.\n"); return; }
+        if (busy || queue.length) { process.stdout.write("\nFinish the active operation and resume or clear pending entries before terminal handoff.\n"); return; }
         buf.clear(); // Explicit terminal commands never enter model/history.
         busy = true; terminalOwnsInput = true;
         try { await consoleShell.terminalCommand(raw); }
@@ -1851,7 +1854,11 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         renderHudLine(); repaint();
         return;
       }
-      const input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
+      let input = classifyConsoleInput(queuePrefix ? raw.slice(queuePrefix[0].length) : raw);
+      if (input.kind === "share") {
+        input = consoleShell.prepareShare(input, ctx.flags.json);
+        if (input.kind === "empty") { buf.clear(); repaint(); return; }
+      }
       const commit = (): void => {
         if (input.kind === "chat") { remember(buf.value); buf.commit(buf.value); }
         else buf.clear();
@@ -2573,7 +2580,7 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
           if (frame.type === "tool_call") receipts.push(sanitizeServerText(`tool call ${frame.toolCallId} (${frame.name})`));
           if (frame.type === "tool_result_ack") receipts.push(sanitizeServerText(`tool result ${frame.toolCallId}`));
         }
-      }, undefined, { ...skillOpts, onToolResult: tool => toolResults.push(tool) });
+      }, undefined, { ...skillOpts, ephemeralAttachment: sharedShellResult, onToolResult: tool => toolResults.push(tool) });
       const afterChanges = observedWorkspaceChanges(ctx.flags.cwd);
       continuation.recordTurn(t, toolResults, afterChanges.filter(change => !beforeChanges.includes(change)), outcome.state, !sharedShellResult && !authReplay);
       if (ctx.flags.json) process.stdout.write(turnOutcomeJson(outcome) + "\n");

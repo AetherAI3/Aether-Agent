@@ -129,7 +129,7 @@ Explain the failing test
 /shell-result send
 ```
 
-`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` stages and previews the exact bounded attachment, including the command, captured directory, exit status, and any omitted bytes. Edit it with `drop`, `replace`, `mask`, or `redact`, then choose `/shell-result send` or `/shell-result cancel`. Redaction helps identify common secrets but does not guarantee their removal. A later shell command cannot change the staged attachment. For pipes and JSON sessions, `/shell-result send` is the explicit one-step send form.
+`!commands` run locally with **zero model API calls**. Output streams into the console with an exit code. `/shell-result` stages and previews the exact bounded attachment, including the command, captured directory, exit status, and any omitted bytes. Edit it with `drop`, `replace`, `mask`, or `redact`, then choose `/shell-result send` or `/shell-result cancel`. Redaction helps identify common secrets but does not guarantee their removal. The complete attachment, including metadata, stays within 8 KiB. Send freezes the reviewed bytes, so later edits or commands cannot change a queued attachment. Preview controls remain local while a turn is busy. For pipes and JSON sessions, `/shell-result send` explicitly sends one fresh capture; repeated, cancelled or empty sends cannot silently restage it.
 
 | Platform | Local shell | Interactive programs |
 |---|---|---|

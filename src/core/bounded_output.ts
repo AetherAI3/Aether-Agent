@@ -75,6 +75,10 @@ export class BoundedOutput {
 
   get omittedBytes(): number { return this.parts().omittedBytes; }
 
+  snapshot(): { text: string; totalBytes: number; omittedBytes: number } {
+    return { text: this.render(), totalBytes: this.observedBytes, omittedBytes: this.omittedBytes };
+  }
+
   render(): string {
     const { head, tail, omittedBytes } = this.parts();
     if (!omittedBytes) return Buffer.concat([head, tail]).toString("utf8");
