@@ -155,6 +155,11 @@ Ctrl+R searches this workspace's submitted prompts newest first. Type to narrow
 matches, repeat Ctrl+R for older ones, Enter to insert a match for editing, or
 Escape to restore your draft. `AETHER_NO_HISTORY=1` disables prompt history.
 
+If you decline a model-requested tool call, you can add one short instruction
+for that denial, such as `Use the offline unit suite.` The tool stays blocked;
+the instruction is returned once with its failed result. Enter skips the note,
+and Escape cancels it. [Approval details](COMMANDS.md#aether-config-showgetset--local-settings).
+
 Type `/` at an idle raw terminal prompt to browse described commands. Use
 arrows or Tab to choose, Enter to insert editable command text, then Enter
 again to run it; Escape restores your earlier draft.

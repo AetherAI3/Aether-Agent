@@ -68,7 +68,7 @@ import { ConsoleQueue, describeEntry, entryKind, parseQueueCommand, renderDispos
 import { HostRenderer } from "../ui/host_render.js";
 import type { TaskCommand } from "../core/brain.js";
 import { getRegistry } from "../core/context_registry.js";
-import { prepareToolApproval, requestToolApproval, terminalSafeReview } from "../core/tool_approval.js";
+import { bindToolApprovalVerdict, deniedToolResult, prepareToolApproval, requestToolApproval, terminalSafeReview, type ToolApprovalVerdict } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import {
   TRANSIENT_READ_AUTO_RETRIES,
@@ -859,25 +859,29 @@ export async function runLocalTurn(
   });
   const brain = deps.brain ?? new OllamaBrain({ model, ...(deps.advertisedTools ? { tools: deps.advertisedTools } : {}) });
   const exec = deps.exec ?? new ToolExecutor(cwd);
+  const seenCallIds = new Set<string>();
+  const controller = new AbortController();
   const renderer = new HostRenderer({ poolGb: 5, json: ctx.flags.json });
   const pulse = new ThinkingPulse({
     enabled: Boolean(process.stderr.isTTY) && !ctx.flags.json && process.env["AETHER_NO_ANIM"] !== "1",
     write: (s) => process.stderr.write(errTheme.dim(s)),
     onPaint: deps.onPulsePaint,
   });
-  const approveTool = async (name: string, args: Record<string, unknown>): Promise<boolean> => {
+  const approveTool = async (callId: string, name: string, args: Record<string, unknown>): Promise<ToolApprovalVerdict> => {
     let patchPreview: string | undefined;
     if (name === "patch_file" && exec.previewPatch) {
       const preview = exec.previewPatch(args);
       process.stderr.write(terminalSafeReview(preview.output) + "\n");
-      if (preview.exitCode !== 0) return true;
+      if (preview.exitCode !== 0) return { callId, approved: true };
       patchPreview = preview.output;
     }
     return requestToolApproval({
+      callId,
       name, args: args as Record<string, string | number>,
       permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
       yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
       shellCwd: exec.shellCwd ?? cwd, fileRoot: cwd, confirm: ctx.confirm,
+      ...(ctx.approvalFeedback ? { feedback: () => ctx.approvalFeedback!(controller.signal) } : {}),
       patchPreview,
       onDeny: () => process.stderr.write(`blocked ${name}: confirmation required; use --yes or permissionMode skip\n`),
     });
@@ -893,7 +897,6 @@ export async function runLocalTurn(
   let partialOutput = false;
   let terminalError: ChatTurnError | null = null;
   const timeoutMs = deps.meaningfulProgressTimeoutMs ?? defaultStreamTimeoutMs();
-  const controller = new AbortController();
   const forwardAbort = (): void => controller.abort(signal?.reason ?? new DOMException("turn cancelled", "AbortError"));
   const closeBrain = (): void => {
     try { brain.close(); } catch { /* cleanup cannot replace the primary outcome */ }
@@ -953,6 +956,8 @@ export async function runLocalTurn(
         break;
       }
       if (ev.type === "tool_call") {
+        if (seenCallIds.has(ev.id)) continue; // one result and no second execution for one call ID
+        seenCallIds.add(ev.id);
         noteWaitingForTool(lifecycle);
         renderer.event(ev);
         // Same ordering as hostLoop (commands/code.ts): the skill narrowing is
@@ -1028,13 +1033,13 @@ export async function runLocalTurn(
             continue;
           }
           const approvalContext = exec.shellContext;
-          const approved = await boundedLocalOperation(
-            () => approveTool(ev.name, prepared.args),
+          const approval = bindToolApprovalVerdict(ev.id, await boundedLocalOperation(
+            () => approveTool(ev.id, ev.name, prepared.args),
             controller.signal,
             timeoutMs,
             lastMeaningfulAt,
             timeout,
-          );
+          ));
           const execute = (): Promise<ToolResult> => {
             const remaining = timeoutMs > 0
               ? Math.max(1, timeoutMs - (Date.now() - lastMeaningfulAt))
@@ -1053,8 +1058,8 @@ export async function runLocalTurn(
               timeout,
             );
           };
-          if (!approved) {
-            deliver({ output: `[tool ${ev.name} blocked: permission denied]`, exitCode: 1 }, "approval");
+          if (!approval.approved) {
+            deliver(deniedToolResult(ev.name, approval), "approval");
           } else if (!supersededBySteer()) {
             // Approval can take a while; a steer accepted during the prompt is
             // checked above, so an approved-but-stale write still never runs.
@@ -1328,6 +1333,12 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
       buf.endRecoveryScope();
       approvalOwnsInput = true;
       try { return await ctx.confirm(question); }
+      finally { approvalOwnsInput = false; }
+    },
+    approvalFeedback: async (signal) => {
+      buf.endRecoveryScope();
+      approvalOwnsInput = true;
+      try { return await ctx.approvalFeedback?.(signal) ?? null; }
       finally { approvalOwnsInput = false; }
     },
   };

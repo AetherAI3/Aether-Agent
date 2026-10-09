@@ -21,6 +21,7 @@ import { cmdRun } from "./commands/run.js";
 import { cmdCode } from "./commands/code.js";
 import { promptFileConflict, readPromptFile } from "./commands/prompt_file.js";
 import { errTheme } from "./ui/theme.js";
+import { promptDenialFeedback } from "./ui/approval_feedback.js";
 // VERSION is imported ONCE from the generated version.js — main.ts must never
 // hardcode a duplicate version string that can drift from package.json.
 import { VERSION } from "./version.js";
@@ -179,7 +180,7 @@ export async function main(argv: string[]): Promise<number> {
         });
   const ctx: AppContext = {
     cfg, api, tokens, driveStaffTokens: new FileTokenStore(".drive-staff-session"),
-    flags, confirm,
+    flags, confirm, approvalFeedback: (signal) => promptDenialFeedback({ signal }),
   };
 
   const loginOpts: LoginOpts = {
