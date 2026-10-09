@@ -61,6 +61,32 @@ test("input batched after feedback submission returns to the next owner", async 
   assert.equal(handedBack, "queued draft");
 });
 
+test("split bracketed-paste delimiters keep pasted newlines inside feedback", async () => {
+  const io = lease();
+  const pending = promptDenialFeedback(io);
+  let settled = false;
+  void pending.then(() => { settled = true; });
+  io.input.write("\x1b[20");
+  io.input.write("0~Use offline tests\nsecond line\x1b[20");
+  io.input.write("1~");
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(settled, false, "pasted newline must not submit feedback");
+  io.input.write("\r");
+  assert.equal(await pending, "Use offline tests second line");
+  let handedBack = "";
+  io.input.on("data", chunk => { handedBack += String(chunk); });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(handedBack, "", "pasted text must not leak to the next input owner");
+});
+
+test("a paste opener split after Escape is still recognized", async () => {
+  const io = lease();
+  const pending = promptDenialFeedback(io);
+  io.input.write("\x1b");
+  io.input.write("[200~note\ncontinued\x1b[201~\r");
+  assert.equal(await pending, "note continued");
+});
+
 test("turn cancellation releases the feedback lease without a note", async () => {
   const io = lease();
   const controller = new AbortController();
