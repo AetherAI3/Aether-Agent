@@ -1,12 +1,12 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:f580e0cc5449abd63d6b16b9eec6ebcdc23d42ab296387abba00e6683a3e80cb -->
+<!-- manifest-digest: sha256:d73ec80b1137dba5cf588b3aa1e57ce0e3e67a48476480f8989685829c4db825 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
 
 Global shell flags accepted by the manifest:
 
-`--agent`, `--all`, `--apply`, `--audit`, `--available`, `--ci`, `--cwd`, `--effort`, `--help`, `--interactive`, `--json`, `--junit`, `--license-key`, `--local`, `--model`, `--no-browser`, `--no-log`, `--no-skills`, `--out`, `--password`, `--pool`, `--quiet`, `--repo`, `--resume`, `--scope`, `--skill`, `--test-cmd`, `--token`, `--username`, `--version`, `--with-token`, `--worktree`, `--yes`
+`--agent`, `--all`, `--apply`, `--audit`, `--available`, `--ci`, `--cwd`, `--effort`, `--help`, `--interactive`, `--json`, `--junit`, `--license-key`, `--local`, `--model`, `--no-browser`, `--no-log`, `--no-skills`, `--out`, `--password`, `--pool`, `--prompt-file`, `--quiet`, `--repo`, `--resume`, `--scope`, `--skill`, `--test-cmd`, `--token`, `--username`, `--version`, `--with-token`, `--worktree`, `--yes`
 
 ## Shell commands
 

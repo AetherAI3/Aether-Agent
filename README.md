@@ -52,6 +52,13 @@ Type `/help` for commands or `/models` to choose a model. For a coding task with
 aether agent --test-cmd "npm test" "fix the failing test"
 ```
 
+For a multiline task, save the specification in `task.md` and run
+`aether agent --prompt-file task.md`. You can also pipe UTF-8 text to
+`aether agent --prompt-file -` (for example,
+`cat task.md | aether agent --prompt-file -`). The whole input is one literal
+coding task; see [prompt input rules](COMMANDS.md#aether-code-task--autonomous-coding-agent)
+for the size limit and flag conflicts.
+
 A completed check records its exit code. Changing the repository makes that verification stale until you run it again.
 
 The npm CLI is published as **v4.20.0**. Run `aether --version` to check the

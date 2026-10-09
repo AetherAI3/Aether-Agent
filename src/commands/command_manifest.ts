@@ -306,7 +306,7 @@ export const COMMAND_PARSE_OPTIONS = manifestParseOptions();
 export function renderManifestHelp(surface: "shell" | "slash", target = ""): string {
   const commands = projectLegacyCommandSpecs(surface);
   if (surface === "shell") {
-    return renderRegistryHelp({
+    const help = renderRegistryHelp({
       title: "Aether Agent - local-first coding agent",
       intro: "Authenticated turns use the Aether cloud brain; signed-out turns use local Ollama.",
       usage: ["aether", 'aether "<prompt>"', "aether help [command]", "aether <command> --help"],
@@ -322,6 +322,11 @@ export function renderManifestHelp(surface: "shell" | "slash", target = ""): str
         "Unknown command text remains a bare prompt.",
       ],
     });
+    if (target === "agent" || target === "code") {
+      const detail = findManifestCommand("shell", target)?.detailedHelp.split("\n").slice(1).join("\n");
+      return detail ? help + "\n" + detail + "\n" : help;
+    }
+    return help;
   }
   return renderRegistryHelp({
     title: "Aether Agent slash commands",

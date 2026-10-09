@@ -60,6 +60,7 @@ export const GLOBAL_FLAGS: FlagTable = {
   pool: { type: "string" },
   effort: { type: "string" },
   "test-cmd": { type: "string" },
+  "prompt-file": { type: "string" },
   quiet: { type: "boolean", default: false },
   interactive: { type: "boolean", default: false },
   "no-log": { type: "boolean", default: false },
