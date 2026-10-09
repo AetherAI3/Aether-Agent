@@ -30,6 +30,9 @@ claim a GitHub-hosted provenance attestation from a self-hosted publish.
 
 The normal `release.yml` route retains its protected hosted provenance path;
 the manual exception does not change that standing workflow.
+PR #336 keeps exact-source, audit, parity, and CodeQL evidence in the job logs
+while Actions artifact storage is at quota. Its upload exception is restricted
+to that same-repository release branch; ordinary CI runs still require uploads.
 
 ## Existing commands carried without a new announcement
 
