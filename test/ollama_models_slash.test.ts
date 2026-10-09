@@ -161,7 +161,7 @@ test("empty, unreachable, malformed, and disappeared models keep the old choice 
   } finally { globalThis.fetch = oldFetch; rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a failed local picker leaves type-ahead draft unsent", async () => {
+test("a failed local picker yields input ownership and a later draft needs explicit submit", async () => {
   const root = mkdtempSync(join(tmpdir(), "aether-ollama-draft-"));
   const ctx = localContext(root);
   const oldFetch = globalThis.fetch;
@@ -186,14 +186,14 @@ test("a failed local picker leaves type-ahead draft unsent", async () => {
     globalThis.fetch = (async () => new Promise<Response>((_resolve, reject) => { rejectTags = reject; })) as typeof fetch;
     running = repl(ctx, { noSkills: true });
     await until(() => observed.includes("\x1b[?2004h"));
-    process.stdin.emit("data", Buffer.from("/models\r"));
+    process.stdin.emit("data", Buffer.from("/models\r\r"));
     await until(() => rejectTags !== null);
     process.stdin.emit("data", Buffer.from("unsent draft"));
     rejectTags!(new Error("offline"));
     await until(() => observed.includes("Cannot reach Ollama installed models"));
-    assert.match(observed.slice(observed.lastIndexOf("Cannot reach Ollama installed models")), /draft/);
     assert.equal(ctx.flags.model, undefined);
     assert.equal(modelBody, "", "discovery failure did not submit the draft");
+    process.stdin.emit("data", Buffer.from("unsent draft")); // composer owns input again after the modal exits
     globalThis.fetch = (async (_url, init) => {
       modelBody = String(init?.body ?? "");
       return Response.json({ choices: [{ message: { content: "done" } }] });
@@ -202,7 +202,7 @@ test("a failed local picker leaves type-ahead draft unsent", async () => {
     await until(() => modelBody.length > 0);
     assert.match(modelBody, /unsent draft/);
     await until(() => observed.includes("done"));
-    process.stdin.emit("data", Buffer.from("/exit\r"));
+    process.stdin.emit("data", Buffer.from("/exit\r\r"));
     assert.equal(await running, 0);
     running = null;
   } finally {

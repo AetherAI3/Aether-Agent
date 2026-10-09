@@ -169,10 +169,10 @@ test("raw TTY queues shell while a model turn is busy, preserves the draft and n
     await until(() => output.includes('"state":"cancelled"'));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(existsSync(join(root, "never-replayed")), false);
-    submit("/shell-reset");
+    submit("/shell-reset"); process.stdin.emit("data", Buffer.from("\r"));
     await until(() => output.includes('"type":"shell_reset"'));
     await new Promise(resolve => setImmediate(resolve));
-    submit("/exit");
+    submit("/exit"); process.stdin.emit("data", Buffer.from("\r"));
     assert.equal(await Promise.race([pending, new Promise((_, reject) => setTimeout(() => reject(new Error("TTY exit timed out")), 1000))]), 0); pending = null;
   } finally {
     (release as (() => void) | null)?.();

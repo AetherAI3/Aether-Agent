@@ -66,14 +66,26 @@ export class InputBuffer {
     this.insertText("\n", false);
   }
   /** Completion replaces the current draft as one undoable edit. */
-  replace(s: string): void {
-    if (s === this.value) return;
+  replace(s: string, cursor: number = [...s].length): void {
+    if (s === this.value) {
+      this.cursor = Math.max(0, Math.min(cursor, this.chars.length));
+      this.breakTyping();
+      return;
+    }
     this.saveEdit();
     this.chars = [...s];
-    this.cursor = this.chars.length;
+    this.cursor = Math.max(0, Math.min(cursor, this.chars.length));
     this.histIdx = -1;
     this.draft = null;
     this.breakTyping();
+  }
+  /** Restore the exact draft/caret from before a temporary input overlay. */
+  restoreDraft(value: string, cursor: number): void {
+    this.chars = [...value];
+    this.cursor = Math.max(0, Math.min(cursor, this.chars.length));
+    this.histIdx = -1;
+    this.draft = null;
+    this.endRecoveryScope();
   }
   /** A bracketed-paste block: inserted verbatim (newlines kept) at the cursor. */
   paste(block: string): void {

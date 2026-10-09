@@ -26,7 +26,7 @@ import type { CatalogItem, CatalogResponse } from "../types.js";
 import { MODELS_PATH } from "../core/transport.js";
 import { fetchTrail } from "../core/audit.js";
 import { theme } from "../ui/theme.js";
-import { suggestManifestCommand } from "./command_manifest.js";
+import { commandInvocationStatus, findManifestCommand, suggestManifestCommand } from "./command_manifest.js";
 import { printSlashHelp } from "./slash_help.js";
 import { EFFORT_TIERS, normalizeEffort, renderEffortSlider, renderCodeProArt } from "../ui/effort.js";
 import { saveConfig } from "../core/config.js";
@@ -178,6 +178,13 @@ export async function handleSlash(
 ): Promise<SlashResult> {
   const { cmd, arg } = splitSlashCommand(line);
 
+  const manifestEntry = findManifestCommand("slash", cmd);
+  if (manifestEntry?.sessionScope === "managed-agent"
+      && commandInvocationStatus(manifestEntry, "coding") === "unsupported") {
+    out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
+    return { exit: false };
+  }
+
   switch (cmd) {
     case "terminal":
     case "terminal-attach":
@@ -203,9 +210,7 @@ export async function handleSlash(
       break;
     case "browser":
     case "ats":
-      // These operations belong to the managed chat hook/session lifecycle.
-      // The coding REPL only gives a handoff, and never replays the arguments.
-      out.write(`/${cmd} is available in a managed agent chat. Open one with aether agent chat <id>, then use /${cmd}.\n`);
+      // Reached only if the shared manifest scope gate above changes.
       break;
     case "models": {
       const r = await showPicker(ctx, out, "model", signal);

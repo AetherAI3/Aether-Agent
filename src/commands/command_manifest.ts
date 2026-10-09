@@ -274,6 +274,18 @@ export function findManifestCommand(
   const normalized = surface === "slash" ? name.trim().toLowerCase().replace(/^\//, "") : name;
   return entries.find((entry) => entry.surface === surface && (entry.name === normalized || entry.aliases.includes(normalized)));
 }
+
+/** Static invocation truth only; a handler with no capability requirements can
+ * be invoked even when its result depends on session state. No network probe. */
+export function commandInvocationStatus(
+  entry: CommandManifestEntry, session: "coding" | "managed-agent",
+): "supported" | "unsupported" | "runtime-dependent" {
+  if (entry.sessionScope === "managed-agent" && session !== "managed-agent") return "unsupported";
+  if (entry.availability.state === "available") return "supported";
+  if (entry.availability.state === "unavailable") return "unsupported";
+  if (entry.availability.capabilityRequirements.length === 0) return "supported";
+  return "runtime-dependent";
+}
 export function manifestCommandNames(surface: CommandSurface, entries: readonly CommandManifestEntry[] = COMMAND_MANIFEST): string[] {
   return entries.filter((entry) => entry.surface === surface).flatMap((entry) => [entry.name, ...entry.aliases]);
 }
@@ -336,7 +348,7 @@ export function renderManifestHelp(surface: "shell" | "slash", target = ""): str
     sections: [...new Set(commands.map((command) => command.section))],
     target: target.trim().replace(/^\//, ""),
     footer: [
-      "/help <command> for detail · /help <word> searches · Tab completes slash commands.",
+      "/help <command> for detail · /help <word> searches · leading / opens a described picker in raw TTY.",
       "/model or /agent with no argument opens the picker.",
     ],
   });
