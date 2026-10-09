@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadHistory, appendHistory } from "../src/core/history_store.js";
+import { loadHistory, appendHistory, historyPath } from "../src/core/history_store.js";
 
 const fresh = (): string => join(mkdtempSync(join(tmpdir(), "aether-hist-")), "history");
 
@@ -14,6 +14,24 @@ test("round-trips entries oldest-first and survives a missing file", () => {
   appendHistory("second", p);
   assert.deepEqual(loadHistory(p), ["first", "second"]);
   rmSync(join(p, ".."), { recursive: true, force: true });
+});
+
+test("workspace paths load separate prompt histories", () => {
+  const first = mkdtempSync(join(tmpdir(), "aether-hist-workspace-"));
+  const second = mkdtempSync(join(tmpdir(), "aether-hist-workspace-"));
+  try {
+    const firstPath = historyPath(first);
+    const secondPath = historyPath(second);
+    assert.notEqual(firstPath, secondPath);
+    appendHistory("first workspace only", firstPath);
+    assert.deepEqual(loadHistory(firstPath), ["first workspace only"]);
+    assert.deepEqual(loadHistory(secondPath), []);
+  } finally {
+    rmSync(historyPath(first), { force: true });
+    rmSync(historyPath(second), { force: true });
+    rmSync(first, { recursive: true, force: true });
+    rmSync(second, { recursive: true, force: true });
+  }
 });
 
 test("consecutive duplicates collapse; blanks are never stored", () => {

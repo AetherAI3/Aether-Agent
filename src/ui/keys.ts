@@ -8,6 +8,7 @@ export type Key =
   | { kind: "newline" }
   | { kind: "undo" }
   | { kind: "yank" }
+  | { kind: "history-search" }
   | { kind: "backspace" }
   | { kind: "interrupt" }
   | { kind: "eof" }
@@ -85,6 +86,8 @@ export function decodeKey(seq: string, lfSubmits = false): Key {
       return { kind: "undo" }; // ctrl-_
     case "\x19":
       return { kind: "yank" }; // ctrl-y
+    case "\x12":
+      return { kind: "history-search" }; // ctrl-r
     case "\x7f":
     case "\b":
       return { kind: "backspace" };

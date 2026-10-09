@@ -151,6 +151,10 @@ undoes recent edits, and Ctrl+Y restores killed text. The single-row input
 shows newlines as `⏎` with a line count. If your terminal sends LF for Enter,
 set `aether config set lfSubmits true` to keep LF as submit. [Composer details](COMMANDS.md#aether--interactive-repl).
 
+Ctrl+R searches this workspace's submitted prompts newest first. Type to narrow
+matches, repeat Ctrl+R for older ones, Enter to insert a match for editing, or
+Escape to restore your draft. `AETHER_NO_HISTORY=1` disables prompt history.
+
 Type `/` at an idle raw terminal prompt to browse described commands. Use
 arrows or Tab to choose, Enter to insert editable command text, then Enter
 again to run it; Escape restores your earlier draft.

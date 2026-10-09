@@ -38,6 +38,10 @@ import { promptPrefix } from "../ui/prompt.js";
 import { InputBuffer } from "../ui/input_line.js";
 import { renderInputView } from "../ui/input_render.js";
 import { decodeKey, splitKeys } from "../ui/keys.js";
+import {
+  backspaceHistoryQuery, olderHistoryMatch, openHistorySearch, renderHistorySearch,
+  selectedHistoryMatch, typeHistoryQuery, type HistorySearchState,
+} from "../ui/history_search.js";
 import { ThinkingPulse } from "../ui/thinking.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
 import { ModelOutputBudget } from "../core/model_output_budget.js";
@@ -1314,6 +1318,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let terminalOwnsInput = false;
   let approvalOwnsInput = false;
   let picker: SlashPickerState | null = null;
+  let historySearch: HistorySearchState | null = null;
+  let searchPriorPicker: SlashPickerState | null = null;
   let pickerPanelLines = 0;
   let pickerSuppressed = false;
   const composerCtx: AppContext = {
@@ -1348,8 +1354,10 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     if (pickerPanelLines) process.stdout.write(viewerClearSequence(pickerPanelLines));
     pickerPanelLines = 0;
     if (!buf.value) pickerSuppressed = false;
-    if (picker) {
-      const lines = renderSlashPicker(picker, buf.value, process.stdout.columns ?? 80, process.stdout.rows ?? 24);
+    if (picker || historySearch) {
+      const lines = historySearch
+        ? renderHistorySearch(historySearch, process.stdout.columns ?? 80, process.stdout.rows ?? 24)
+        : renderSlashPicker(picker!, buf.value, process.stdout.columns ?? 80, process.stdout.rows ?? 24);
       if (lines.length) {
         process.stdout.write("\r\x1b[2K" + lines.join("\n") + "\n");
         pickerPanelLines = lines.length;
@@ -1421,7 +1429,15 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
   let viewerLastLines = 0;
   return await new Promise<number>((resolve) => {
     const onResize = (): void => {
-      if ((process.stdout.rows ?? 24) < 3) picker = null;
+      if ((process.stdout.rows ?? 24) < 3) {
+        picker = null;
+        searchPriorPicker = null;
+      }
+      if ((process.stdout.rows ?? 24) < 2 && historySearch) {
+        buf.restoreDraft(historySearch.priorValue, historySearch.priorCursor);
+        historySearch = null;
+        searchPriorPicker = null;
+      }
       repaint();
     };
     const cleanup = (): void => {
@@ -1725,6 +1741,8 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
 
     const onCtrlC = (): void => {
       picker = null;
+      historySearch = null;
+      searchPriorPicker = null;
       const now = Date.now();
       const armed = now - ctrlCArmedAt <= CTRL_C_WINDOW_MS && ctrlCArmedAt > 0;
       const active = turnAbort ?? slashAbort;
@@ -2036,10 +2054,9 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
     };
 
     // Input-owner precedence: PTY/approval/setup are gated in onData; paste
-    // owns literal bytes; while idle, the slash picker owns Enter/Escape and
-    // selection keys before the workflow viewer or history. Dismissal returns
-    // those keys to their prior owners. Acceptance edits only the composer;
-    // a second, explicit Enter invokes the command.
+    // owns literal bytes. Idle search owns query/Enter/Escape before the slash
+    // picker, which in turn owns selection keys before viewer/history. Both
+    // overlays only edit the composer; a later Enter submits a draft.
     const dismissPicker = (restore: boolean): void => {
       if (!picker) return;
       if (restore) buf.restoreDraft(picker.priorValue, picker.priorCursor);
@@ -2075,6 +2092,50 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         return;
       }
       const k = decodeKey(seq, ctx.cfg.lfSubmits);
+      if (k.kind === "history-search") {
+        if (busy || viewerOpen || (process.stdout.rows ?? 24) < 2) return;
+        if (historySearch) historySearch = olderHistoryMatch(historySearch);
+        else {
+          searchPriorPicker = picker;
+          picker = null;
+          buf.endRecoveryScope();
+          const enabled = historyEnabled();
+          historySearch = openHistorySearch(enabled ? buf.historyEntries() : [], buf.value, buf.pos, !enabled);
+        }
+        repaint();
+        return;
+      }
+      if (historySearch) {
+        switch (k.kind) {
+          case "char": historySearch = typeHistoryQuery(historySearch, k.value); repaint(); return;
+          case "backspace": historySearch = backspaceHistoryQuery(historySearch); repaint(); return;
+          case "submit": {
+            const match = selectedHistoryMatch(historySearch);
+            if (match === null) { repaint(); return; }
+            historySearch = null;
+            searchPriorPicker = null;
+            picker = null;
+            buf.replace(match);
+            repaint();
+            return;
+          }
+          case "escape":
+            buf.restoreDraft(historySearch.priorValue, historySearch.priorCursor);
+            historySearch = null;
+            picker = searchPriorPicker;
+            searchPriorPicker = null;
+            repaint();
+            return;
+          case "paste-start":
+            buf.restoreDraft(historySearch.priorValue, historySearch.priorCursor);
+            historySearch = null;
+            searchPriorPicker = null;
+            break; // paste is owned by the composer below
+          case "clear-screen":
+            process.stdout.write("\x1b[2J\x1b[H"); repaint(); return;
+          default: return;
+        }
+      }
       switch (k.kind) {
         case "paste-start":
           picker = null;

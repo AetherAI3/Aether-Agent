@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { repl } from "../src/commands/chat.js";
 import { ApiClient } from "../src/core/transport.js";
 import { DEFAULT_CONFIG } from "../src/core/config.js";
-import { historyPath } from "../src/core/history_store.js";
+import { appendHistory, historyPath } from "../src/core/history_store.js";
 import type { AppContext } from "../src/core/context.js";
 import type { TokenStore } from "../src/core/auth.js";
 
@@ -16,7 +16,7 @@ async function withComposer(lfSubmits: boolean, run: (h: {
   until: (text: string) => Promise<void>;
   modelCalls: () => number;
   resize: (cols: number, rows: number) => void;
-}) => Promise<void>): Promise<void> {
+}) => Promise<void>, options: { history?: string[]; noHistory?: boolean } = {}): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "aether-composer-"));
   const oldFetch = globalThis.fetch;
   const oldWrite = process.stdout.write;
@@ -25,6 +25,7 @@ async function withComposer(lfSubmits: boolean, run: (h: {
   const raw = Object.getOwnPropertyDescriptor(process.stdin, "setRawMode");
   const columns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
   const rows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+  const oldNoHistory = process.env["AETHER_NO_HISTORY"];
   let output = "";
   let modelCalls = 0;
   let pending: Promise<number> | null = null;
@@ -43,6 +44,9 @@ async function withComposer(lfSubmits: boolean, run: (h: {
     }
   };
   try {
+    for (const entry of options.history ?? []) appendHistory(entry, historyPath(root));
+    if (options.noHistory) process.env["AETHER_NO_HISTORY"] = "1";
+    else delete process.env["AETHER_NO_HISTORY"];
     Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
     Object.defineProperty(process.stdin, "setRawMode", { value: () => process.stdin, configurable: true });
     Object.defineProperty(process.stdout, "columns", { value: 80, configurable: true });
@@ -67,6 +71,8 @@ async function withComposer(lfSubmits: boolean, run: (h: {
     pending = null;
     assert.equal(modelCalls, 0);
   } finally {
+    if (oldNoHistory === undefined) delete process.env["AETHER_NO_HISTORY"];
+    else process.env["AETHER_NO_HISTORY"] = oldNoHistory;
     if (pending) {
       key("\x03\x03\x04");
       await Promise.race([pending.catch(() => {}), new Promise(resolve => setTimeout(resolve, 1_000))]);
@@ -163,4 +169,50 @@ test("picker selection, Escape, history, paste and resize retain their input own
     key("\r");
     await until("unknown command: /mo");
   });
+});
+
+test("Ctrl+R searches workspace prompts, restores drafts, and switches cleanly with the slash picker", async () => {
+  await withComposer(false, async ({ key, output, modelCalls, resize }) => {
+    resize(160, 24);
+    key("draft");
+    key("\x1b[D\x1b[D"); // caret after dra
+    key("\x12");
+    assert.match(output().slice(-500), /Ctrl\+R.*newest/);
+    key("match");
+    assert.match(output().slice(-500), /1\/2\n> match newer/);
+    key("\x12");
+    assert.match(output().slice(-500), /2\/2\n> match older/);
+    key("\x1b");
+    key("X");
+    assert.match(output().slice(output().lastIndexOf("\r\x1b[2K")), /draXft/);
+
+    key("\x12match\r"); // acceptance edits the composer, not the model
+    assert.match(output().slice(output().lastIndexOf("\r\x1b[2K")), /match newer/);
+    assert.equal(modelCalls(), 0);
+    key("\x1f"); // only the accepted edit is undone, not older draft edits
+    assert.match(output().slice(output().lastIndexOf("\r\x1b[2K")), /draXft/);
+
+    key("\x05\x15/mo");
+    assert.match(output().slice(-500), /> \/model/);
+    key("\x12"); // search takes ownership from picker
+    assert.match(output().slice(-500), /Ctrl\+R/);
+    key("\x1b"); // restore /mo and picker selection
+    assert.match(output().slice(-500), /> \/model/);
+    key("\x12/btw\r"); // accept a slash prompt without executing it
+    assert.match(output().slice(output().lastIndexOf("\r\x1b[2K")), /\/btw archived/);
+    key("\t"); // picker can be opened again on accepted slash text
+    assert.match(output().slice(-500), /> \/btw/);
+    key("\x1b");
+    assert.equal(modelCalls(), 0);
+  }, { history: ["match older", "/btw archived", "match newer"] });
+});
+
+test("Ctrl+R honors AETHER_NO_HISTORY and keeps disabled entries unseen", async () => {
+  await withComposer(false, async ({ key, output, modelCalls }) => {
+    key("\x12");
+    assert.match(output().slice(-500), /history disabled/);
+    assert.doesNotMatch(output().slice(-500), /stored secret/);
+    key("\x1b");
+    assert.equal(modelCalls(), 0);
+  }, { history: ["stored secret"], noHistory: true });
 });
