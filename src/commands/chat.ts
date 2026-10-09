@@ -490,6 +490,8 @@ export async function runTurn(
     const opened = openRunSession({
       projectRoot: ctx.flags.cwd,
       prompt,
+      selectedPins: getRegistry().selectedPins(),
+      selectedFileTransport: backend === "cloud" ? "unsupported" : "host",
       ...(skillOpts.capability ? { capability: skillOpts.capability } : {}),
       allowIncompleteInstructionDiscovery: backend === "cloud",
       ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
@@ -528,6 +530,7 @@ export async function runTurn(
       lastTurnHeader = null;
     }
     const brief = run.brief(prompt);
+    getRegistry().lastAdmitted = run.admittedContext();
 
     if (backend === "local") {
       // Aether meters nothing on a local brain, so the session is unmetered
@@ -1968,7 +1971,10 @@ export async function repl(ctx: AppContext, skillOpts: TurnSkillOptions = {}): P
         if (setupOwnsInput) buf.endRecoveryScope();
         if (setupOwnsInput) process.stdout.write("\x1b[?2004l");
         try {
-          const res = await handleSlash(composerCtx, t, process.stdout, slashAbort.signal);
+          const res = await handleSlash(composerCtx, t, process.stdout, slashAbort.signal, {
+            ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
+            ...(skillOpts.noSkills ? { noSkills: true } : {}),
+          });
           if (res.exit) {
             discardQueue("session ended"); // entries held after a failure are listed, not lost silently
             cleanup();
@@ -2403,7 +2409,10 @@ export async function replLines(ctx: AppContext, skillOpts: TurnSkillOptions = {
     if (t.startsWith("/")) {
       inflight = new AbortController();
       try {
-        const res = await handleSlash(ctx, t, process.stdout, inflight.signal);
+        const res = await handleSlash(ctx, t, process.stdout, inflight.signal, {
+          ...(skillOpts.explicitSkill ? { explicitSkill: skillOpts.explicitSkill } : {}),
+          ...(skillOpts.noSkills ? { noSkills: true } : {}),
+        });
         if (res.exit) break;
         if (res.restart) {
           applyRestart(ctx.flags, res.restart);

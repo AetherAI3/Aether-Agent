@@ -4525,6 +4525,46 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:context",
+    "surface": "slash",
+    "name": "context",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "[next <task> | content <path>]",
+    "summary": "inspect admitted and next-task selected context",
+    "detailedHelp": "/context [next <task> | content <project-relative path>]\nShows the last admitted run's rules, skills, pinned files, digests, bytes and omissions. /context next <task> previews the next task without sending it. /context content <path> explicitly previews admitted local file content (up to 4096 bytes).",
+    "section": "Context & Limits",
+    "hidden": false,
+    "permissionClass": "read-only",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.context",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:context",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "context",
+      "usage": "/context [next <task> | content <path>]",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "changed",
+      "note": "Adds an admitted-context inspector and an unsent next-task preview."
+    }
+  },
+  {
     "key": "slash:snapshot",
     "surface": "slash",
     "name": "snapshot",

@@ -27,10 +27,11 @@ aether                                  # no args = interactive REPL
 `help`, `auth`, `models`, `model`, `switch`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`,
 `voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`,
 `code-review`, `writing-skills`, `writing-plans`, `shell-profile`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`,
-`btw`, `pin`, `drop`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`, `workflow`,
-`workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`, `broadcast`,
-`gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`, `frame`,
-`re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`, `ats`
+`btw`, `pin`, `drop`, `context`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`,
+`workflow`, `workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`,
+`broadcast`, `gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`,
+`frame`, `re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`,
+`ats`
 <!-- SLASH-COMMANDS:END -->
 
 ## Runtime capability requirements
@@ -618,9 +619,12 @@ Each starts an agent loop in the REPL.
 
 | Command | Action |
 |---|---|
-| `/pin <path> [reason]` | Force a file into persistent context across loops. |
+| `/pin <path> [reason]` | Select a file for bounded, fresh inclusion at coding-turn admission. |
 | `/pin list` | List pinned files. |
-| `/drop <path>` | Evict a file from context. |
+| `/drop <path>` | Stop automatic inclusion on future turns; explicit file-reading tools remain available. |
+| `/context` | Inspect the last admitted turn's rules, skills, file digests, bytes, bindings, and omissions without showing file bodies. |
+| `/context next <task>` | Preview the context for a draft task in the current workspace without sending it. |
+| `/context content <path>` | Explicitly preview up to 4096 bytes of a file included in the last admitted local turn. |
 | `/snapshot` | Save session state to disk. |
 | `/snapshot resume [id]` | Reload a snapshot (cloud first, else local; lists with no id). |
 | `/snapshot list` | List saved snapshots. |
@@ -628,6 +632,15 @@ Each starts an agent loop in the REPL.
 | `/audit-receipt [n]` | Verified log of tool calls + UVT (local custody + server). |
 | `/rollback` | Discard uncommitted changes to tracked files (git-backed). Restores from the index, so files with staged changes come back to their staged state, not to the last commit. Untracked files are never touched. |
 | `/logs-view`, `/logs` | Interactive session log browser. |
+
+Pins are bound by project-relative path to the checkout where the task runs. The
+host reads each file once at admission and includes complete UTF-8 files only,
+up to 64 KiB per file, 32 pins, and the 512 KiB aggregate composed-context
+ceiling shared with rules and skills. Missing, binary, unsafe, and over-budget
+files are reported as omissions. `/context next` is a new preview; `/context`
+shows the frozen last admission, so a later file edit does not rewrite its
+digest. Server-executed cloud chat reports selected-file admission as
+unsupported because the local host cannot inspect its server-side context.
 
 ### Goals & workflows
 
