@@ -1,7 +1,8 @@
 # Aether Agent v4.21.0 — clearer coding workflow
 
-**Source candidate — October 9, 2026.** npm publication is pending exact-source
-verification and the operator-approved self-hosted release exception.
+**October 9, 2026.** This is the v4.21.0 release source. Check the
+[npm package](https://www.npmjs.com/package/aether-agents) for current
+availability and the operator packet for its qualification record.
 
 ## Coding console
 
@@ -18,12 +19,13 @@ verification and the operator-approved self-hosted release exception.
 ## Install and qualification
 
 `npm install -g aether-agents@latest --ignore-scripts` installs the current
-published CLI. The source candidate declares v4.21.0, and its tag and package
-are not yet published. The PyPI launcher remains a separate release step.
+published CLI. This source declares v4.21.0; the registry and immutable tag
+determine whether its archive is available. The PyPI launcher remains a
+separate release step.
 
-The three registered self-hosted runners are available for release checks.
-GitHub artifact storage is at quota and the current main CI has additional
-failing checks; the v4.21.0 operator packet records what is actually verified.
+The release qualification uses the self-hosted runner pool. GitHub artifact
+storage limits require a documented log-evidence exception; the v4.21.0
+operator packet records what was actually verified.
 This release does not extend ATS trading or Cloud service claims.
 
 ---

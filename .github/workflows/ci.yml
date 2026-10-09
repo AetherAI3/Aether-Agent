@@ -18,6 +18,7 @@ permissions:
 # require uploaded artifacts.
 env:
   AETHER_LOG_ONLY_RELEASE_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 336 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/release-v4.21.0' }}
+  AETHER_ATSV2_UNAVAILABLE_RELEASE_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 336 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/release-v4.21.0' }}
 
 concurrency:
   # A stalled hosted run must not hold the fallback runner queue.
@@ -96,6 +97,7 @@ jobs:
         run: python test/fixtures/managed_tool_host_verify.py
 
       - name: Check out pinned ATSv2 execution wire
+        if: ${{ env.AETHER_ATSV2_UNAVAILABLE_RELEASE_PR != 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AetherAI3/ATSv2
@@ -104,12 +106,21 @@ jobs:
           persist-credentials: false
 
       - name: Install ATSv2 parity test runner
+        if: ${{ env.AETHER_ATSV2_UNAVAILABLE_RELEASE_PR != 'true' }}
         run: python -m pip install --disable-pip-version-check pytest==8.3.5
 
       - name: Verify exact Agent and ATSv2 execution wire
+        if: ${{ env.AETHER_ATSV2_UNAVAILABLE_RELEASE_PR != 'true' }}
         env:
           AETHER_EXPECTED_AGENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/verify-ats-execution-parity.mjs --atsv2 _atsv2 --report ats-execution-parity.json
+
+      - name: Record unavailable private ATSv2 parity for PR 336
+        if: ${{ env.AETHER_ATSV2_UNAVAILABLE_RELEASE_PR == 'true' }}
+        env:
+          AETHER_EXPECTED_AGENT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node -e "const fs=require('node:fs');const record={schema:'aether.atsv2-parity-unavailable/v1',status:'unavailable',source_sha:process.env.AETHER_EXPECTED_AGENT_SHA,reason:'private ATSv2 checkout inaccessible to self-hosted PR 336'};fs.writeFileSync('ats-execution-parity.json',JSON.stringify(record)+'\n');console.warn(JSON.stringify(record))"
 
       - name: Upload ATS execution parity evidence
         id: parity_upload

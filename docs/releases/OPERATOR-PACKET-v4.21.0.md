@@ -33,6 +33,10 @@ the manual exception does not change that standing workflow.
 PR #336 keeps exact-source, audit, parity, and CodeQL evidence in the job logs
 while Actions artifact storage is at quota. Its upload exception is restricted
 to that same-repository release branch; ordinary CI runs still require uploads.
+The private ATSv2 checkout is inaccessible to the self-hosted runners, so PR
+#336 records cross-repository execution parity as unavailable. Independent ATS
+contract fixtures remain required; the missing parity must not be called a
+pass or used to claim live ATS runtime compatibility.
 
 ## Existing commands carried without a new announcement
 
