@@ -237,6 +237,26 @@ test("TTY: a failed turn pauses pending entries until /queue resume; nothing sil
   });
 });
 
+test("/skill refuses busy and queued admission before either can become chat prose", async () => {
+  await withConsole(async ({ bodies, output, submit, type, until, answer, waitForCall }) => {
+    submit("ordinary running task");
+    await waitForCall(1);
+    submit("/skill user/demo /clear !literal");
+    await until(() => output().includes("/skill runs only from the idle composer and cannot be queued"), "busy skill refusal");
+    type("\x15"); // refused draft remains editable
+    submit("/queue /skill user/demo task");
+    await until(() => (output().match(/cannot be queued/g) ?? []).length >= 2, "queued skill refusal");
+    assert.equal(bodies.length, 1);
+    assert.doesNotMatch(bodies[0]!, /user\/demo|!literal/);
+    type("\x15");
+    await answer(1);
+    await until(() => output().includes('"type":"turn_outcome"'), "normal turn finished");
+    type("\x1b[200~/skill user/demo task\x1b[201~\r");
+    await until(() => output().includes("/skill is unavailable while --no-skills is active"), "disabled skills refused");
+    assert.equal(bodies.length, 1);
+  });
+});
+
 test("TTY: cancelling a streaming turn discards and lists pending entries; none run", async () => {
   await withConsole(async ({ root, bodies, output, submit, until, waitForCall }) => {
     submit("long task");
@@ -306,11 +326,12 @@ test("line mode has no pending queue: management explains itself and /queue <tas
   const input = new PassThrough();
   try {
     const session = replLines(context(root), { noSkills: true }, new ConsoleShell(root, text => { output += text; }, true), input);
-    input.end(["/queue list", "/queue edit q1 something", "/queue clear", touch("ran.txt").replace("!", "/queue !"), ""].join("\n"));
+    input.end(["/queue list", "/queue edit q1 something", "/queue clear", "/skill user/demo literal", touch("ran.txt").replace("!", "/queue !"), ""].join("\n"));
     assert.equal(await session, 0);
     assert.equal((output.match(/Line mode has no pending queue/g) ?? []).length, 3);
     assert.equal(existsSync(join(root, "ran.txt")), true, "/queue <shell> runs as the next line");
     assert.equal(modelCalls, 0);
+    assert.match(output, /\/skill requires the idle interactive composer/);
     assert.doesNotMatch(output, /\x1b\[/, "line mode does not render the ANSI slash picker");
   } finally {
     globalThis.fetch = oldFetch; process.stdout.write = oldWrite;

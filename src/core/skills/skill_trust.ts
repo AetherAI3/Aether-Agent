@@ -5,9 +5,10 @@
 // moves the skill to "changed · review required"; nothing implicit re-trusts it.
 // Built-ins are trusted via the signed package artifact and never appear here.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { configDir } from "../config.js";
+import { readSkillStore } from "./skill_store_read.js";
 
 export const SKILL_TRUST_SCHEMA_VERSION = 1;
 
@@ -37,44 +38,18 @@ export function trustStorePath(): string {
 }
 
 export function loadTrustStore(): SkillTrustStore {
-  const path = trustStorePath();
-  if (!existsSync(path)) return { schemaVersion: SKILL_TRUST_SCHEMA_VERSION, records: [] };
-  try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    if (raw["schema_version"] !== SKILL_TRUST_SCHEMA_VERSION || !Array.isArray(raw["records"])) {
-      // Unknown shape: treat as empty rather than guessing — callers see skills
-      // as untrusted, which fails closed.
-      return { schemaVersion: SKILL_TRUST_SCHEMA_VERSION, records: [] };
-    }
-    const records: SkillTrustRecord[] = [];
-    for (const entry of raw["records"] as unknown[]) {
-      if (typeof entry !== "object" || entry === null) continue;
-      const item = entry as Record<string, unknown>;
-      if (
-        typeof item["projectRoot"] !== "string" ||
-        typeof item["skillId"] !== "string" ||
-        typeof item["version"] !== "string" ||
-        typeof item["sha256"] !== "string" ||
-        typeof item["trustedAt"] !== "string" ||
-        (item["method"] !== "inspect" && item["method"] !== "explicit" && item["method"] !== "install")
-      ) continue;
-      records.push({
-        projectRoot: item["projectRoot"],
-        repository: typeof item["repository"] === "string" ? item["repository"] : null,
-        skillId: item["skillId"],
-        version: item["version"],
-        sha256: item["sha256"],
-        trustedAt: item["trustedAt"],
-        method: item["method"],
-        requestedPermissions: Array.isArray(item["requestedPermissions"])
-          ? (item["requestedPermissions"] as unknown[]).filter((p): p is string => typeof p === "string")
-          : [],
-      });
-    }
-    return { schemaVersion: SKILL_TRUST_SCHEMA_VERSION, records };
-  } catch {
-    return { schemaVersion: SKILL_TRUST_SCHEMA_VERSION, records: [] };
-  }
+  const records = readSkillStore(trustStorePath(), "skill trust", SKILL_TRUST_SCHEMA_VERSION, "records", (entry): entry is SkillTrustRecord => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+    const item = entry as Record<string, unknown>;
+    return typeof item["projectRoot"] === "string" && typeof item["skillId"] === "string"
+      && (item["repository"] === null || typeof item["repository"] === "string")
+      && typeof item["version"] === "string" && typeof item["sha256"] === "string"
+      && typeof item["trustedAt"] === "string"
+      && (item["method"] === "inspect" || item["method"] === "explicit" || item["method"] === "install")
+      && Array.isArray(item["requestedPermissions"])
+      && item["requestedPermissions"].every((permission: unknown) => typeof permission === "string");
+  });
+  return { schemaVersion: SKILL_TRUST_SCHEMA_VERSION, records };
 }
 
 function saveTrustStore(store: SkillTrustStore): void {

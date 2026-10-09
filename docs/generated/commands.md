@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:15c107ce5164a95e2383d4e4b82c4f8dee285d5942b384498ee7dedbb9b934d6 -->
+<!-- manifest-digest: sha256:def6250fc8d0ac298249432af7f7bdf2286eb74cf4870321888702e04f9c33ea -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -448,6 +448,12 @@ Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.
 deep reconnaissance
 
 Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.recon`
+
+#### `/skill <qualified-id> <task>`
+
+use a trusted skill for one idle local task
+
+Permission: `unknown` · Availability: `runtime-dependent` · Telemetry: `slash.skill`
 
 #### `/plan <topic>`
 

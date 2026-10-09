@@ -143,6 +143,26 @@ test("slash picker inserts text on Enter; only a later Enter runs the command", 
   });
 });
 
+test("picker and history restore /skill as editable text without selecting a skill", async () => {
+  await withComposer(false, async ({ key, output, until, modelCalls, resize }) => {
+    resize(160, 24);
+    key("/ski");
+    assert.match(output(), /> \/skill/);
+    key("\r"); // picker accepts text only
+    assert.equal(modelCalls(), 0);
+    assert.doesNotMatch(output(), /\/skill is unavailable while --no-skills is active/);
+    key("user/demo task");
+    key("\r");
+    await until("/skill is unavailable while --no-skills is active");
+    key("\x15");
+    key("\x12skill");
+    assert.equal(modelCalls(), 0);
+    key("\r"); // search acceptance restores a draft only
+    assert.match(output().slice(output().lastIndexOf("\r\x1b[2K")), /\/skill user\/demo task/);
+    assert.equal(modelCalls(), 0);
+  }, { history: ["/skill user/demo task"] });
+});
+
 test("picker selection, Escape, history, paste and resize retain their input owners", async () => {
   await withComposer(false, async ({ key, output, resize, until }) => {
     key("/btw remembered\r");

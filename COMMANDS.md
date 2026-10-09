@@ -25,13 +25,13 @@ aether                                  # no args = interactive REPL
 
 <!-- SLASH-COMMANDS:START -->
 `help`, `auth`, `models`, `model`, `switch`, `agent`, `agents`, `tier`, `effort`, `audit`, `doctor`, `settings`,
-`voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `plan`, `research`, `project-review`,
-`code-review`, `writing-skills`, `writing-plans`, `shell-profile`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`, `steer`,
-`btw`, `pin`, `drop`, `context`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`, `memory`,
-`workflow`, `workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`, `tree`,
-`broadcast`, `gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`, `photogen`,
-`frame`, `re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`, `browser`,
-`ats`
+`voice`, `preview`, `clear`, `exit`, `mcp`, `autonomous-execution`, `subagent-driven-execution`, `self-review`, `recon`, `skill`, `plan`, `research`,
+`project-review`, `code-review`, `writing-skills`, `writing-plans`, `shell-profile`, `shell-result`, `shell-reset`, `terminal`, `terminal-attach`, `terminal-stop`, `terminal-status`, `queue`,
+`steer`, `btw`, `pin`, `drop`, `context`, `snapshot`, `limit`, `audit-receipt`, `rollback`, `logs-view`, `goal`, `goals`,
+`memory`, `workflow`, `workflow-templates`, `workflow-template`, `vault`, `vault-context`, `vault-search`, `vault-recent`, `vault-project`, `vault-tag`, `vault-tree`, `delegate`,
+`tree`, `broadcast`, `gather`, `scaffold`, `port`, `test-drive`, `bench`, `purge`, `stage-diff`, `review`, `ship`, `revert`,
+`photogen`, `frame`, `re-frame`, `videogen`, `sequence`, `animate`, `re-cut`, `output`, `storyboard`, `add`, `hud`, `agent-create`,
+`browser`, `ats`
 <!-- SLASH-COMMANDS:END -->
 
 ## Runtime capability requirements
@@ -514,6 +514,23 @@ skill's content digest, so editing a trusted skill revokes that trust until you
 approve the new digest. A skill declaration narrows what the agent may do — it
 never grants a tool the host would otherwise refuse.
 
+In an idle interactive console using a local model, `/skill <qualified-id>
+<task>` loads an installed, enabled skill for just that task. For example,
+`/skill user/fix-ci Investigate the failing unit test`. The task suffix is
+sent literally, including extra spaces, newlines, quotes, `/`, and `!`; it is
+never dispatched as another console command. The run header shows the resolved
+skill ID, content digest, context size, and effective host tool limits.
+`/context` identifies the last admitted turn; `/context next <task>` previews
+normal next-turn defaults, or the current `/skill` command if one is supplied.
+History and the slash picker restore editable text,
+so submitting an old `/skill` line resolves its current digest and trust again.
+
+`/skill` refuses busy, queued, line-input, `--no-skills`, and server-executed
+cloud chat use. Use `aether agent --skill <id> <task>` for a hosted host-executed
+run. A malformed or future-version local skill settings or trust store is
+never treated as an empty store; incompatible data is reported and left
+untouched until repaired. Normal skill defaults resume after this turn.
+
 ### `aether capabilities [--available]` — what this build can actually do
 
 Prints the capability contract: tools, their side-effect class, and the
@@ -623,6 +640,7 @@ Each starts an agent loop in the REPL.
 | `/self-review` | Review your own recent work. |
 | `/recon <topic>` | Deep reconnaissance pass over the codebase. |
 | `/plan <topic>` | Write an implementation plan. |
+| `/skill <qualified-id> <task>` | Use a trusted skill for one idle local task. |
 | `/writing-plans <topic>` | Write a plan to `.hermes/plans/`. |
 | `/research <topic>` | Research → gather → summarize. |
 | `/project-review` | Full project review + summary. (Was `/review`; that name is now the change-review rail below.) |

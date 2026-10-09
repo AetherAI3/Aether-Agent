@@ -3814,6 +3814,46 @@ export const COMMAND_MANIFEST_SOURCE: readonly CommandManifestEntry[] = [
     }
   },
   {
+    "key": "slash:skill",
+    "surface": "slash",
+    "name": "skill",
+    "aliases": [],
+    "compatibilityAliases": [],
+    "deprecatedAliases": [],
+    "args": "<qualified-id> <task>",
+    "summary": "use a trusted skill for one idle local task",
+    "detailedHelp": "/skill <qualified-id> <task>\nUse an installed, enabled and trusted skill for this one task. Requires an idle interactive composer and a local host-executed turn; --no-skills refuses it. The following task text is literal. The next turn resumes normal skill defaults.",
+    "section": "Agent Modes",
+    "hidden": false,
+    "permissionClass": "unknown",
+    "availability": {
+      "state": "runtime-dependent",
+      "capabilityRequirements": []
+    },
+    "telemetryName": "slash.skill",
+    "acceptedGlobalFlags": [],
+    "ownedFlags": {},
+    "handler": {
+      "id": "handler:slash:skill",
+      "kind": "host",
+      "module": "src/commands/slash.ts",
+      "symbol": "handleSlash"
+    },
+    "docs": {
+      "kind": "manifest",
+      "module": "src/commands/command_manifest_data.ts",
+      "symbol": "COMMAND_MANIFEST_SOURCE",
+      "target": "skill",
+      "usage": "/skill <qualified-id> <task>",
+      "visible": true,
+      "disposition": "generated"
+    },
+    "release": {
+      "disposition": "new",
+      "note": "One-turn trusted skill invocation in the idle local composer"
+    }
+  },
+  {
     "key": "slash:plan",
     "surface": "slash",
     "name": "plan",
