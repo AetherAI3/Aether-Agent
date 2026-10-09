@@ -4,11 +4,19 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { hostLoop } from "../src/commands/code.js";
 import { runLocalTurn } from "../src/commands/chat.js";
+import { CloudBrain } from "../src/core/brain_cloud.js";
+import { ApiClient } from "../src/core/transport.js";
 import type { Brain, TaskCommand } from "../src/core/brain.js";
 import type { BrainEvent } from "../src/core/brain_protocol.js";
 import type { AppContext } from "../src/core/context.js";
+import type { TokenStore } from "../src/core/auth.js";
 import { ToolExecutor, type ToolResult } from "../src/core/tool_executor.js";
+import { ToolFailureBudget, operationKey } from "../src/core/tool_failure_budget.js";
 import {
+  MAX_DENIAL_FEEDBACK_BYTES,
+  bindToolApprovalVerdict,
+  boundedDenialFeedback,
+  deniedToolResult,
   formatToolApprovalReview,
   prepareToolApproval,
   requestToolApproval,
@@ -64,30 +72,70 @@ test("shared gate shows the whole command and denial does not execute", async ()
   let reviewed = "";
   let executed = 0;
   const approved = await requestToolApproval({
+    callId: "reviewed",
     name: "run_shell", args: prepared.args, permissionMode: "ask", autoApply: false,
     yes: false, isTty: true, shellCwd: "/cwd", fileRoot: "/root",
     confirm: async (text) => { reviewed = text; return false; },
     onDeny: () => assert.fail("TTY must prompt"),
   });
-  if (approved) executed++;
+  if (approved.approved) executed++;
   assert.equal(executed, 0);
   assert.ok(reviewed.includes("SUFFIX_AFTER_200"));
+  assert.match(reviewed, /optional one-call instruction/);
 
   let prompted = false;
   const nonTty = await requestToolApproval({
+    callId: "non-tty",
     name: "run_shell", args: prepared.args, permissionMode: "ask", autoApply: false,
     yes: false, isTty: false, shellCwd: "/cwd", fileRoot: "/root",
     confirm: async () => { prompted = true; return true; }, onDeny: () => {},
   });
-  assert.equal(nonTty, false);
+  assert.deepEqual(nonTty, { callId: "non-tty", approved: false });
   assert.equal(prompted, false);
   const preapproved = await requestToolApproval({
+    callId: "preapproved",
     name: "run_shell", args: prepared.args, permissionMode: "ask", autoApply: false,
     yes: true, isTty: false, shellCwd: "/cwd", fileRoot: "/root",
-    confirm: async () => { prompted = true; return false; }, onDeny: () => {},
+    confirm: async () => { prompted = true; return false; },
+    feedback: async () => assert.fail("--yes cannot request denial feedback"), onDeny: () => {},
   });
-  assert.equal(preapproved, true);
+  assert.deepEqual(preapproved, { callId: "preapproved", approved: true });
   assert.equal(prompted, false);
+});
+
+test("a declined call carries one bounded instruction under its original ID", async () => {
+  const prepared = prepareToolApproval("run_tests", { command: "npm test" });
+  assert.equal(prepared.ok, true);
+  if (!prepared.ok) return;
+  const verdict = await requestToolApproval({
+    callId: "call-42", name: "run_tests", args: prepared.args,
+    permissionMode: "ask", autoApply: false, yes: false, isTty: true,
+    shellCwd: ".", fileRoot: ".", confirm: async () => false,
+    feedback: async () => "Use the offline unit suite.", onDeny: () => assert.fail("interactive"),
+  });
+  assert.deepEqual(verdict, { callId: "call-42", approved: false, feedback: "Use the offline unit suite." });
+  assert.match(deniedToolResult("run_tests", verdict).output, /Operator instruction for this denied call: Use the offline unit suite\./);
+  assert.deepEqual(bindToolApprovalVerdict("other-call", verdict), { callId: "other-call", approved: false });
+  assert.deepEqual(bindToolApprovalVerdict("call-42", { callId: "call-42", approved: true, feedback: "should disappear" }),
+    { callId: "call-42", approved: true });
+  assert.equal(boundedDenialFeedback(" "), null);
+  assert.equal(Buffer.byteLength(boundedDenialFeedback("é".repeat(400))!, "utf8"), MAX_DENIAL_FEEDBACK_BYTES);
+  assert.equal(boundedDenialFeedback("!echo ok\n/clear\x1b[2J"), "!echo ok /clear[2J");
+});
+
+test("denial feedback does not reset or widen the repeated-failure budget", () => {
+  const call = { name: "run_shell", args: { command: "echo denied" } };
+  const key = operationKey(call);
+  const budget = new ToolFailureBudget({ budgets: { permission_refused: 1 } });
+  budget.noteModelRound(1);
+  assert.equal(budget.check(key, call).action, "allow");
+  budget.record(key, call, deniedToolResult(call.name, { callId: "first", approved: false, feedback: "Try offline." }), "approval");
+  budget.noteModelRound(2);
+  const repeated = budget.check(key, call);
+  assert.equal(repeated.action, "refuse");
+  if (repeated.action === "refuse") assert.doesNotMatch(repeated.result.output, /Try offline/);
+  budget.noteModelRound(3);
+  assert.equal(budget.check(key, call).action, "stop");
 });
 
 test("configured run_tests command is the exact reviewed and executed command", () => {
@@ -155,6 +203,7 @@ test("approved long command executes its distinguishing suffix", async (t) => {
 
 class OneToolBrain implements Brain {
   results: ToolResult[] = [];
+  ids: string[] = [];
   constructor(private readonly name: string, private readonly args: Record<string, unknown>) {}
   run(_task: TaskCommand): AsyncIterable<BrainEvent> {
     const name = this.name;
@@ -164,7 +213,7 @@ class OneToolBrain implements Brain {
       yield { type: "done", ok: true, result: "done", remaining: 0, reason: "" };
     })();
   }
-  sendToolResult(_id: string, result: ToolResult): void { this.results.push(result); }
+  sendToolResult(id: string, result: ToolResult): void { this.ids.push(id); this.results.push(result); }
   control(): void {}
   close(): void {}
 }
@@ -181,6 +230,100 @@ test("coding host loop denial never calls the executor", async () => {
   assert.equal(executions, 0);
   assert.equal(brain.results.length, 1);
   assert.equal(brain.results[0]?.exitCode, 1);
+});
+
+test("host loop delivers denial feedback once for one call ID, even if the event repeats", async () => {
+  const events: BrainEvent[] = [
+    { type: "tool_call", id: "repeat-id", name: "run_shell", args: { command: "echo never" } },
+    { type: "tool_call", id: "repeat-id", name: "run_shell", args: { command: "echo never" } },
+    { type: "done", ok: true, result: "done", remaining: 0, reason: "" },
+  ];
+  const delivered: Array<{ id: string; result: ToolResult }> = [];
+  const brain = {
+    run: async function* () { for (const event of events) yield event; },
+    sendToolResult: (id: string, result: ToolResult) => { delivered.push({ id, result }); },
+    control() {}, close() {},
+  } as unknown as Brain;
+  let executions = 0;
+  let reviews = 0;
+  const exec = { executeAsync: async () => { executions++; return { output: "unexpected", exitCode: 0 }; } } as unknown as ToolExecutor;
+  await hostLoop(brain, exec, () => {}, { type: "task", text: "test", cwd: ".", poolGb: 5 }, undefined,
+    async ({ id }) => { reviews++; return { callId: id, approved: false, feedback: "Use the offline unit suite." }; },
+    undefined, { failureBudget: false });
+  assert.equal(executions, 0);
+  assert.equal(reviews, 1);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0]?.id, "repeat-id");
+  assert.equal(delivered[0]?.result.output.match(/Use the offline unit suite\./g)?.length, 1);
+});
+
+test("local chat returns declined feedback under the same call without running it", async () => {
+  const priorTty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+  Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+  try {
+    const brain = new OneToolBrain("run_shell", { command: "echo never" });
+    let executions = 0;
+    let feedbackPrompts = 0;
+    const ctx = {
+      cfg: { permissionMode: "ask", autoApply: false },
+      flags: { cwd: process.cwd(), yes: false, json: true },
+      confirm: async () => false,
+      approvalFeedback: async () => { feedbackPrompts++; return "Use the offline unit suite."; },
+    } as unknown as AppContext;
+    await runLocalTurn(ctx, "test", undefined, { brain, exec: { executeAsync: async () => {
+      executions++;
+      return { output: "unexpected", exitCode: 0 };
+    } } });
+    assert.equal(executions, 0);
+    assert.equal(feedbackPrompts, 1);
+    assert.equal(brain.results.length, 1);
+    assert.deepEqual(brain.ids, ["one"]);
+    assert.match(brain.results[0]!.output, /Operator instruction for this denied call: Use the offline unit suite\./);
+  } finally {
+    if (priorTty) Object.defineProperty(process.stdin, "isTTY", priorTty);
+    else delete (process.stdin as { isTTY?: boolean }).isTTY;
+  }
+});
+
+test("hosted dev-session receives the same one-call denial result and never runs the tool", async () => {
+  const posts: Record<string, unknown>[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/agent/dev/sessions")) {
+      return Response.json({ session_id: "approval-hosted", protocol_version: 1 });
+    }
+    if (url.endsWith("/tool-results")) {
+      posts.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return Response.json({});
+    }
+    if (url.includes("/stream")) {
+      const frames = [
+        { type: "tool_call", seq: 1, tool_call_id: "hosted-id", name: "run_shell", args: { command: "echo never" } },
+        { type: "done", seq: 2, ok: true },
+      ].map(frame => `data: ${JSON.stringify(frame)}\n\n`).join("");
+      return new Response(frames, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    return Response.json({});
+  }) as typeof fetch;
+  const token = { get: async () => "aek_fixture" } as unknown as TokenStore;
+  const api = new ApiClient("https://example.invalid", token);
+  (api as unknown as { fetchImpl: typeof fetch }).fetchImpl = fetchImpl;
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  let executions = 0;
+  const exec = { executeAsync: async () => { executions++; return { output: "unexpected", exitCode: 0 }; } } as unknown as ToolExecutor;
+  try {
+    const brain = new CloudBrain(api, undefined, { requireLocalAuthority: true });
+    await hostLoop(brain, exec, () => {}, { type: "task", text: "test", cwd: process.cwd(), poolGb: 5 }, undefined,
+      async ({ id }) => ({ callId: id, approved: false, feedback: "Use the offline unit suite." }),
+      undefined, { failureBudget: false });
+    await new Promise<void>(resolve => setTimeout(resolve, 20));
+  } finally { globalThis.fetch = priorFetch; }
+  assert.equal(executions, 0);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0]?.["tool_call_id"], "hosted-id");
+  assert.equal(posts[0]?.["exit_code"], 1);
+  assert.match(String(posts[0]?.["output"]), /Operator instruction for this denied call: Use the offline unit suite\./);
 });
 
 test("local chat executes the validated snapshot with an argument binding", async () => {

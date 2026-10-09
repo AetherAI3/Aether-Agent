@@ -57,10 +57,47 @@ export function formatToolApprovalReview(
   const diff = name === "patch_file" && patchPreview
     ? `\nAffected diff (escaped for terminal safety):\n${terminalSafeReview(patchPreview)}\n`
     : "";
-  return `\nModel-requested tool approval\nTool: ${name}\nShell cwd: ${terminalSafeReview(shellCwd, false)}\nFile root: ${terminalSafeReview(fileRoot, false)}\n${field} (numbered rows preserve line breaks; controls and backslashes are escaped):\n${lines}${diff}\nRun this exact tool call? [y/N] `;
+  return `\nModel-requested tool approval\nTool: ${name}\nShell cwd: ${terminalSafeReview(shellCwd, false)}\nFile root: ${terminalSafeReview(fileRoot, false)}\n${field} (numbered rows preserve line breaks; controls and backslashes are escaped):\n${lines}${diff}\nDeclining offers an optional one-call instruction.\nRun this exact tool call? [y/N] `;
+}
+
+export const MAX_DENIAL_FEEDBACK_BYTES = 512;
+
+/** Feedback is inert tool-result text, never a command or an approval. */
+export function boundedDenialFeedback(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[\r\n\t]+/g, " ")
+    .replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\p{Cf}]/gu, "").trim();
+  let bounded = "";
+  for (const character of cleaned) {
+    if (Buffer.byteLength(bounded + character, "utf8") > MAX_DENIAL_FEEDBACK_BYTES) break;
+    bounded += character;
+  }
+  return bounded || null;
+}
+
+export interface ToolApprovalVerdict {
+  readonly callId: string;
+  readonly approved: boolean;
+  /** Present only for a declined, interactive call. */
+  readonly feedback?: string;
+}
+
+/** Existing embedders may still return a boolean; bind it to this exact call. */
+export function bindToolApprovalVerdict(callId: string, decision: ToolApprovalVerdict | boolean): ToolApprovalVerdict {
+  if (typeof decision === "boolean") return { callId, approved: decision };
+  if (decision.callId !== callId) return { callId, approved: false };
+  if (decision.approved) return { callId, approved: true };
+  const feedback = boundedDenialFeedback(decision.feedback);
+  return { callId, approved: false, ...(feedback ? { feedback } : {}) };
+}
+
+export function deniedToolResult(name: string, verdict: ToolApprovalVerdict): { output: string; exitCode: number } {
+  const base = `[denied: ${name} not approved by user]`;
+  return { output: verdict.feedback ? `${base}\nOperator instruction for this denied call: ${verdict.feedback}` : base, exitCode: 1 };
 }
 
 export interface ToolApprovalRequest {
+  callId: string;
   name: string;
   args: ValidatedToolArgs;
   permissionMode: PermissionMode;
@@ -71,20 +108,24 @@ export interface ToolApprovalRequest {
   fileRoot: string;
   patchPreview?: string;
   confirm: (review: string) => Promise<boolean>;
+  feedback?: () => Promise<string | null>;
   onDeny: () => void;
 }
 
-export async function requestToolApproval(request: ToolApprovalRequest): Promise<boolean> {
+export async function requestToolApproval(request: ToolApprovalRequest): Promise<ToolApprovalVerdict> {
   const outcome = decideGate(request.name, request.permissionMode, request.autoApply, {
     yes: request.yes,
     isTty: request.isTty,
   });
-  if (outcome === "allow") return true;
+  if (outcome === "allow") return { callId: request.callId, approved: true };
   if (outcome === "deny") {
     request.onDeny();
-    return false;
+    return { callId: request.callId, approved: false };
   }
-  return request.confirm(formatToolApprovalReview(
+  const approved = await request.confirm(formatToolApprovalReview(
     request.name, request.args, request.shellCwd, request.fileRoot, request.patchPreview,
   ));
+  if (approved) return { callId: request.callId, approved: true };
+  const feedback = boundedDenialFeedback(await request.feedback?.());
+  return { callId: request.callId, approved: false, ...(feedback ? { feedback } : {}) };
 }

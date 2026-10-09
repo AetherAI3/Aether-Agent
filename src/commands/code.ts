@@ -57,7 +57,7 @@ import { parseRepoSpec, ensureLocalClone, type RepoSpec } from "../core/repo.js"
 import { chooseBackend, chooseLocalBrain } from "../core/backend.js";
 import { ModelTextProgress } from "../core/model_text_progress.js";
 import { ModelOutputBudget } from "../core/model_output_budget.js";
-import { prepareToolApproval, requestToolApproval, terminalSafeReview } from "../core/tool_approval.js";
+import { bindToolApprovalVerdict, deniedToolResult, prepareToolApproval, requestToolApproval, terminalSafeReview, type ToolApprovalVerdict } from "../core/tool_approval.js";
 import { openRunSession, refusalToolResult } from "../core/skills/run_session.js";
 import type { SessionContext } from "../core/session_resume.js";
 import type { SkillSessionProvenance } from "../core/skills/skill_session.js";
@@ -159,7 +159,7 @@ export function codeMeaningfulProgressTimeoutMs(
 }
 
 /** Approve (or refuse) one brain-emitted tool call before the host executes it. */
-export type ToolGate = (call: { name: string; args: Record<string, unknown> }) => Promise<boolean>;
+export type ToolGate = (call: { id: string; name: string; args: Record<string, unknown> }) => Promise<ToolApprovalVerdict | boolean>;
 
 /** Read-only correlation hooks for an explicit saved-goal phase run. */
 export interface CodeRunStarted {
@@ -1116,33 +1116,36 @@ export async function cmdCode(
     if (result.exitCode !== 0 && hostRefusals.length < 16
       && (/^\[(?:denied:|refused by host policy:|tool .* rejected:|unknown tool:)/i.test(result.output)
         || result.exitCode === 127)) {
-      hostRefusals.push(redactInline(sanitizeServerText(result.output)).slice(0, 240));
+      hostRefusals.push(redactInline(sanitizeServerText(result.output.split("\n", 1)[0]!)).slice(0, 240));
     }
   };
   let confirmToolReview = ctx.confirm;
+  let confirmToolFeedback = ctx.approvalFeedback;
 
   // Permission gate: every brain-emitted mutating/shell tool call is approved
   // here before the host runs it. Honors the configured permission mode + auto-
   // apply; in `ask` (the default) on a TTY the user gets a y/N prompt, and on a
   // non-TTY (CI/pipe) an un-pre-approved call FAILS CLOSED rather than running
   // unattended. `--yes` or `permissionMode: skip` opt out.
-  const gate: ToolGate = async ({ name, args }) => {
+  const gate: ToolGate = async ({ id, name, args }) => {
     if (opts.forbidPublication && isPublicationToolCall(name, args)) {
       process.stderr.write("✗ publishing is a separate ship action; this goal phase tool call was refused.\n");
-      return false;
+      return { callId: id, approved: false };
     }
     let patchPreview: string | undefined;
     if (name === "patch_file") {
       const preview = exec.previewPatch(args);
       process.stderr.write(terminalSafeReview(preview.output) + "\n");
-      if (preview.exitCode !== 0) return true; // executor returns the same conflict to the brain
+      if (preview.exitCode !== 0) return { callId: id, approved: true }; // executor returns the same conflict to the brain
       patchPreview = preview.output;
     }
     return requestToolApproval({
+      callId: id,
       name, args: args as Record<string, string | number>,
       permissionMode: ctx.cfg.permissionMode, autoApply: ctx.cfg.autoApply,
       yes: ctx.flags.yes, isTty: Boolean(process.stdin.isTTY),
       shellCwd: exec.shellCwd, fileRoot: cwd, confirm: confirmToolReview,
+      ...(confirmToolFeedback ? { feedback: () => confirmToolFeedback!(commandAbort.signal) } : {}),
       patchPreview,
       onDeny: () => process.stderr.write(
         `✗ blocked ${name} — permission mode "${ctx.cfg.permissionMode}" needs confirmation but there is no TTY.\n` +
@@ -1191,6 +1194,14 @@ export async function cmdCode(
       try { return await ctx.confirm(review); }
       finally { resume(); }
     };
+    if (confirmToolFeedback) {
+      const requestFeedback = confirmToolFeedback;
+      confirmToolFeedback = async (signal) => {
+        const resume = sr.pauseForPrompt();
+        try { return await requestFeedback(signal); }
+        finally { resume(); }
+      };
+    }
     replay((line) => sr.log(line));
     const anim = new AnimationController({
       onFrame: (_stage, art) => sr.setAnim(art),
@@ -1523,6 +1534,7 @@ export async function hostLoop(
   const timeoutMs = options.meaningfulProgressTimeoutMs ?? DEFAULT_CODE_MEANINGFUL_PROGRESS_TIMEOUT_MS;
   const segmentTimeoutMs = options.modelSegmentTimeoutMs ?? codeModelSegmentTimeoutMs();
   const signal = options.signal;
+  const seenCallIds = new Set<string>();
   const failures =
     options.failureBudget === false ? null : (options.failureBudget ?? defaultToolFailureBudget(task.cwd, exec));
   let lastMeaningfulAt = Date.now();
@@ -1555,6 +1567,8 @@ export async function hostLoop(
       let terminal = false;
       switch (ev.type) {
         case "tool_call": {
+          if (seenCallIds.has(ev.id)) break; // never re-execute or re-deliver one call ID
+          seenCallIds.add(ev.id);
           // The host owns execution + the path-guard. A tool call is gated FIRST
           // (permission mode); a denied call is never executed — the brain gets a
           // synthetic refusal result so the loop continues without running it.
@@ -1628,9 +1642,9 @@ export async function hostLoop(
             break;
           }
           const approvalContext = exec.shellContext;
-          const approved = gate
+          const gateDecision = gate
             ? await boundedCodeOperation(
-                () => gate({ name: ev.name, args: prepared.args }),
+                () => gate({ id: ev.id, name: ev.name, args: prepared.args }),
                 timeoutMs,
                 lastMeaningfulAt,
                 signal,
@@ -1638,8 +1652,9 @@ export async function hostLoop(
                 modelSegmentStartedAt,
               )
             : true;
-          if (!approved) {
-            deliver({ output: `[denied: ${ev.name} not approved by user]`, exitCode: 1 }, "approval");
+          const approval = bindToolApprovalVerdict(ev.id, gateDecision);
+          if (!approval.approved) {
+            deliver(deniedToolResult(ev.name, approval), "approval");
             break;
           }
           const execute = (): Promise<ToolResult> => {

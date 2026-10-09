@@ -574,6 +574,15 @@ aether config set autoApply true
 | `autoApply` | bool | Apply streamed edits without a per-edit prompt. |
 | `telemetry` | bool | Anonymous usage telemetry opt-in. |
 
+When an interactive coding run asks to execute a tool, answering no opens a
+separate optional instruction field for that one declined call. Type a note
+such as `Use the offline unit suite.`, then press Enter; an empty Enter skips
+it, and Escape or Ctrl+C cancels the note. The note is limited to 512 UTF-8
+bytes and reaches the model once inside that call's failed tool result. It
+never approves or runs the tool. The main draft, prompt history, queued tasks,
+and reviewed shell attachment are untouched. Non-TTY decisions and `--yes`
+retain their existing behavior and do not produce an instruction.
+
 ---
 
 ## Slash commands (inside the REPL)
