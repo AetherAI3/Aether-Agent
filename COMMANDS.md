@@ -79,6 +79,18 @@ Opens a session. Type a prompt to chat; type `/` commands to control it (see
 `Ctrl-C` mid-answer cancels the turn and keeps the session; `Ctrl-C` at an
 empty prompt (or `/exit`) leaves.
 
+In a raw TTY, Enter (CR) submits and Ctrl+J (LF) inserts a newline into the
+same draft. The composer stays on one row: `⏎` marks each newline and `[nL]`
+shows the line count. Ctrl+_ undoes recent edits (adjacent typing groups into
+one step; a bracketed paste is one step). Ctrl+Y restores the last text killed
+with Ctrl+K, Ctrl+U, or Ctrl+W. Submitting or clearing a draft ends its undo
+and yank history. Non-TTY input stays line-oriented.
+
+Some terminals send LF for Enter as well as Ctrl+J, so those two keys cannot
+be distinguished there. Use `aether config set lfSubmits true` to make LF
+submit for compatibility; `aether config set lfSubmits false` restores Ctrl+J
+newline entry. This setting affects only the raw TTY composer.
+
 ### `aether "<prompt>"` — one-shot
 Runs a single turn against your default (or `--model`) and streams the answer.
 `aether chat "<prompt>"` is the explicit form — it bypasses command matching,

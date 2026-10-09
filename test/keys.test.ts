@@ -17,6 +17,15 @@ test("splitKeys: multibyte graphemes survive in one run", () => {
 
 test("splitKeys: control chars are individual tokens", () => {
   assert.deepEqual(splitKeys("ab\rcd\x7f"), ["ab", "\r", "cd", "\x7f"]);
+  assert.deepEqual(splitKeys("a\nb\x1f\x19"), ["a", "\n", "b", "\x1f", "\x19"]);
+});
+
+test("Ctrl+J inserts LF by default; explicit compatibility mode submits it", () => {
+  assert.deepEqual(decodeKey("\r"), { kind: "submit" });
+  assert.deepEqual(decodeKey("\n"), { kind: "newline" });
+  assert.deepEqual(decodeKey("\n", true), { kind: "submit" });
+  assert.deepEqual(decodeKey("\x1f"), { kind: "undo" });
+  assert.deepEqual(decodeKey("\x19"), { kind: "yank" });
 });
 
 test("splitKeys: bracketed paste markers tokenize exactly", () => {

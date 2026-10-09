@@ -5,6 +5,9 @@
 export type Key =
   | { kind: "char"; value: string } // a printable run — may be multi-char (batched typing / paste)
   | { kind: "submit" }
+  | { kind: "newline" }
+  | { kind: "undo" }
+  | { kind: "yank" }
   | { kind: "backspace" }
   | { kind: "interrupt" }
   | { kind: "eof" }
@@ -72,11 +75,16 @@ export function splitKeys(chunk: string): string[] {
 }
 
 /** Decode one key sequence (a splitKeys token) into a Key. Pure. */
-export function decodeKey(seq: string): Key {
+export function decodeKey(seq: string, lfSubmits = false): Key {
   switch (seq) {
     case "\r":
-    case "\n":
       return { kind: "submit" };
+    case "\n":
+      return { kind: lfSubmits ? "submit" : "newline" };
+    case "\x1f":
+      return { kind: "undo" }; // ctrl-_
+    case "\x19":
+      return { kind: "yank" }; // ctrl-y
     case "\x7f":
     case "\b":
       return { kind: "backspace" };

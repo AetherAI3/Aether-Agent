@@ -20,6 +20,8 @@ export interface AetherConfig {
   permissionMode: PermissionMode;
   /** Auto-apply streamed edits without per-edit prompt. Mirrors Aether Agent. */
   autoApply: boolean;
+  /** Raw TTY compatibility: treat LF/Ctrl+J as submit instead of newline. */
+  lfSubmits?: boolean;
   /** Anonymous usage telemetry opt-in. */
   telemetry: boolean;
   /** Default effort tier (LOW|MED|MAX|ULTRA|CODEPRO, "" = server default).

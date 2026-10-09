@@ -35,7 +35,10 @@ export function renderInputView(prompt: string, value: string, cursor: number, c
     p = sliceVisible(p, Math.max(0, cols - 8));
     pw = visibleWidth(p);
   }
-  const avail = Math.max(1, cols - pw - 1); // one spare column for the caret
+  const lines = 1 + [...value].filter((ch) => ch === "\n").length;
+  const lineHint = lines > 1 ? ` [${lines}L]` : "";
+  const hint = cols - pw >= visibleWidth(lineHint) + 3 ? lineHint : "";
+  const avail = Math.max(1, cols - pw - visibleWidth(hint) - 1); // one spare column for the caret
   // Control chars from multi-line pastes render as glyphs — a raw \n written
   // during repaint would drop the cursor a row and stack garbage lines.
   const cps = [...value].map(displayChar);
@@ -56,7 +59,7 @@ export function renderInputView(prompt: string, value: string, cursor: number, c
     end++;
   }
   return {
-    text: p + cps.slice(start, end).join(""),
+    text: p + cps.slice(start, end).join("") + hint,
     cursorCol: Math.min(Math.max(1, cols), pw + winW + 1),
   };
 }
