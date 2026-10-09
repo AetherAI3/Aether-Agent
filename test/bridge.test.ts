@@ -16,6 +16,8 @@ import {
 } from "../src/core/brain_protocol.js";
 import { ToolExecutor, capHeadTail } from "../src/core/tool_executor.js";
 import { EventQueue, type Brain, type TaskCommand } from "../src/core/brain.js";
+import { OllamaBrain } from "../src/core/brain_ollama.js";
+import type { ChatMessage, ChatReply } from "../src/core/ollama.js";
 import { hostLoop, cmdCode } from "../src/commands/code.js";
 import type { AppContext } from "../src/core/context.js";
 
@@ -374,6 +376,45 @@ test("two sequential tool calls: each result pairs to its own id, in order", asy
     );
     assert.equal(JSON.parse(brain.pairs[0]!.output).content, "AAA"); // A's result is a.txt, not b.txt
     assert.equal(JSON.parse(brain.pairs[1]!.output).content, "BBB");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("hostLoop executes successive Ollama replies that reuse a response-local call ID", async () => {
+  const dir = tmpWorkspace("aether-ollama-ids-");
+  try {
+    writeFileSync(join(dir, "a.txt"), "AAA");
+    writeFileSync(join(dir, "b.txt"), "BBB");
+    const replies: ChatReply[] = ["a.txt", "b.txt"].map((path) => ({
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path }) } }],
+    }));
+    replies.push({ role: "assistant", content: "both read" });
+    const requests: ChatMessage[][] = [];
+    let turn = 0;
+    const brain = new OllamaBrain({ chat: async (messages) => {
+      requests.push(messages.map((message) => ({ ...message })));
+      return replies[turn++]!;
+    } });
+    const ids: string[] = [];
+    const code = await hostLoop(brain, new ToolExecutor(dir), (event) => {
+      if (event.type === "tool_call") ids.push(event.id);
+    }, { type: "task", text: "read both", cwd: dir, poolGb: 5 }, undefined, undefined, undefined, {
+      failureBudget: false,
+      modelSegmentTimeoutMs: 2_000,
+    });
+    assert.equal(code, 0);
+    assert.equal(ids.length, 2);
+    assert.notEqual(ids[0], ids[1], "IDs must be unique across model replies");
+    const final = requests[2] ?? [];
+    const assistantCalls = final.filter((message) => message.role === "assistant")
+      .flatMap((message) => message.tool_calls ?? []);
+    const results = final.filter((message) => message.role === "tool");
+    assert.deepEqual(assistantCalls.map((call) => call.id), ids);
+    assert.deepEqual(results.map((message) => message.tool_call_id), ids);
+    assert.deepEqual(results.map((message) => JSON.parse(message.content).content), ["AAA", "BBB"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

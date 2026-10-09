@@ -87,6 +87,9 @@ export class OllamaBrain implements Brain {
   private withheld: string[] = [];
   // Incremented per model reply: tool calls batched into one reply share it.
   private round = 0;
+  // Ollama may reuse response-local IDs (including synthesized call-1) on
+  // later replies. The host deduplicates IDs for the whole run.
+  private nextCallId = 0;
 
   constructor(opts: OllamaBrainOptions = {}) {
     this.opts = opts;
@@ -237,7 +240,10 @@ export class OllamaBrain implements Brain {
           break;
         }
 
-        const calls = reply.tool_calls ?? [];
+        const calls = (reply.tool_calls ?? []).map((call) => ({
+          ...call,
+          id: `ollama-call-${++this.nextCallId}`,
+        }));
         this.round += 1;
         // A pause received while the network request was in flight takes
         // effect before any resulting tool call or answer becomes observable.
@@ -277,7 +283,7 @@ export class OllamaBrain implements Brain {
         }
 
         // Record the assistant turn (with its tool calls) before the replies.
-        messages.push(assistantTurn(reply));
+        messages.push(assistantTurn({ ...reply, tool_calls: calls }));
 
         for (const call of calls) {
           if (this.aborted) break;

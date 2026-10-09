@@ -44,9 +44,12 @@ export function promptDenialFeedback(io: ApprovalFeedbackIO = {}): Promise<strin
     let settled = false;
     let pasting = false;
     let paste = "";
+    let pendingSequence = "";
+    let escapeTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (value: string | null): void => {
       if (settled) return;
       settled = true;
+      if (escapeTimer) clearTimeout(escapeTimer);
       input.off("data", onData);
       io.signal?.removeEventListener("abort", onAbort);
       if (changedRaw) { try { input.setRawMode?.(false); } catch { /* terminal may have closed */ } }
@@ -69,9 +72,15 @@ export function promptDenialFeedback(io: ApprovalFeedbackIO = {}): Promise<strin
       paint();
     };
     const onData = (chunk: Buffer | string): void => {
-      const sequences = splitKeys(typeof chunk === "string" ? chunk : decoder.write(chunk));
+      if (escapeTimer) clearTimeout(escapeTimer);
+      const data = pendingSequence + (typeof chunk === "string" ? chunk : decoder.write(chunk));
+      // A terminal may split a bracketed-paste marker at any byte. Keep an
+      // unfinished CSI/SS3 sequence until the next chunk before tokenizing it.
+      const incomplete = data.match(/\x1b(?:\[[0-9;:<=>?]*[ -/]*|O)?$/);
+      pendingSequence = incomplete?.[0] ?? "";
+      const sequences = splitKeys(data.slice(0, data.length - pendingSequence.length));
       const returnTail = (index: number): void => {
-        const tail = sequences.slice(index + 1).join("");
+        const tail = sequences.slice(index + 1).join("") + pendingSequence;
         if (tail) setImmediate(() => input.emit("data", Buffer.from(tail, "utf8")));
       };
       for (const [index, seq] of sequences.entries()) {
@@ -99,6 +108,11 @@ export function promptDenialFeedback(io: ApprovalFeedbackIO = {}): Promise<strin
           case "eof": finish(null); returnTail(index); return;
           default: break;
         }
+      }
+      // A bare Escape key is also the prefix of a terminal sequence. Give
+      // adjacent chunks a brief chance to complete it before cancelling.
+      if (pendingSequence === "\x1b" && !pasting) {
+        escapeTimer = setTimeout(() => { pendingSequence = ""; finish(null); }, 50);
       }
     };
     input.on("data", onData);

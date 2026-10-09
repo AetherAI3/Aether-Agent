@@ -81,11 +81,12 @@ test("OllamaBrain emits a tool_call, accepts sendToolResult, then a done", async
   assert.equal(done?.type === "done" ? done.ok : false, true, "done.ok true on a clean finish");
 
   // The tool_result must have been fed back to the model on the 2nd turn: the
-  // second chat call's message list includes a role:"tool" reply for c1.
+  // second chat call's message list includes a role:"tool" reply for this call.
   const second = calls()[1] ?? [];
   const toolMsg = second.find((m) => m.role === "tool");
   assert.ok(toolMsg, "tool_result fed back into the conversation");
-  assert.equal(toolMsg?.tool_call_id, "c1");
+  assert.equal(toolMsg?.tool_call_id, call?.type === "tool_call" ? call.id : "");
+  assert.equal(second.find((m) => m.role === "assistant")?.tool_calls?.[0]?.id, toolMsg?.tool_call_id);
 });
 
 test("OllamaBrain answers immediately when the model makes no tool call", async () => {
