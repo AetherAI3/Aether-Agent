@@ -1,5 +1,5 @@
 <!-- GENERATED FILE: run `npm run docs:generate`; do not edit by hand. -->
-<!-- manifest-digest: sha256:d73ec80b1137dba5cf588b3aa1e57ce0e3e67a48476480f8989685829c4db825 -->
+<!-- manifest-digest: sha256:f047dc15eff1c35784add44adb5ab9699d07d9e865d06fcc757b2f9b9718d721 -->
 # Generated command reference
 
 This reference is generated from the validated, versioned command manifest. Availability is evaluated at runtime; a listed command may still require authentication, a hosted capability, or local tooling.
@@ -23,6 +23,10 @@ Permission: `read-only` · Availability: `runtime-dependent` · Telemetry: `shel
 run the coding agent or manage account agents and shared conversations
 
 Permission: `local-write` · Availability: `runtime-dependent` · Telemetry: `shell.agent` · Aliases: `aether code` · Requires: `aether.hosted-or-local`
+
+Command flags:
+
+- `--planning`
 
 #### `aether chat [prompt]`
 

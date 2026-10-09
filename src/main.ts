@@ -119,6 +119,10 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const promptFile = sf(values["prompt-file"]);
+  if (values["planning"] && cmd !== "agent" && cmd !== "code") {
+    process.stderr.write(`${errTheme.red("✗")} --planning is available only with aether agent or aether code\n`);
+    return 2;
+  }
   if (promptFile !== undefined) {
     if (cmd !== "agent" && cmd !== "code") {
       process.stderr.write(`${errTheme.red("✗")} --prompt-file is available only with aether agent or aether code\n`);
@@ -199,6 +203,10 @@ export async function main(argv: string[]): Promise<number> {
     return 1;
   }
   if (cmd === "agent" && rest[0] && MANAGED_AGENT_VERBS.has(rest[0])) {
+    if (values["planning"]) {
+      process.stderr.write(`${errTheme.red("✗")} --planning applies to coding tasks, not managed agent commands\n`);
+      return 2;
+    }
     return cmdManagedAgents(ctx, rest, { hooks: createAtsHooks() });
   }
 
@@ -309,9 +317,14 @@ export async function main(argv: string[]): Promise<number> {
       }
       // No task and not resuming → open the persistent interactive agent REPL
       // (chat bar ready for the first question), Claude Code style.
+      if (values["planning"] && !task) {
+        process.stderr.write(`${errTheme.red("✗")} --planning requires a task or --prompt-file\n`);
+        return 2;
+      }
       if (!task && !sf(values["resume"])) return cmdChat(ctx, "", skillOpts);
       return cmdCode(ctx, task, {
         local: Boolean(values["local"]),
+        capability: values["planning"] ? "planning" : "coding",
         pool: Number(sf(values["pool"]) ?? "5") || 5,
         effort: sf(values["effort"]),
         testCmd: sf(values["test-cmd"]),

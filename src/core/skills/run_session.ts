@@ -39,8 +39,11 @@ import type { SkillPolicy } from "./skill_types.js";
 import { INSTRUCTION_CONTEXT_CONTRACT_VERSION } from "../instructions/instruction_resolver.js";
 import { SKILL_CONTEXT_CONTRACT_VERSION } from "./context_packet.js";
 import { recordWhy } from "../why_log.js";
+import { planningEnvelope, refuseRunCapability, type RunCapability } from "../run_capability.js";
 
 export interface RunSessionOptions {
+  /** Typed host authority for this invocation. */
+  capability?: RunCapability;
   /** Root the rules and project skills are discovered from — the tree the run works in. */
   projectRoot: string;
   /** The user's instruction; automatic skill selection reads it. */
@@ -304,13 +307,14 @@ function composeSkills(session: SkillSession): string {
  * nothing above it can widen the list. A header that advertised a policy the
  * host did not enforce would be worse than no header; so would a brief.
  */
-function composeHostPolicy(effective: readonly string[], narrowed: boolean): string {
+function composeHostPolicy(effective: readonly string[], narrowed: boolean, capability: RunCapability): string {
   if (!narrowed) return "";
   const body = effective.length
     ? "Tools you may call this run: " + effective.join(", ") + "."
     : "You may call NO tools this run — the loaded skills have no tool in common. Answer without tools, or ask the user to run with --no-skills.";
   return (
     "<host_policy>\n" +
+    (capability === "planning" ? "Planning capability: inspect this workspace and return an actionable plan in the response. Do not save it or execute a phase.\n" : "") +
     body +
     "\nThe host executes every tool call and checks this list itself, before running anything. " +
     "A call to any other tool is refused by the host and never runs. " +
@@ -323,8 +327,9 @@ function composeHostPolicy(effective: readonly string[], narrowed: boolean): str
 export function effectiveToolsFor(
   policies: readonly SkillPolicy[],
   envelope: PermissionEnvelope,
+  capability: RunCapability = "coding",
 ): readonly string[] {
-  return TOOLS.filter((tool) => refuseUndeclaredToolCall(tool, policies, envelope) === null);
+  return TOOLS.filter((tool) => refuseRunCapability(tool, capability) === null && refuseUndeclaredToolCall(tool, policies, envelope) === null);
 }
 
 /** Human guidance for one refusal — the code stays the machine contract. */
@@ -382,7 +387,8 @@ function refused(refusal: SkillRefusal): OpenRunSession {
  * never degrades into a quiet skill-free run.
  */
 export function openRunSession(options: RunSessionOptions): OpenRunSession {
-  const envelope = options.envelope ?? defaultPermissionEnvelope();
+  const capability = options.capability ?? "coding";
+  const envelope = capability === "planning" ? planningEnvelope() : options.envelope ?? defaultPermissionEnvelope();
   let session: SkillSession;
   let contextPacket: AgentContextPacket | null;
   const unmet: string[] = [];
@@ -409,7 +415,7 @@ export function openRunSession(options: RunSessionOptions): OpenRunSession {
     // not fatal — a trigger phrase must not be able to abort a run.
     for (const [index, policy] of session.policies.entries()) {
       const explicit = session.loaded[index]?.invocation === "explicit";
-      if (explicit) {
+      if (explicit || capability === "planning") {
         assertRequiredPermissions(policy, envelope);
         continue;
       }
@@ -445,10 +451,10 @@ export function openRunSession(options: RunSessionOptions): OpenRunSession {
   const policies = session.policies.filter((_, index) => session.loaded[index]?.invocation === "explicit");
   const automaticOnly = policies.length === 0 && session.loaded.length > 0;
   const narrowed = policies.length > 0;
-  const effective = effectiveToolsFor(policies, envelope);
+  const effective = effectiveToolsFor(policies, envelope, capability);
   const rules = composeRules(session);
   const skills = composeSkills(session);
-  const hostPolicy = composeHostPolicy(effective, narrowed);
+  const hostPolicy = composeHostPolicy(effective, narrowed || capability === "planning", capability);
   const contextText = [rules.text, skills, hostPolicy].filter((part) => part.length > 0).join("\n");
   const contextTokens = approximateTokens(Buffer.byteLength(contextText, "utf8"));
 
@@ -472,7 +478,7 @@ export function openRunSession(options: RunSessionOptions): OpenRunSession {
       return contextText + "\n<task>\n" + fenceSafe(task) + "\n</task>";
     },
     guard(tool: string): SkillRefusal | null {
-      const refusal = refuseUndeclaredToolCall(tool, policies, envelope);
+      const refusal = refuseRunCapability(tool, capability) ?? refuseUndeclaredToolCall(tool, policies, envelope);
       if (refusal) recordWhy("permission-denial", refusal.code + ": " + refusal.detail);
       return refusal;
     },
@@ -528,7 +534,9 @@ function buildHeader(
 
   lines.push(row("Context", formatTokens(contextTokens) + " tokens (measured, not estimated from a manifest)"));
 
-  if (automaticOnly) {
+  if (options.capability === "planning") {
+    lines.push(row("Policy", `planning · ${effective.join(" · ") || "NO TOOLS"} — enforced by this host`));
+  } else if (automaticOnly) {
     lines.push(
       row(
         "Policy",
